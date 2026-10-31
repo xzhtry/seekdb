@@ -1616,15 +1616,52 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
     ret = OB_INVALID_ARGUMENT;
   } else {
     uint64_t args_count = args_array->element_count();
-    int64_t max_result_len = template_str.length();
+    int64_t max_result_len = 0;
     char *result_buf = NULL;
     for (uint64_t i = 0; OB_SUCC(ret) && i < args_count; i++) {
       ObJsonNode *arg_node = args_array->get_value(i);
-      if (OB_NOT_NULL(arg_node) && arg_node->json_type() == ObJsonNodeType::J_STRING) {
-        ObJsonString *arg_str = static_cast<ObJsonString *>(arg_node);
-        max_result_len += arg_str->get_str().length();
-      } else {
+      if (OB_ISNULL(arg_node) || arg_node->json_type() != ObJsonNodeType::J_STRING) {
         ret = OB_INVALID_ARGUMENT;
+      }
+    }
+    // Walk the template to size the buffer: a placeholder that appears more than
+    // once has to be counted once per occurrence, otherwise a repeated {0}
+    // under-sizes the buffer and the replacement fails with OB_BUF_NOT_ENOUGH.
+    {
+      const char *tpl_ptr = template_str.ptr();
+      const int64_t tpl_len = template_str.length();
+      for (int64_t i = 0; OB_SUCC(ret) && i < tpl_len;) {
+        if ('{' == tpl_ptr[i]) {
+          int64_t end_pos = -1;
+          for (int64_t j = i + 1; j < tpl_len; ++j) {
+            if ('}' == tpl_ptr[j]) {
+              end_pos = j;
+              break;
+            } else if (tpl_ptr[j] < '0' || tpl_ptr[j] > '9') {
+              break;
+            }
+          }
+          if (end_pos > i + 1) {
+            int64_t index = 0;
+            for (int64_t k = i + 1; k < end_pos; ++k) {
+              index = index * 10 + (tpl_ptr[k] - '0');
+            }
+            if (index < 0 || index >= static_cast<int64_t>(args_count)) {
+              ret = OB_INVALID_ARGUMENT;
+              LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_prompt: invalid placeholder index");
+            } else {
+              ObJsonString *arg_str = static_cast<ObJsonString *>(args_array->get_value(static_cast<uint64_t>(index)));
+              max_result_len += arg_str->get_str().length();
+            }
+            i = end_pos + 1;
+          } else {
+            ++max_result_len;
+            ++i;
+          }
+        } else {
+          ++max_result_len;
+          ++i;
+        }
       }
     }
     if (OB_FAIL(ret)) {
