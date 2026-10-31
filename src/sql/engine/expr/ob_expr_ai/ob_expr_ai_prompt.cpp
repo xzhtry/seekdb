@@ -21,6 +21,7 @@
 #include "lib/utility/utility.h"
 #include "common/json_type/ob_json_common.h"
 #include "common/json_type/ob_json_base.h"
+#include "sql/engine/expr/ob_expr_json_func_helper.h"
 
 
 using namespace oceanbase::common;
@@ -120,11 +121,14 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
         } else if (OB_FAIL(args_array->append(arg_json_str))) {
         }
       } else if (ob_is_json(arg->datum_meta_.type_)) {
+        // Let the JSON helper do the type dispatch: it builds a tree node for
+        // numbers, booleans, objects and arrays, instead of treating the datum
+        // as a raw binary blob.
         ObIJsonBase *j_base = NULL;
         if (datum->is_null()) {
           ret = OB_ERR_INVALID_TYPE_FOR_OP;
-        } else if (OB_FAIL(ObJsonBaseFactory::get_json_base(&tmp_allocator, datum->get_string(),
-                       ObJsonInType::JSON_BIN, ObJsonInType::JSON_TREE, j_base))) {
+        } else if (OB_FAIL(ObJsonExprHelper::get_json_val(expr, ctx, &tmp_allocator,
+                       static_cast<uint16_t>(i), j_base))) {
         } else if (OB_FAIL(args_array->append(static_cast<ObJsonNode *>(j_base)))) {
         }
       } else if (datum->is_null()) {
