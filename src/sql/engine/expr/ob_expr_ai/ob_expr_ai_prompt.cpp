@@ -101,7 +101,9 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
 
   if (OB_FAIL(tmp_allocator.eval_arg(arg0, ctx, template_datum))) {
   } else if (template_datum->is_null()) {
-    ret = OB_INVALID_ARGUMENT;
+    // A NULL template is a type error (errcode 5083); an empty template is an
+    // argument error and is rejected later by construct_prompt_object().
+    ret = OB_ERR_INVALID_TYPE_FOR_OP;
   } else {
     template_str = template_datum->get_string();
   }
