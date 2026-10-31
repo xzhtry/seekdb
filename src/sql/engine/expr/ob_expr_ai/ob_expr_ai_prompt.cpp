@@ -20,6 +20,7 @@
 #include "ob_ai_func.h"
 #include "lib/utility/utility.h"
 #include "common/json_type/ob_json_common.h"
+#include "common/json_type/ob_json_base.h"
 
 
 using namespace oceanbase::common;
@@ -70,8 +71,8 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
       }
       types_stack[i].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     } else if (ob_is_json(types_stack[i].get_type())) {
-      ret = OB_NOT_SUPPORTED;
-      LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
+      // JSON arguments are supported: they keep the JSON type and are appended
+      // to the args array as JSON values instead of being flattened to text.
     } else {
       ret = OB_ERR_INVALID_TYPE_FOR_OP;
     }
@@ -119,8 +120,13 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
         } else if (OB_FAIL(args_array->append(arg_json_str))) {
         }
       } else if (ob_is_json(arg->datum_meta_.type_)) {
-        ret = OB_NOT_SUPPORTED;
-        LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
+        ObIJsonBase *j_base = NULL;
+        if (datum->is_null()) {
+          ret = OB_ERR_INVALID_TYPE_FOR_OP;
+        } else if (OB_FAIL(ObJsonBaseFactory::get_json_base(&tmp_allocator, datum->get_string(),
+                       ObJsonInType::JSON_BIN, ObJsonInType::JSON_TREE, j_base))) {
+        } else if (OB_FAIL(args_array->append(static_cast<ObJsonNode *>(j_base)))) {
+        }
       } else if (datum->is_null()) {
         ret = OB_ERR_INVALID_TYPE_FOR_OP;
       }
