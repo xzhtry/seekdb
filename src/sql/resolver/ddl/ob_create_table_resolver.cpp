@@ -819,12 +819,12 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
             }
           }
 
-          if (OB_SUCC(ret) && column.get_comment_str().length() > 6 &&
-              0 == MEMCMP(column.get_comment_str().ptr(), "__AI__|", 6)) {
+          if (OB_SUCC(ret) && column.get_comment_str().length() > 7 &&
+              0 == MEMCMP(column.get_comment_str().ptr(), "__AI__|", 7)) {
             // 把暂存的 AI 列定义展开成 3 个隐藏列
             const ObString cmt = column.get_comment_str();
             ObString rest;
-            rest.assign_ptr(cmt.ptr() + 6, cmt.length() - 6);
+            rest.assign_ptr(cmt.ptr() + 7, cmt.length() - 7);
             int64_t p1 = -1;
             int64_t p2 = -1;
             for (int64_t i = 0; i < rest.length() && p2 < 0; ++i) {

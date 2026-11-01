@@ -2056,8 +2056,69 @@ int ObDDLResolver::resolve_normal_column_attribute_constr_default(ObColumnSchema
 
 
 
+// 在 hay 里找 needle，返回下标或 -1
+static int64_t ai_find(const ObString &hay, const char *needle)
+{
+  int64_t found = -1;
+  const int64_t nlen = static_cast<int64_t>(strlen(needle));
+  for (int64_t i = 0; found < 0 && i + nlen <= hay.length(); ++i) {
+    if (0 == strncasecmp(hay.ptr() + i, needle, nlen)) {
+      found = i;
+    }
+  }
+  return found;
+}
+
 // 解析 AI COLUMN (...) WITH (sync_mode=..., max_retries=...) 的选项。
+// 直接读选项原文（语法里通过 dup_expr_string 挂在参数列表节点上），
+// 避免依赖 ParseNode 的包装结构。
 static int collect_ai_column_params(ParseNode *node, ObString &sync_mode, int64_t &max_retries)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(node) || OB_ISNULL(node->str_value_) || node->str_len_ <= 0) {
+    // 没有 WITH 子句
+  } else {
+    ObString text;
+    text.assign_ptr(node->str_value_, static_cast<int32_t>(node->str_len_));
+    int64_t pos = ai_find(text, "max_retries");
+    if (pos >= 0) {
+      int64_t eq = pos;
+      while (eq < text.length() && '=' != text[eq]) {
+        ++eq;
+      }
+      for (int64_t i = eq + 1; i < text.length(); ++i) {
+        if (text[i] >= '0' && text[i] <= '9') {
+          max_retries = max_retries * 10 + (text[i] - '0');
+        } else if (max_retries > 0 || text[i] == ',') {
+          break;
+        }
+      }
+    }
+    pos = ai_find(text, "sync_mode");
+    if (pos >= 0) {
+      int64_t eq = pos;
+      while (eq < text.length() && '=' != text[eq]) {
+        ++eq;
+      }
+      int64_t begin = eq + 1;
+      while (begin < text.length() &&
+             (' ' == text[begin] || '\t' == text[begin] || '\'' == text[begin] || '"' == text[begin])) {
+        ++begin;
+      }
+      int64_t end = begin;
+      while (end < text.length() && '\'' != text[end] && '"' != text[end] && ',' != text[end]) {
+        ++end;
+      }
+      if (end > begin) {
+        sync_mode.assign_ptr(text.ptr() + begin, static_cast<int32_t>(end - begin));
+      }
+    }
+    SQL_RESV_LOG(WARN, "ai column options", K(text), K(max_retries), K(sync_mode));
+  }
+  return ret;
+}
+
+static int collect_ai_column_params_old(ParseNode *node, ObString &sync_mode, int64_t &max_retries)
 {
   int ret = OB_SUCCESS;
   if (OB_ISNULL(node)) {
@@ -2293,6 +2354,13 @@ int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
         // 据此生成 state/request/result_spec 三个隐藏列并清理注释。
         ParseNode *expr_node = attr_node->children_[0];
         ParseNode *param_node = attr_node->children_[1];
+        SQL_RESV_LOG(WARN, "ai column attr debug",
+                     "num_child", attr_node->num_child_,
+                     "child1_null", OB_ISNULL(param_node),
+                     "child1_type", OB_ISNULL(param_node) ? -1 : static_cast<int>(param_node->type_),
+                     "child1_str_len", OB_ISNULL(param_node) ? -1 : static_cast<int>(param_node->str_len_),
+                     "child1_num_child", OB_ISNULL(param_node) ? -1 : static_cast<int>(param_node->num_child_),
+                     "expr_len", static_cast<int>(attr_node->str_len_));
         ObString sync_mode;
         int64_t max_retries = 0;
         if (OB_FAIL(collect_ai_column_params(param_node, sync_mode, max_retries))) {
