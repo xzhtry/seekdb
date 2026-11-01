@@ -20,6 +20,8 @@
 #include "lib/stat/ob_diagnostic_info_guard.h"
 #include "share/ob_server_struct.h"
 #include "sql/engine/cmd/ob_table_executor.h"
+#include "share/ob_dml_sql_splicer.h"
+#include "share/inner_table/ob_inner_table_schema_constants.h"
 #include "query/command/ob_root_command_service.h"
 #include "query/command/ob_root_service_serialization.h"
 #include "query/runtime/ob_query_runtime_environment.h"
@@ -440,6 +442,96 @@ int ObCreateTableExecutor::execute_ctas(ObExecContext &ctx,
   return ret;
 }
 
+// 把已经解析出的 AI 列定义写进 __all_ai_column。
+// 定义挂在 state 隐藏列的注释上：
+//   __AI_STATE__|列名|列ID|重试次数|同步模式|归一化表达式|state列|request列|spec列
+static int insert_ai_column_meta(const share::schema::ObTableSchema &table_schema,
+                                 const uint64_t table_id)
+{
+  int ret = OB_SUCCESS;
+  ObMySQLTransaction trans;
+  const char *const PREFIX = "__AI_STATE__|";
+  const int64_t PREFIX_LEN = 13;
+  if (OB_ISNULL(GCTX.sql_proxy_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(trans.start(GCTX.sql_proxy_))) {
+  } else {
+    share::schema::ObTableSchema::const_column_iterator it = table_schema.column_begin();
+    for (; OB_SUCC(ret) && it != table_schema.column_end(); ++it) {
+      const share::schema::ObColumnSchemaV2 *col = *it;
+      if (OB_ISNULL(col)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (!col->is_hidden()) {
+        // skip
+      } else if (col->get_comment_str().length() <= PREFIX_LEN ||
+                 0 != MEMCMP(col->get_comment_str().ptr(), PREFIX, PREFIX_LEN)) {
+        // not an AI state column
+      } else {
+        const ObString &cmt = col->get_comment_str();
+        ObString rest;
+        rest.assign_ptr(cmt.ptr() + PREFIX_LEN, cmt.length() - PREFIX_LEN);
+        ObString fields[8];
+        int64_t nfield = 0;
+        int64_t start = 0;
+        for (int64_t i = 0; i <= rest.length() && nfield < 8; ++i) {
+          if (i == rest.length() || '|' == rest[i]) {
+            fields[nfield++].assign_ptr(rest.ptr() + start, static_cast<int32_t>(i - start));
+            start = i + 1;
+          }
+        }
+        if (8 != nfield) {
+          ret = OB_ERR_UNEXPECTED;
+          SQL_ENG_LOG(WARN, "invalid ai state column comment", K(ret), K(cmt));
+        } else {
+          int64_t ai_column_id = 0;
+          int64_t max_retries = 0;
+          int64_t state_id = 0;
+          int64_t request_id = 0;
+          int64_t spec_id = 0;
+          uint64_t nums[5] = {0, 0, 0, 0, 0};
+          const int64_t num_field_idx[5] = {1, 2, 5, 6, 7};
+          for (int64_t n = 0; n < 5; ++n) {
+            const ObString &f = fields[num_field_idx[n]];
+            for (int64_t k = 0; k < f.length(); ++k) {
+              if (f[k] >= '0' && f[k] <= '9') {
+                nums[n] = nums[n] * 10 + static_cast<uint64_t>(f[k] - '0');
+              }
+            }
+          }
+          ai_column_id = static_cast<int64_t>(nums[0]);
+          max_retries = static_cast<int64_t>(nums[1]);
+          state_id = static_cast<int64_t>(nums[2]);
+          request_id = static_cast<int64_t>(nums[3]);
+          spec_id = static_cast<int64_t>(nums[4]);
+          share::ObDMLSqlSplicer sql;
+          ObSqlString buffer;
+          int64_t affected_rows = 0;
+          if (OB_FAIL(sql.add_pk_column("table_id", table_id))) {
+          } else if (OB_FAIL(sql.add_pk_column("column_id", ai_column_id))) {
+          } else if (OB_FAIL(sql.add_column("column_name", ObHexEscapeSqlStr(fields[0])))) {
+          } else if (OB_FAIL(sql.add_column("sync_mode", ObHexEscapeSqlStr(fields[3])))) {
+          } else if (OB_FAIL(sql.add_column("max_retries", max_retries))) {
+          } else if (OB_FAIL(sql.add_column("state_column_id", state_id))) {
+          } else if (OB_FAIL(sql.add_column("request_column_id", request_id))) {
+          } else if (OB_FAIL(sql.add_column("result_spec_column_id", spec_id))) {
+          } else if (OB_FAIL(sql.add_column("normalized_expr", ObHexEscapeSqlStr(fields[4])))) {
+          } else if (OB_FAIL(sql.splice_insert_sql(share::OB_ALL_AI_COLUMN_TNAME, buffer))) {
+          } else if (OB_FAIL(trans.write(buffer.ptr(), affected_rows))) {
+          }
+        }
+      }
+    }
+    if (trans.is_started()) {
+      int tmp_ret = OB_SUCCESS;
+      if (OB_SUCCESS != (tmp_ret = trans.end(OB_SUCC(ret)))) {
+        LOG_WARN("failed to end trans", KR(ret), K(tmp_ret));
+        ret = OB_SUCC(ret) ? tmp_ret : ret;
+      }
+    }
+  }
+  return ret;
+}
+
 int ObCreateTableExecutor::execute(ObExecContext &ctx, ObCreateTableStmt &stmt)
 {
   int ret = OB_SUCCESS;
@@ -486,6 +578,7 @@ int ObCreateTableExecutor::execute(ObExecContext &ctx, ObCreateTableStmt &stmt)
         if (OB_FAIL(ObDDLExecutorUtil::execute_pcreate_table(
             my_session, ctx.root_command_service(), "[parallel create table]",
                                                           create_table_arg, res))) {
+        } else if (OB_FAIL(insert_ai_column_meta(table_schema, res.table_id_))) {
         }
       }
     } else {

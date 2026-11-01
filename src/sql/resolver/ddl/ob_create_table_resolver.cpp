@@ -914,13 +914,15 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
                 int64_t mpos = 0;
                 if (OB_ISNULL(mbuf)) {
                   ret = OB_ALLOCATE_MEMORY_FAILED;
-                } else if (OB_FAIL(databuff_printf(mbuf, mlen, mpos,
+                } else if (FALSE_IT(mpos = snprintf(mbuf, static_cast<size_t>(mlen),
                            "__AI_STATE__|%.*s|%lu|%ld|%.*s|%.*s|%lu|%lu|%lu",
-                           column.get_column_name_str().length(), column.get_column_name_str().ptr(),
-                           column.get_column_id(), max_retries,
-                           sync_mode.length(), sync_mode.ptr(),
-                           normalized.length(), normalized.ptr(),
+                           static_cast<int>(column.get_column_name_str().length()), column.get_column_name_str().ptr(),
+                           column.get_column_id(), static_cast<long>(max_retries),
+                           static_cast<int>(sync_mode.length()), sync_mode.ptr(),
+                           static_cast<int>(normalized.length()), normalized.ptr(),
                            hidden_ids[0], hidden_ids[1], hidden_ids[2]))) {
+                } else if (mpos < 0 || mpos >= mlen) {
+                  ret = OB_SIZE_OVERFLOW;
                 } else {
                   ObString meta;
                   meta.assign_ptr(mbuf, static_cast<int32_t>(mpos));

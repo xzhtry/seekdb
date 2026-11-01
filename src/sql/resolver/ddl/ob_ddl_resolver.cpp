@@ -2066,6 +2066,11 @@ static int collect_ai_column_params(ParseNode *node, ObString &sync_mode, int64_
     if (OB_FAIL(collect_ai_column_params(node->children_[0], sync_mode, max_retries))) {
     } else if (OB_FAIL(collect_ai_column_params(node->children_[1], sync_mode, max_retries))) {
     }
+  } else if (T_AI_COLUMN_PARAM_LIST == node->type_) {
+    for (int64_t i = 0; OB_SUCC(ret) && i < node->num_child_; ++i) {
+      if (OB_FAIL(collect_ai_column_params(node->children_[i], sync_mode, max_retries))) {
+      }
+    }
   } else if (T_AI_COLUMN_PARAM == node->type_ && 2 == node->num_child_) {
     ParseNode *name = node->children_[0];
     ParseNode *value = node->children_[1];
@@ -2079,6 +2084,12 @@ static int collect_ai_column_params(ParseNode *node, ObString &sync_mode, int64_
         text.assign_ptr(value->str_value_, static_cast<int32_t>(value->str_len_));
       }
       sync_mode = text;
+    }
+  } else {
+    // 列表/链式包装节点：递归扫描
+    for (int64_t i = 0; OB_SUCC(ret) && i < node->num_child_; ++i) {
+      if (OB_FAIL(collect_ai_column_params(node->children_[i], sync_mode, max_retries))) {
+      }
     }
   }
   return ret;
@@ -2286,16 +2297,19 @@ int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
         int64_t max_retries = 0;
         if (OB_FAIL(collect_ai_column_params(param_node, sync_mode, max_retries))) {
         } else {
-          const int32_t expr_len = OB_ISNULL(expr_node) ? 0 : static_cast<int32_t>(expr_node->str_len_);
-          const char *expr_str = OB_ISNULL(expr_node) ? "" : expr_node->str_value_;
+          // dup_expr_string 把表达式原文挂在 T_AI_COLUMN 节点上（不是 expr 子节点）
+          const int32_t expr_len = static_cast<int32_t>(attr_node->str_len_);
+          const char *expr_str = attr_node->str_value_;
           const int64_t buf_len = 32 + sync_mode.length() + expr_len;
           char *buf = static_cast<char *>(allocator_->alloc(buf_len));
           int64_t pos = 0;
           if (OB_ISNULL(buf)) {
             ret = OB_ALLOCATE_MEMORY_FAILED;
-          } else if (OB_FAIL(databuff_printf(buf, buf_len, pos, "__AI__|%.*s|%ld|%.*s",
+          } else if (FALSE_IT(pos = snprintf(buf, static_cast<size_t>(buf_len), "__AI__|%.*s|%ld|%.*s",
                      sync_mode.length(), sync_mode.ptr(), max_retries,
                      expr_len, NULL == expr_str ? "" : expr_str))) {
+          } else if (pos < 0 || pos >= buf_len) {
+            ret = OB_SIZE_OVERFLOW;
           } else {
             ObString marker;
             marker.assign_ptr(buf, static_cast<int32_t>(pos));
