@@ -819,6 +819,120 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
             }
           }
 
+          if (OB_SUCC(ret) && column.get_comment_str().length() > 6 &&
+              0 == MEMCMP(column.get_comment_str().ptr(), "__AI__|", 6)) {
+            // 把暂存的 AI 列定义展开成 3 个隐藏列
+            const ObString cmt = column.get_comment_str();
+            ObString rest;
+            rest.assign_ptr(cmt.ptr() + 6, cmt.length() - 6);
+            int64_t p1 = -1;
+            int64_t p2 = -1;
+            for (int64_t i = 0; i < rest.length() && p2 < 0; ++i) {
+              if ('|' == rest[i]) {
+                if (p1 < 0) {
+                  p1 = i;
+                } else {
+                  p2 = i;
+                }
+              }
+            }
+            if (p1 < 0 || p2 < 0) {
+              ret = OB_ERR_UNEXPECTED;
+              SQL_RESV_LOG(WARN, "invalid ai column marker", K(ret), K(cmt));
+            } else {
+              ObString sync_mode;
+              sync_mode.assign_ptr(rest.ptr(), static_cast<int32_t>(p1));
+              ObString retry_str;
+              retry_str.assign_ptr(rest.ptr() + p1 + 1, static_cast<int32_t>(p2 - p1 - 1));
+              int64_t max_retries = 0;
+              ObString expr_text;
+              expr_text.assign_ptr(rest.ptr() + p2 + 1, static_cast<int32_t>(rest.length() - p2 - 1));
+              for (int64_t ri = 0; ri < retry_str.length(); ++ri) {
+                if (retry_str[ri] >= '0' && retry_str[ri] <= '9') {
+                  max_retries = max_retries * 10 + (retry_str[ri] - '0');
+                }
+              }
+              if (OB_FAIL(column.set_comment(ObString()))) {
+              }
+
+              // 归一化表达式：JSON 列要求模型只返回一个 JSON 值
+              ObString normalized;
+              if (ObJsonType == column.get_data_type()) {
+                static const char *AI_JSON_SUFFIX = " Return exactly one valid JSON value.";
+                const int64_t nlen = expr_text.length() + static_cast<int64_t>(STRLEN(AI_JSON_SUFFIX)) + 1;
+                char *nbuf = static_cast<char *>(allocator_->alloc(nlen));
+                int64_t npos = 0;
+                if (OB_ISNULL(nbuf)) {
+                  ret = OB_ALLOCATE_MEMORY_FAILED;
+                } else if (OB_FAIL(databuff_printf(nbuf, nlen, npos, "%.*s%s",
+                           expr_text.length(), expr_text.ptr(), AI_JSON_SUFFIX))) {
+                } else {
+                  normalized.assign_ptr(nbuf, static_cast<int32_t>(npos));
+                }
+              } else {
+                normalized = expr_text;
+              }
+
+              uint64_t hidden_ids[3] = {0, 0, 0};
+              const char *suffixes[3] = {"state", "request", "spec"};
+              const ObObjType types[3] = {ObIntType, ObLongTextType, ObLongTextType};
+              for (int64_t k = 0; OB_SUCC(ret) && k < 3; ++k) {
+                ObColumnSchemaV2 hidden;
+                const int64_t name_len = column.get_column_name_str().length() + 16;
+                char *nbuf = static_cast<char *>(allocator_->alloc(name_len));
+                int64_t npos = 0;
+                if (OB_ISNULL(nbuf)) {
+                  ret = OB_ALLOCATE_MEMORY_FAILED;
+                } else if (OB_FAIL(databuff_printf(nbuf, name_len, npos, "__ai_%.*s_%s",
+                           column.get_column_name_str().length(), column.get_column_name_str().ptr(), suffixes[k]))) {
+                } else {
+                  ObString hidden_name;
+                  hidden_name.assign_ptr(nbuf, static_cast<int32_t>(npos));
+                  hidden_ids[k] = gen_column_id();
+                  hidden.set_column_id(hidden_ids[k]);
+                  hidden.set_table_id(table_schema.get_table_id());
+                  hidden.set_rowkey_position(0);
+                  hidden.set_index_position(0);
+                  hidden.set_tbl_part_key_pos(0);
+                  hidden.set_is_hidden(true);
+                  hidden.set_nullable(true);
+                  hidden.set_data_type(types[k]);
+                  hidden.set_accuracy(ObAccuracy::DDL_DEFAULT_ACCURACY[types[k]]);
+                  if (ObLongTextType == types[k]) {
+                    hidden.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+                    hidden.set_charset_type(CHARSET_UTF8MB4);
+                  }
+                  if (OB_FAIL(hidden.set_column_name(hidden_name))) {
+                  } else if (OB_FAIL(resolved_cols.push_back(hidden))) {
+                  }
+                }
+              }
+              if (OB_SUCC(ret)) {
+                // 把 AI 元数据挂到 state 隐藏列的注释上，DDL service 落表时读取
+                const int64_t mlen = normalized.length() + column.get_column_name_str().length() + 256;
+                char *mbuf = static_cast<char *>(allocator_->alloc(mlen));
+                int64_t mpos = 0;
+                if (OB_ISNULL(mbuf)) {
+                  ret = OB_ALLOCATE_MEMORY_FAILED;
+                } else if (OB_FAIL(databuff_printf(mbuf, mlen, mpos,
+                           "__AI_STATE__|%.*s|%lu|%ld|%.*s|%.*s|%lu|%lu|%lu",
+                           column.get_column_name_str().length(), column.get_column_name_str().ptr(),
+                           column.get_column_id(), max_retries,
+                           sync_mode.length(), sync_mode.ptr(),
+                           normalized.length(), normalized.ptr(),
+                           hidden_ids[0], hidden_ids[1], hidden_ids[2]))) {
+                } else {
+                  ObString meta;
+                  meta.assign_ptr(mbuf, static_cast<int32_t>(mpos));
+                  // state 隐藏列是 resolved_cols 的倒数第三个
+                  ObColumnSchemaV2 &state_col = resolved_cols.at(resolved_cols.count() - 3);
+                  if (OB_FAIL(state_col.set_comment(meta))) {
+                  }
+                }
+              }
+            }
+          }
+
           if (OB_SUCC(ret)) {
             ObColumnSchemaV2 *tmp_col = NULL;
             if (OB_FAIL(table_schema.add_column(column))) {

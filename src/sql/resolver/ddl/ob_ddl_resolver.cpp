@@ -2056,6 +2056,34 @@ int ObDDLResolver::resolve_normal_column_attribute_constr_default(ObColumnSchema
 
 
 
+// 解析 AI COLUMN (...) WITH (sync_mode=..., max_retries=...) 的选项。
+static int collect_ai_column_params(ParseNode *node, ObString &sync_mode, int64_t &max_retries)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(node)) {
+    // 没有 WITH 子句
+  } else if (T_LINK_NODE == node->type_) {
+    if (OB_FAIL(collect_ai_column_params(node->children_[0], sync_mode, max_retries))) {
+    } else if (OB_FAIL(collect_ai_column_params(node->children_[1], sync_mode, max_retries))) {
+    }
+  } else if (T_AI_COLUMN_PARAM == node->type_ && 2 == node->num_child_) {
+    ParseNode *name = node->children_[0];
+    ParseNode *value = node->children_[1];
+    if (OB_ISNULL(name) || OB_ISNULL(value) || OB_ISNULL(name->str_value_)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (0 == ObString(name->str_len_, name->str_value_).case_compare("max_retries")) {
+      max_retries = value->value_;
+    } else if (0 == ObString(name->str_len_, name->str_value_).case_compare("sync_mode")) {
+      ObString text;
+      if (OB_NOT_NULL(value->str_value_)) {
+        text.assign_ptr(value->str_value_, static_cast<int32_t>(value->str_len_));
+      }
+      sync_mode = text;
+    }
+  }
+  return ret;
+}
+
 int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
                                                    ParseNode *attrs_node,
                                                    ObColumnResolveStat &resolve_stat,
@@ -2250,9 +2278,31 @@ int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
           break;
       }
       case T_AI_COLUMN: {
-        // AI column: hidden state/request/result_spec columns and the
-        // __all_ai_column row are materialised after the whole column
-        // definition (including its dependencies) has been resolved.
+        // AI 列：这里先把定义暂存进列注释，建表 resolver 在列解析完成后
+        // 据此生成 state/request/result_spec 三个隐藏列并清理注释。
+        ParseNode *expr_node = attr_node->children_[0];
+        ParseNode *param_node = attr_node->children_[1];
+        ObString sync_mode;
+        int64_t max_retries = 0;
+        if (OB_FAIL(collect_ai_column_params(param_node, sync_mode, max_retries))) {
+        } else {
+          const int32_t expr_len = OB_ISNULL(expr_node) ? 0 : static_cast<int32_t>(expr_node->str_len_);
+          const char *expr_str = OB_ISNULL(expr_node) ? "" : expr_node->str_value_;
+          const int64_t buf_len = 32 + sync_mode.length() + expr_len;
+          char *buf = static_cast<char *>(allocator_->alloc(buf_len));
+          int64_t pos = 0;
+          if (OB_ISNULL(buf)) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
+          } else if (OB_FAIL(databuff_printf(buf, buf_len, pos, "__AI__|%.*s|%ld|%.*s",
+                     sync_mode.length(), sync_mode.ptr(), max_retries,
+                     expr_len, NULL == expr_str ? "" : expr_str))) {
+          } else {
+            ObString marker;
+            marker.assign_ptr(buf, static_cast<int32_t>(pos));
+            if (OB_FAIL(column.set_comment(marker))) {
+            }
+          }
+        }
         break;
       }
       case T_CONSTR_SRID: {
