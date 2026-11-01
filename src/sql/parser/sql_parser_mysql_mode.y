@@ -394,6 +394,7 @@ END_P SET_VAR DELIMITER
 %type <node> update_asgn_list update_asgn_factor
 %type <node> update_basic_stmt delete_basic_stmt
 %type <node> table_element_list table_element column_definition column_definition_ref column_definition_list column_name_list
+%type <node> ai_column_param_list ai_column_param
 %type <node> opt_generated_keyname opt_generated_option_list opt_generated_column_attribute_list generated_column_attribute opt_storage_type
 %type <node> data_type special_table_type opt_if_not_exists opt_if_exists opt_charset collation opt_collation cast_data_type
 %type <node> replace_with_opt_hint insert_with_opt_hint column_list opt_on_duplicate_key_clause opt_into opt_replace opt_temporary no_param_column_ref
@@ -4984,7 +4985,6 @@ NOT NULLX
 {
   malloc_terminal_node($$, result->malloc_pool_, T_INVISIBLE);
 }
-;
 
 opt_storage_type:
 VIRTUAL
@@ -6238,6 +6238,36 @@ not NULLX
 | INVISIBLE
 {
   malloc_terminal_node($$, result->malloc_pool_, T_INVISIBLE);
+}
+| AI COLUMN '(' expr ')' WITH '(' ai_column_param_list ')'
+{
+  ParseNode *params = NULL;
+  merge_nodes(params, result, T_AI_COLUMN_PARAM_LIST, $8);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN, 2, $4, params);
+  dup_expr_string($$, result, @4.first_column, @4.last_column);
+}
+| AI COLUMN '(' expr ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN, 2, $4, NULL);
+  dup_expr_string($$, result, @4.first_column, @4.last_column);
+}
+;
+
+ai_column_param_list:
+ai_column_param
+{
+  $$ = $1;
+}
+| ai_column_param_list ',' ai_column_param
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+ai_column_param:
+column_name COMP_EQ literal
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_PARAM, 2, $1, $3);
 }
 ;
 

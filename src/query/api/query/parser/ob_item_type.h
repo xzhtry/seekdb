@@ -2275,6 +2275,11 @@ typedef enum ObItemType
   T_DIFF_TABLE = 4918,
   T_MERGE_TABLE = 4919,
   T_FLUSH_PRIVILEGES = 4920,
+
+  // AI column: `col type AI COLUMN (expr) [WITH (sync_mode='async', max_retries=N)]`
+  T_AI_COLUMN = 4921,
+  T_AI_COLUMN_PARAM = 4922,
+  T_AI_COLUMN_PARAM_LIST = 4923,
   T_MAX //Attention: add a new type before T_MAX
 } ObItemType;
 

@@ -2249,6 +2249,12 @@ int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
           // alter table t modify c1 json check(xyz);
           break;
       }
+      case T_AI_COLUMN: {
+        // AI column: hidden state/request/result_spec columns and the
+        // __all_ai_column row are materialised after the whole column
+        // definition (including its dependencies) has been resolved.
+        break;
+      }
       case T_CONSTR_SRID: {
         if (OB_FAIL(resolve_srid_node(column, *attr_node))) {
         }
