@@ -6243,6 +6243,7 @@ not NULLX
 {
   ParseNode *params = NULL;
   merge_nodes(params, result, T_AI_COLUMN_PARAM_LIST, $8);
+  dup_expr_string(params, result, @8.first_column, @8.last_column);
   malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN, 2, $4, params);
   dup_expr_string($$, result, @4.first_column, @4.last_column);
 }
