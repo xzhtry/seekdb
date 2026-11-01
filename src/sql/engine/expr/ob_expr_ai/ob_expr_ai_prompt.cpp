@@ -57,19 +57,15 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
   if (!ob_is_string_tc(template_type.get_type()) && !ob_is_text_tc(template_type.get_type())) {
     ret = OB_ERR_INVALID_TYPE_FOR_OP;
   } else {
-    // A TEXT/LONGTEXT template keeps its own type: converting it to VARCHAR
-    // narrows the value before the placeholder expansion runs.
-    if (!ob_is_text_tc(template_type.get_type())) {
-      types_stack[0].set_calc_type(ObVarcharType);
-    }
+    // TEXT/LONGTEXT/BLOB templates are materialised as VARCHAR so that the
+    // framework resolves their LOB locator into the actual bytes.
+    types_stack[0].set_calc_type(ObVarcharType);
     types_stack[0].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
   }
 
   for (int64_t i = 1; i < param_num && OB_SUCC(ret); i++) {
     if (ob_is_string_tc(types_stack[i].get_type()) || ob_is_text_tc(types_stack[i].get_type())) {
-      if (!ob_is_text_tc(types_stack[i].get_type())) {
-        types_stack[i].set_calc_type(ObVarcharType);
-      }
+      types_stack[i].set_calc_type(ObVarcharType);
       types_stack[i].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     } else if (ob_is_json(types_stack[i].get_type())) {
       // JSON arguments are supported: they keep the JSON type and are appended
