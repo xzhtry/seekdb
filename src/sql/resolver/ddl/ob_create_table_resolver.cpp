@@ -55,6 +55,20 @@ ObCreateTableResolver::~ObCreateTableResolver()
 {
 }
 
+// 在 str 中查找子串 sub，找到返回首次出现的指针，否则 NULL
+static const char *ai_find_substr(const ObString &str, const ObString &sub)
+{
+  const char *found = NULL;
+  if (sub.length() > 0 && str.length() >= sub.length()) {
+    for (int64_t i = 0; NULL == found && i + sub.length() <= str.length(); ++i) {
+      if (0 == MEMCMP(str.ptr() + i, sub.ptr(), sub.length())) {
+        found = str.ptr() + i;
+      }
+    }
+  }
+  return found;
+}
+
 uint64_t ObCreateTableResolver::gen_column_id()
 {
   return ++cur_column_id_;
@@ -670,6 +684,9 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
     }
 
     int64_t resolved_cols_count = resolved_cols.count();
+
+    // AI 列之间不允许互相依赖：处理过程中累积已展开的 AI 列名
+    ObSEArray<ObString, 8> ai_column_names;
     // Second pass traversal, use resolved_cols to parse out all column schema and save to table_schema
     // And parse index etc
     for (int32_t i = 0, ele_pos = 0; OB_SUCC(ret) && i < node->num_child_; ++i) {
@@ -853,6 +870,63 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
                 }
               }
               if (OB_FAIL(column.set_comment(ObString()))) {
+              }
+
+              if (OB_FAIL(ai_column_names.push_back(column.get_column_name_str()))) {
+              }
+
+              // 依赖校验：表达式里不能出现另一个 AI 列
+              for (int64_t ai_i = 0; OB_SUCC(ret) && ai_i < ai_column_names.count(); ++ai_i) {
+                const ObString &other = ai_column_names.at(ai_i);
+                if (other.length() == column.get_column_name_str().length() &&
+                    0 == MEMCMP(other.ptr(), column.get_column_name_str().ptr(), other.length())) {
+                  // 自己
+                } else if (NULL != ai_find_substr(expr_text, other)) {
+                  ret = OB_NOT_SUPPORTED;
+                  SQL_RESV_LOG(WARN, "ai column depends on another ai column", K(ret), K(expr_text));
+                }
+              }
+
+              // 维度校验：AI_EMBED(model, content, N) 的 N 必须等于 vector 列声明的维度
+              if (OB_SUCC(ret) && 0 == strncasecmp(expr_text.ptr(), "AI_EMBED(", 9)) {
+                int64_t comma = -1;
+                for (int64_t k = 0; k < expr_text.length(); ++k) {
+                  if (',' == expr_text[k]) {
+                    comma = k;
+                  }
+                }
+                if (comma > 0 && comma + 1 < expr_text.length()) {
+                  int64_t got_dim = 0;
+                  int64_t k = comma + 1;
+                  while (k < expr_text.length() && (' ' == expr_text[k])) {
+                    ++k;
+                  }
+                  int64_t digits = 0;
+                  while (k < expr_text.length() && expr_text[k] >= '0' && expr_text[k] <= '9') {
+                    got_dim = got_dim * 10 + (expr_text[k] - '0');
+                    ++k;
+                    ++digits;
+                  }
+                  while (k < expr_text.length() && ' ' == expr_text[k]) {
+                    ++k;
+                  }
+                  if (digits > 0 && k < expr_text.length() && ')' == expr_text[k]) {
+                    int64_t expected_dim = 0;
+                    int dim_ret = ObVectorIndexUtil::get_vector_dim_from_extend_type_info(
+                        column.get_extended_type_info(), expected_dim);
+                    if (OB_SUCCESS != dim_ret) {
+                      expected_dim = 0;
+                    }
+                    if (expected_dim > 0 && expected_dim != got_dim) {
+                      ret = OB_ERR_INVALID_VECTOR_DIM;
+                      LOG_USER_ERROR(OB_ERR_INVALID_VECTOR_DIM,
+                                     static_cast<uint32_t>(expected_dim),
+                                     static_cast<uint32_t>(got_dim));
+                      SQL_RESV_LOG(WARN, "ai column vector dimension mismatch", K(ret),
+                                   K(expected_dim), K(got_dim));
+                    }
+                  }
+                }
               }
 
               // 归一化表达式：JSON 列要求模型只返回一个 JSON 值

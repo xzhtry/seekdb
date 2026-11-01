@@ -844,6 +844,99 @@ int ObAlterTableExecutor::alter_table_exchange_partition_rpc(obcall::ObExchangeP
   return ret;
 }
 
+// ALTER TABLE ADD COLUMN：从 alter schema 里带 "__AI__|" 标记的列写 __all_ai_column。
+// 形如 __AI__|sync_mode|max_retries|表达式
+static int insert_ai_column_meta_for_alter(const share::schema::ObTableSchema &alter_schema,
+                                           const uint64_t table_id)
+{
+  int ret = OB_SUCCESS;
+  ObMySQLTransaction trans;
+  ObArenaAllocator tmp_alloc(ObModIds::OB_SQL_EXECUTOR);
+  const char *const PREFIX = "__AI__|";
+  const int64_t PREFIX_LEN = 7;
+  if (OB_ISNULL(GCTX.sql_proxy_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(trans.start(GCTX.sql_proxy_))) {
+  } else {
+    share::schema::ObTableSchema::const_column_iterator it = alter_schema.column_begin();
+    for (; OB_SUCC(ret) && it != alter_schema.column_end(); ++it) {
+      const share::schema::ObColumnSchemaV2 *col = *it;
+      if (OB_ISNULL(col)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (col->get_comment_str().length() <= PREFIX_LEN ||
+                 0 != MEMCMP(col->get_comment_str().ptr(), PREFIX, PREFIX_LEN)) {
+        // not an AI column
+      } else {
+        ObString rest;
+        rest.assign_ptr(col->get_comment_str().ptr() + PREFIX_LEN,
+                        col->get_comment_str().length() - PREFIX_LEN);
+        int64_t p1 = -1;
+        int64_t p2 = -1;
+        for (int64_t i = 0; i < rest.length() && p2 < 0; ++i) {
+          if ('|' == rest[i]) {
+            if (p1 < 0) {
+              p1 = i;
+            } else {
+              p2 = i;
+            }
+          }
+        }
+        if (p1 < 0 || p2 < 0) {
+          // ignore malformed marker
+        } else {
+          ObString sync_mode;
+          sync_mode.assign_ptr(rest.ptr(), static_cast<int32_t>(p1));
+          int64_t max_retries = 0;
+          for (int64_t i = p1 + 1; i < p2; ++i) {
+            if (rest[i] >= '0' && rest[i] <= '9') {
+              max_retries = max_retries * 10 + (rest[i] - '0');
+            }
+          }
+          ObString expr;
+          expr.assign_ptr(rest.ptr() + p2 + 1, static_cast<int32_t>(rest.length() - p2 - 1));
+          ObString normalized = expr;
+          if (ObJsonType == col->get_data_type()) {
+            static const char *AI_JSON_SUFFIX = " Return exactly one valid JSON value.";
+            const int64_t nlen = expr.length() + static_cast<int64_t>(STRLEN(AI_JSON_SUFFIX)) + 1;
+            char *nbuf = static_cast<char *>(tmp_alloc.alloc(nlen));
+            if (OB_ISNULL(nbuf)) {
+              ret = OB_ALLOCATE_MEMORY_FAILED;
+            } else {
+              int written = snprintf(nbuf, static_cast<size_t>(nlen), "%.*s%s",
+                                     expr.length(), expr.ptr(), AI_JSON_SUFFIX);
+              normalized.assign_ptr(nbuf, static_cast<int32_t>(written));
+            }
+          }
+          share::ObDMLSqlSplicer sql;
+          ObSqlString buffer;
+          int64_t affected_rows = 0;
+          if (OB_FAIL(ret)) {
+          } else if (OB_FAIL(sql.add_pk_column("table_id", table_id))) {
+          } else if (OB_FAIL(sql.add_pk_column("column_id", col->get_column_id()))) {
+          } else if (OB_FAIL(sql.add_column("column_name", ObHexEscapeSqlStr(col->get_column_name_str())))) {
+          } else if (OB_FAIL(sql.add_column("sync_mode", ObHexEscapeSqlStr(sync_mode)))) {
+          } else if (OB_FAIL(sql.add_column("max_retries", max_retries))) {
+          } else if (OB_FAIL(sql.add_column("state_column_id", 0))) {
+          } else if (OB_FAIL(sql.add_column("request_column_id", 0))) {
+          } else if (OB_FAIL(sql.add_column("result_spec_column_id", 0))) {
+          } else if (OB_FAIL(sql.add_column("normalized_expr", ObHexEscapeSqlStr(normalized)))) {
+          } else if (OB_FAIL(sql.splice_insert_sql(share::OB_ALL_AI_COLUMN_TNAME, buffer))) {
+          } else if (OB_FAIL(trans.write(buffer.ptr(), affected_rows))) {
+          }
+        }
+      }
+    }
+    if (trans.is_started()) {
+      int tmp_ret = OB_SUCCESS;
+      if (OB_SUCCESS != (tmp_ret = trans.end(OB_SUCC(ret)))) {
+        LOG_WARN("failed to end trans", KR(ret), K(tmp_ret));
+        ret = OB_SUCC(ret) ? tmp_ret : ret;
+      }
+    }
+  }
+  return ret;
+}
+
 int ObAlterTableExecutor::execute(ObExecContext &ctx, ObAlterTableStmt &stmt)
 {
   int ret = OB_SUCCESS;
@@ -920,6 +1013,9 @@ int ObAlterTableExecutor::execute(ObExecContext &ctx, ObAlterTableStmt &stmt)
                                                 ctx.root_command_service(),
                                                 *ctx.get_query_runtime_environment(),
                                                 ctx.local_command_service()))) {
+          } else if (OB_FAIL(insert_ai_column_meta_for_alter(
+                         alter_table_arg.alter_table_schema_,
+                         alter_table_arg.alter_table_schema_.get_table_id()))) {
           }
         }
       }
