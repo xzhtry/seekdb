@@ -36,6 +36,30 @@ namespace oceanbase
 namespace storage
 {
 
+namespace
+{
+// Per-thread cache of the parsed parser state. ObFTParseHelper::init() runs once per
+// tokenize() row (and once per query tokenization), while the (parser name, parser
+// properties) pair is almost always unchanged. Re-parsing the name, the properties
+// JSON and the parser descriptor on every call is pure overhead on the hot path.
+constexpr int64_t FT_HELPER_CACHE_MAX_PROPS_LEN = 512;
+
+struct ObFTParseHelperCache final
+{
+  bool valid_ = false;
+  int64_t name_len_ = 0;
+  int64_t props_len_ = 0;
+  char name_[OB_FT_PARSER_NAME_LENGTH] = {0};
+  char props_[FT_HELPER_CACHE_MAX_PROPS_LEN] = {0};
+  ObFTParser parser_;
+  ObFTParserProperty parser_property_;
+  ObAddWordFlag add_word_flag_;
+  const ObIFTParserDesc *parser_desc_ = nullptr;
+};
+
+thread_local ObFTParseHelperCache g_ft_parse_helper_cache;
+} // namespace
+
 const char *ObFTParser::NAME_STR[ObFTParser::ParserType::FTP_MAX] = {
 #define FT_PARSER_TYPE(ftp_type, parser_name) #parser_name,
   FTS_BUILD_IN_PARSER_LIST
@@ -330,17 +354,46 @@ int ObFTParseHelper::init(
     const common::ObString &parser_properties)
 {
   int ret = OB_SUCCESS;
+  bool cache_hit = false;
+  ObFTParseHelperCache &cache = g_ft_parse_helper_cache;
   if (OB_UNLIKELY(is_inited_)) {
     ret = OB_INIT_TWICE;
   } else if (OB_ISNULL(allocator) || OB_UNLIKELY(parser_name.empty())) {
     ret = OB_INVALID_ARGUMENT;
+  } else if (cache.valid_ && cache.name_len_ == parser_name.length()
+             && cache.props_len_ == parser_properties.length()
+             && 0 == MEMCMP(cache.name_, parser_name.ptr(), cache.name_len_)
+             && (0 == cache.props_len_
+                 || 0 == MEMCMP(cache.props_, parser_properties.ptr(), cache.props_len_))) {
+    // Same parser configuration as the last call on this thread: reuse the parse
+    // result instead of parsing the name / properties JSON again.
+    parser_name_ = cache.parser_;
+    parser_property_ = cache.parser_property_;
+    parser_desc_ = cache.parser_desc_;
+    add_word_flag_ = cache.add_word_flag_;
+    cache_hit = true;
   } else if (OB_FAIL(parser_name_.parse_from_str(parser_name.ptr(), parser_name.length()))) {
   } else if (OB_FAIL(parser_property_.parse_for_parser_helper(parser_name_, parser_properties))) {
   } else if (OB_FAIL(parser_name_.get_desc(parser_desc_))) {
   } else if (OB_ISNULL(parser_desc_)) {
     ret = OB_ERR_UNEXPECTED;
   } else if (OB_FAIL(set_add_word_flag(*parser_desc_))) {
-  } else {
+  } else if (parser_name.length() < OB_FT_PARSER_NAME_LENGTH
+             && parser_properties.length() <= FT_HELPER_CACHE_MAX_PROPS_LEN) {
+    // Refresh the cache with the freshly parsed state.
+    cache.valid_ = true;
+    cache.name_len_ = parser_name.length();
+    MEMCPY(cache.name_, parser_name.ptr(), cache.name_len_);
+    cache.props_len_ = parser_properties.length();
+    if (cache.props_len_ > 0) {
+      MEMCPY(cache.props_, parser_properties.ptr(), cache.props_len_);
+    }
+    cache.parser_ = parser_name_;
+    cache.parser_property_ = parser_property_;
+    cache.parser_desc_ = parser_desc_;
+    cache.add_word_flag_ = add_word_flag_;
+  }
+  if (OB_SUCC(ret)) {
     allocator_ = allocator;
     is_inited_ = true;
   }
