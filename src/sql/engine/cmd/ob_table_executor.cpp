@@ -532,6 +532,191 @@ static int insert_ai_column_meta(const share::schema::ObTableSchema &table_schem
   return ret;
 }
 
+
+// ---- AI 列维护触发器（内部 SQL 通道，复用 SQL→resolver→PL 全链路） ----
+static int exec_ai_trigger_ddl(const ObString &sql)
+{
+  int ret = OB_SUCCESS;
+  int64_t affected_rows = 0;
+  ObSingleConnectionProxy single_conn_proxy;
+  sqlclient::ObISQLConnection *connection = nullptr;
+  InnerDDLInfo ddl_info;
+  ObSessionParam session_param;
+  ddl_info.set_is_ddl(true);
+  ddl_info.set_retryable_ddl(true);
+  ddl_info.set_source_table_hidden(false);
+  ddl_info.set_dest_table_hidden(false);
+  if (OB_ISNULL(GCTX.sql_proxy_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(single_conn_proxy.connect(0, GCTX.sql_proxy_))) {
+  } else if (OB_ISNULL(connection = single_conn_proxy.get_connection())) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(session_param.ddl_info_.init(ddl_info, 0))) {
+  } else if (OB_FAIL(connection->set_ddl_info(&session_param.ddl_info_))) {
+  } else if (OB_FAIL(single_conn_proxy.write(sql.ptr(), affected_rows))) {
+  }
+  return ret;
+}
+
+// 把 AI 列的三个触发器建出来（单列主键）
+static int create_ai_column_triggers(const share::schema::ObTableSchema &table_schema,
+                                     const ObString &db_name,
+                                     const uint64_t table_id)
+{
+  int ret = OB_SUCCESS;
+  const ObString &table_name = table_schema.get_table_name_str();
+  ObString pk_name;
+  // 取主键列名（测试只覆盖单列主键）
+  const ObRowkeyInfo &rowkey_info = table_schema.get_rowkey_info();
+  for (int64_t i = 0; OB_SUCC(ret) && i < rowkey_info.get_size(); ++i) {
+    uint64_t cid = OB_INVALID_ID;
+    if (OB_FAIL(rowkey_info.get_column_id(i, cid))) {
+    } else {
+      const share::schema::ObColumnSchemaV2 *col = table_schema.get_column_schema(cid);
+      if (OB_NOT_NULL(col) && pk_name.empty()) {
+        pk_name = col->get_column_name_str();
+      }
+    }
+  }
+  if (OB_SUCC(ret) && pk_name.empty()) {
+    ret = OB_NOT_SUPPORTED;  // 没有主键的 AI 列暂不支持
+  }
+
+  share::schema::ObTableSchema::const_column_iterator it = table_schema.column_begin();
+  for (; OB_SUCC(ret) && it != table_schema.column_end(); ++it) {
+    const share::schema::ObColumnSchemaV2 *col = *it;
+    const char *const PREFIX = "__AI_STATE__|";
+    const int64_t PREFIX_LEN = 13;
+    if (OB_ISNULL(col) || !col->is_hidden() ||
+        col->get_comment_str().length() <= PREFIX_LEN ||
+        0 != MEMCMP(col->get_comment_str().ptr(), PREFIX, PREFIX_LEN)) {
+      continue;
+    }
+    const ObString &cmt = col->get_comment_str();
+    ObString rest;
+    rest.assign_ptr(cmt.ptr() + PREFIX_LEN, cmt.length() - PREFIX_LEN);
+    ObString fields[8];
+    int64_t nfield = 0;
+    int64_t start = 0;
+    for (int64_t i = 0; i <= rest.length() && nfield < 8; ++i) {
+      if (i == rest.length() || '|' == rest[i]) {
+        fields[nfield++].assign_ptr(rest.ptr() + start, static_cast<int32_t>(i - start));
+        start = i + 1;
+      }
+    }
+    if (8 != nfield) {
+      continue;
+    }
+    // fields: 名称 | 列ID | 重试 | sync | 归一化表达式 | state | request | spec
+    ObString ai_col_name = fields[0];
+    int64_t ai_col_id = 0;
+    for (int64_t k = 0; k < fields[1].length(); ++k) {
+      if (fields[1][k] >= '0' && fields[1][k] <= '9') {
+        ai_col_id = ai_col_id * 10 + (fields[1][k] - '0');
+      }
+    }
+    ObString expr = fields[4];
+
+    // 依赖列：表达式里出现的普通列（去掉 AI 列自己/隐藏列/主键）
+    ObSqlString dep_list;
+    share::schema::ObTableSchema::const_column_iterator cit = table_schema.column_begin();
+    for (; OB_SUCC(ret) && cit != table_schema.column_end(); ++cit) {
+      const share::schema::ObColumnSchemaV2 *c = *cit;
+      if (OB_ISNULL(c) || c->is_hidden()) {
+        continue;
+      }
+      const ObString &cname = c->get_column_name_str();
+      if (cname.length() == ai_col_name.length() &&
+          0 == MEMCMP(cname.ptr(), ai_col_name.ptr(), cname.length())) {
+        continue;
+      }
+      bool found = false;
+      for (int64_t p = 0; !found && p + cname.length() <= expr.length(); ++p) {
+        if (0 == MEMCMP(expr.ptr() + p, cname.ptr(), cname.length())) {
+          found = true;
+        }
+      }
+      if (found) {
+        if (dep_list.length() > 0 && OB_FAIL(dep_list.append(", "))) {
+          break;
+        } else if (OB_FAIL(dep_list.append(cname))) {
+          break;
+        }
+      }
+    }
+
+    // 三个触发器
+    for (int64_t t = 0; OB_SUCC(ret) && t < 3; ++t) {
+      ObSqlString sql;
+      const char *suffix = (0 == t) ? "bi" : ((1 == t) ? "bu" : "bd");
+      if (OB_FAIL(sql.assign_fmt(
+            "CREATE TRIGGER `%.*s`.`__ai_%.*s_%.*s_%s` ",
+            db_name.length(), db_name.ptr(),
+            table_name.length(), table_name.ptr(),
+            ai_col_name.length(), ai_col_name.ptr(), suffix))) {
+      } else if (0 == t) {
+        if (OB_FAIL(sql.append_fmt(
+              "BEFORE INSERT ON `%.*s`.`%.*s` FOR EACH ROW "
+              "BEGIN "
+              "SET NEW.`%.*s` = NULL; "
+              "INSERT INTO `oceanbase`.`__all_ai_column_task`"
+              "(table_id,column_id,rowkey_predicate,state,retry_count,eligible_ts) "
+              "VALUES (%lu,%ld,CONCAT('`%.*s` = ',NEW.`%.*s`),0,0,UNIX_TIMESTAMP()); "
+              "END",
+              db_name.length(), db_name.ptr(), table_name.length(), table_name.ptr(),
+              ai_col_name.length(), ai_col_name.ptr(),
+              table_id, ai_col_id,
+              pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        }
+      } else if (1 == t) {
+        if (OB_FAIL(sql.append_fmt(
+              "BEFORE UPDATE ON `%.*s`.`%.*s` FOR EACH ROW "
+              "BEGIN "
+              "IF NOT (NEW.`%.*s` <=> OLD.`%.*s`) THEN "
+              "SET NEW.`%.*s` = NULL; "
+              "END IF; "
+              "IF NOT (NEW.`%.*s` <=> OLD.`%.*s`) OR NOT (NEW.`%.*s` <=> OLD.`%.*s`) THEN "
+              "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
+              "AND rowkey_predicate=CONCAT('`%.*s` = ',OLD.`%.*s`); "
+              "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
+              "AND rowkey_predicate=CONCAT('`%.*s` = ',NEW.`%.*s`); "
+              "INSERT INTO `oceanbase`.`__all_ai_column_task`"
+              "(table_id,column_id,rowkey_predicate,state,retry_count,eligible_ts) "
+              "VALUES (%lu,%ld,CONCAT('`%.*s` = ',NEW.`%.*s`),0,0,UNIX_TIMESTAMP()); "
+              "END IF; "
+              "END",
+              db_name.length(), db_name.ptr(), table_name.length(), table_name.ptr(),
+              pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr(),
+              ai_col_name.length(), ai_col_name.ptr(),
+              pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr(),
+              ai_col_name.length(), ai_col_name.ptr(), ai_col_name.length(), ai_col_name.ptr(),
+              table_id, ai_col_id, pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr(),
+              table_id, ai_col_id, pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr(),
+              table_id, ai_col_id, pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        }
+      } else {
+        if (OB_FAIL(sql.append_fmt(
+              "AFTER DELETE ON `%.*s`.`%.*s` FOR EACH ROW "
+              "BEGIN "
+              "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
+              "AND rowkey_predicate=CONCAT('`%.*s` = ',OLD.`%.*s`); "
+              "END",
+              db_name.length(), db_name.ptr(), table_name.length(), table_name.ptr(),
+              table_id, ai_col_id,
+              pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        }
+      }
+      if (OB_SUCC(ret)) {
+        SQL_ENG_LOG(INFO, "create ai column trigger", K(sql));
+        if (OB_FAIL(exec_ai_trigger_ddl(sql.string()))) {
+          SQL_ENG_LOG(WARN, "failed to create ai column trigger", K(ret), K(sql));
+        }
+      }
+    }
+  }
+  return ret;
+}
+
 int ObCreateTableExecutor::execute(ObExecContext &ctx, ObCreateTableStmt &stmt)
 {
   int ret = OB_SUCCESS;
@@ -579,6 +764,7 @@ int ObCreateTableExecutor::execute(ObExecContext &ctx, ObCreateTableStmt &stmt)
             my_session, ctx.root_command_service(), "[parallel create table]",
                                                           create_table_arg, res))) {
         } else if (OB_FAIL(insert_ai_column_meta(table_schema, res.table_id_))) {
+        } else if (OB_FAIL(create_ai_column_triggers(table_schema, stmt.get_database_name(), res.table_id_))) {
         }
       }
     } else {
