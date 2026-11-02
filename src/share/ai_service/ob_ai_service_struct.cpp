@@ -281,6 +281,9 @@ OB_SERIALIZE_MEMBER(ObAiServiceModelInfo, name_, type_, model_name_);
 } // namespace oceanbase
 
 #include <pthread.h>
+#include <stdarg.h>
+#include <cstdio>
+#include <string>
 #include <unistd.h>
 #include "share/ob_server_struct.h"
 #include "lib/string/ob_sql_string.h"
@@ -294,6 +297,20 @@ namespace share
 {
 
 static volatile bool g_ai_col_worker_stop = false;
+
+static void ai_worker_log(const char *fmt, ...)
+{
+  FILE *fp = fopen("/tmp/ai_worker.log", "a");
+  if (NULL != fp) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(fp, fmt, ap);
+    va_end(ap);
+    fprintf(fp, "\n");
+    fclose(fp);
+  }
+}
+
 static bool g_ai_col_worker_started = false;
 static pthread_t g_ai_col_worker_tid;
 
@@ -373,13 +390,20 @@ static void process_one_task(ObArenaAllocator &allocator,
       0 == MEMCMP(raw_expr.ptr() + raw_expr.length() - slen, SUFFIX, slen)) {
     raw_expr.assign_ptr(raw_expr.ptr(), static_cast<int32_t>(raw_expr.length() - slen));
   }
+  ai_worker_log("task begin db=%s tbl=%s col=%s pred=%s retry=%ld",
+                std::string(db_name.ptr(), db_name.length()).c_str(),
+                std::string(table_name.ptr(), table_name.length()).c_str(),
+                std::string(column_name.ptr(), column_name.length()).c_str(),
+                std::string(predicate.ptr(), predicate.length()).c_str(), retry_count);
   if (OB_FAIL(sql.assign_fmt("SELECT %.*s AS v FROM `%.*s`.`%.*s` WHERE %.*s",
                              raw_expr.length(), raw_expr.ptr(),
                              db_name.length(), db_name.ptr(),
                              table_name.length(), table_name.ptr(),
                              predicate.length(), predicate.ptr()))) {
   } else if (OB_FAIL(query_one_value(sql.ptr(), result, allocator))) {
+    ai_worker_log("select failed ret=%d sql=%s", ret, sql.ptr());
   } else if (result.empty()) {
+    ai_worker_log("select empty sql=%s", sql.ptr());
     ret = OB_ERR_UNEXPECTED;
   } else {
     ObSqlString update;
@@ -392,6 +416,7 @@ static void process_one_task(ObArenaAllocator &allocator,
                                   value.length(), value.ptr(),
                                   predicate.length(), predicate.ptr()))) {
     } else if (OB_FAIL(exec_dml(update.ptr()))) {
+      ai_worker_log("update failed ret=%d sql=%s", ret, update.ptr());
     } else {
     }
   }
@@ -443,8 +468,10 @@ static void process_ai_column_tasks()
     if (OB_ISNULL(GCTX.sql_proxy_)) {
       // do nothing
     } else if (OB_FAIL(GCTX.sql_proxy_->read(res, task_sql, 0))) {
+      ai_worker_log("task query failed ret=%d", ret);
     } else if (OB_ISNULL(result = res.get_result())) {
     } else {
+      ai_worker_log("round: reading tasks");
       while (OB_SUCC(result->next())) {
         ObString db_name;
         ObString table_name;
