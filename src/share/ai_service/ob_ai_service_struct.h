@@ -100,6 +100,10 @@ private:
   ObString response_transform_fn_;
 };
 
+
+// 启动 AI 列后台 worker（幂等）
+int start_ai_column_worker();
+
 } // namespace share
 } // namespace oceanbase
 

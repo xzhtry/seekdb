@@ -22,6 +22,7 @@
 #include "sql/engine/cmd/ob_table_executor.h"
 #include "share/ob_dml_sql_splicer.h"
 #include "share/inner_table/ob_inner_table_schema_constants.h"
+#include "share/ai_service/ob_ai_service_struct.h"
 #include "query/command/ob_root_command_service.h"
 #include "query/command/ob_root_service_serialization.h"
 #include "query/runtime/ob_query_runtime_environment.h"
@@ -708,6 +709,9 @@ static int create_ai_column_triggers(const share::schema::ObTableSchema &table_s
       }
       if (OB_SUCC(ret)) {
         SQL_ENG_LOG(INFO, "create ai column trigger", K(sql));
+        if (OB_FAIL(share::start_ai_column_worker())) {
+          SQL_ENG_LOG(WARN, "failed to start ai column worker", K(ret));
+        }
         if (OB_FAIL(exec_ai_trigger_ddl(sql.string()))) {
           SQL_ENG_LOG(WARN, "failed to create ai column trigger", K(ret), K(sql));
         }

@@ -279,3 +279,222 @@ OB_SERIALIZE_MEMBER(ObAiServiceModelInfo, name_, type_, model_name_);
 
 } // namespace share
 } // namespace oceanbase
+
+#include <pthread.h>
+#include <unistd.h>
+#include "share/ob_server_struct.h"
+#include "lib/string/ob_sql_string.h"
+#include "common/mysqlclient/ob_mysql_proxy.h"
+#include "common/mysqlclient/ob_single_connection_proxy.h"
+#include "common/mysqlclient/ob_mysql_result.h"
+
+namespace oceanbase
+{
+namespace share
+{
+
+static volatile bool g_ai_col_worker_stop = false;
+static bool g_ai_col_worker_started = false;
+static pthread_t g_ai_col_worker_tid;
+
+// 转义单引号与反斜杠，拼进 SQL 字符串字面量
+static void escape_sql_string(const ObString &in, ObSqlString &out)
+{
+  for (int64_t i = 0; i < in.length(); ++i) {
+    const char c = in.ptr()[i];
+    if ('\'' == c) {
+      out.append("''");
+    } else if ('\\' == c) {
+      out.append("\\\\");
+    } else {
+      out.append(&c, 1);
+    }
+  }
+}
+
+// 执行一条“取单个字符串结果”的 SQL
+static int query_one_value(const char *sql, ObString &value, ObArenaAllocator &allocator)
+{
+  int ret = OB_SUCCESS;
+  ObSingleConnectionProxy conn_proxy;
+  if (OB_ISNULL(GCTX.sql_proxy_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(conn_proxy.connect(0, GCTX.sql_proxy_))) {
+  } else {
+  SMART_VAR(common::ObMySQLProxy::MySQLResult, res) {
+    common::sqlclient::ObMySQLResult *result = nullptr;
+    ObString whole;
+    if (OB_FAIL(conn_proxy.read(res, sql, 0))) {
+    } else if (OB_ISNULL(result = res.get_result())) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(result->next())) {
+      if (OB_ITER_END == ret) {
+        ret = OB_SUCCESS;
+        value.reset();
+      }
+    } else if (OB_FAIL(result->get_varchar("v", whole))) {
+    } else if (OB_FAIL(ob_write_string(allocator, whole, value))) {
+    }
+  }
+  }
+  return ret;
+}
+
+static int exec_dml(const char *sql)
+{
+  int ret = OB_SUCCESS;
+  int64_t affected_rows = 0;
+  ObSingleConnectionProxy conn_proxy;
+  if (OB_ISNULL(GCTX.sql_proxy_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(conn_proxy.connect(0, GCTX.sql_proxy_))) {
+  } else if (OB_FAIL(conn_proxy.write(sql, affected_rows))) {
+  }
+  return ret;
+}
+
+static void process_one_task(ObArenaAllocator &allocator,
+                             const ObString &db_name,
+                             const ObString &table_name,
+                             const ObString &column_name,
+                             const ObString &predicate,
+                             const ObString &expr,
+                             int64_t retry_count,
+                             int64_t max_retries)
+{
+  int ret = OB_SUCCESS;
+  ObSqlString sql;
+  ObString result;
+  // 去掉 JSON 列的提示词后缀，按原始表达式求值
+  ObString raw_expr = expr;
+  static const char *SUFFIX = " Return exactly one valid JSON value.";
+  const int64_t slen = static_cast<int64_t>(STRLEN(SUFFIX));
+  if (raw_expr.length() > slen &&
+      0 == MEMCMP(raw_expr.ptr() + raw_expr.length() - slen, SUFFIX, slen)) {
+    raw_expr.assign_ptr(raw_expr.ptr(), static_cast<int32_t>(raw_expr.length() - slen));
+  }
+  if (OB_FAIL(sql.assign_fmt("SELECT %.*s AS v FROM `%.*s`.`%.*s` WHERE %.*s",
+                             raw_expr.length(), raw_expr.ptr(),
+                             db_name.length(), db_name.ptr(),
+                             table_name.length(), table_name.ptr(),
+                             predicate.length(), predicate.ptr()))) {
+  } else if (OB_FAIL(query_one_value(sql.ptr(), result, allocator))) {
+  } else if (result.empty()) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    ObSqlString update;
+    ObSqlString value;
+    escape_sql_string(result, value);
+    if (OB_FAIL(update.assign_fmt("UPDATE `%.*s`.`%.*s` SET `%.*s` = '%.*s' WHERE %.*s",
+                                  db_name.length(), db_name.ptr(),
+                                  table_name.length(), table_name.ptr(),
+                                  column_name.length(), column_name.ptr(),
+                                  value.length(), value.ptr(),
+                                  predicate.length(), predicate.ptr()))) {
+    } else if (OB_FAIL(exec_dml(update.ptr()))) {
+    } else {
+    }
+  }
+  // 清理/重试
+  ObSqlString clean;
+  if (OB_SUCC(ret)) {
+    clean.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task WHERE rowkey_predicate = '%.*s' "
+                     "AND column_id = (SELECT column_id FROM oceanbase.__all_column WHERE table_id = "
+                     "(SELECT table_id FROM oceanbase.__all_table WHERE table_name = '%.*s') AND column_name = '%.*s')",
+                     predicate.length(), predicate.ptr(),
+                     table_name.length(), table_name.ptr(),
+                     column_name.length(), column_name.ptr());
+  } else if (retry_count + 1 > max_retries) {
+    clean.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task WHERE rowkey_predicate = '%.*s' AND column_id = "
+                     "(SELECT column_id FROM oceanbase.__all_column WHERE table_id = "
+                     "(SELECT table_id FROM oceanbase.__all_table WHERE table_name = '%.*s') AND column_name = '%.*s')",
+                     predicate.length(), predicate.ptr(),
+                     table_name.length(), table_name.ptr(),
+                     column_name.length(), column_name.ptr());
+  } else {
+    clean.assign_fmt("UPDATE oceanbase.__all_ai_column_task SET retry_count = retry_count + 1, "
+                     "eligible_ts = unix_timestamp() + 1 WHERE rowkey_predicate = '%.*s' AND column_id = "
+                     "(SELECT column_id FROM oceanbase.__all_column WHERE table_id = "
+                     "(SELECT table_id FROM oceanbase.__all_table WHERE table_name = '%.*s') AND column_name = '%.*s')",
+                     predicate.length(), predicate.ptr(),
+                     table_name.length(), table_name.ptr(),
+                     column_name.length(), column_name.ptr());
+  }
+  if (clean.length() > 0) {
+    int tmp_ret = exec_dml(clean.ptr());
+  }
+}
+
+static void process_ai_column_tasks()
+{
+  int ret = OB_SUCCESS;
+  ObArenaAllocator allocator("AiColWorker");
+  const char *task_sql =
+      "SELECT d.database_name, t.table_name, c.column_name, a.rowkey_predicate, m.normalized_expr, "
+      "a.retry_count "
+      "FROM oceanbase.__all_ai_column_task a "
+      "JOIN oceanbase.__all_table t ON t.table_id = a.table_id "
+      "JOIN oceanbase.__all_database d ON d.database_id = t.database_id "
+      "JOIN oceanbase.__all_column c ON c.table_id = a.table_id AND c.column_id = a.column_id "
+      "JOIN oceanbase.__all_ai_column m ON m.table_id = a.table_id AND m.column_id = a.column_id "
+      "WHERE a.state = 0 AND a.eligible_ts <= unix_timestamp() LIMIT 4";
+  SMART_VAR(common::ObMySQLProxy::MySQLResult, res) {
+    common::sqlclient::ObMySQLResult *result = nullptr;
+    if (OB_ISNULL(GCTX.sql_proxy_)) {
+      // do nothing
+    } else if (OB_FAIL(GCTX.sql_proxy_->read(res, task_sql, 0))) {
+    } else if (OB_ISNULL(result = res.get_result())) {
+    } else {
+      while (OB_SUCC(result->next())) {
+        ObString db_name;
+        ObString table_name;
+        ObString column_name;
+        ObString predicate;
+        ObString expr;
+        int64_t retry_count = 0;
+        if (OB_FAIL(result->get_varchar("database_name", db_name))) {
+          break;
+        } else if (OB_FAIL(result->get_varchar("table_name", table_name))) {
+          break;
+        } else if (OB_FAIL(result->get_varchar("column_name", column_name))) {
+          break;
+        } else if (OB_FAIL(result->get_varchar("rowkey_predicate", predicate))) {
+          break;
+        } else if (OB_FAIL(result->get_varchar("normalized_expr", expr))) {
+          break;
+        } else if (OB_FAIL(result->get_int("retry_count", retry_count))) {
+          break;
+        }
+        process_one_task(allocator, db_name, table_name, column_name, predicate, expr,
+                         retry_count, 3);
+        allocator.reuse();
+      }
+    }
+  }
+}
+
+static void *ai_column_worker_main(void *arg)
+{
+  UNUSED(arg);
+  while (!g_ai_col_worker_stop) {
+    process_ai_column_tasks();
+    usleep(200 * 1000);
+  }
+  return nullptr;
+}
+
+int start_ai_column_worker()
+{
+  int ret = OB_SUCCESS;
+  if (!g_ai_col_worker_started) {
+    g_ai_col_worker_started = true;
+    if (0 != pthread_create(&g_ai_col_worker_tid, nullptr, ai_column_worker_main, nullptr)) {
+      ret = OB_ERR_UNEXPECTED;
+      g_ai_col_worker_started = false;
+    }
+  }
+  return ret;
+}
+
+}  // namespace share
+}  // namespace oceanbase
