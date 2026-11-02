@@ -142,7 +142,8 @@ namespace share
   static const char* const OB_SV_PARALLEL_SERVERS_TARGET = "parallel_servers_target";
   static const char* const OB_SV_TRX_IDLE_TIMEOUT = "ob_trx_idle_timeout";
   static const char* const OB_SV_BLOCK_ENCRYPTION_MODE = "block_encryption_mode";
-  static const char* const OB_SV__NLJ_BATCHING_ENABLED = "_nlj_batching_enabled";
+  static const char* const OB_SV_AI_COLUMN_STRICT_READ = "ai_column_strict_read";
+  static const char* const OB_SV_AI_COLUMN_INTERNAL_WRITE = "ai_column_internal_write";
   static const char* const OB_SV_TRANSACTION_ISOLATION = "transaction_isolation";
   static const char* const OB_SV_TRX_LOCK_TIMEOUT = "ob_trx_lock_timeout";
   static const char* const OB_SV_VALIDATE_PASSWORD_CHECK_USER_NAME = "validate_password_check_user_name";
@@ -739,6 +740,8 @@ namespace share
   static const char* const OB_SV_HNSW_EXTRA_INFO_MAX_SIZE = "ob_hnsw_extra_info_max_size";
   static const char* const OB_SV__PUSH_JOIN_PREDICATE = "_push_join_predicate";
   static const char* const OB_SV_SPARSE_DROP_RATIO_SEARCH = "ob_sparse_drop_ratio_search";
+  static const char* const OB_SV__NLJ_BATCHING_ENABLED = "_nlj_batching_enabled";
+  static const char* const OB_SV_AI_COMPLETE_SYSTEM_PROMPT = "ai_complete_system_prompt";
 
 }
 }

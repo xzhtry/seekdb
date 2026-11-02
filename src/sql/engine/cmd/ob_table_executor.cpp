@@ -618,8 +618,8 @@ static int create_ai_column_triggers(const share::schema::ObTableSchema &table_s
     }
     ObString expr = fields[4];
 
-    // 依赖列：表达式里出现的普通列（去掉 AI 列自己/隐藏列/主键）
-    ObSqlString dep_list;
+    // 依赖列条件：表达式里出现的普通列（排除 AI 列自己/隐藏列/主键）
+    ObSqlString dep_cond;
     share::schema::ObTableSchema::const_column_iterator cit = table_schema.column_begin();
     for (; OB_SUCC(ret) && cit != table_schema.column_end(); ++cit) {
       const share::schema::ObColumnSchemaV2 *c = *cit;
@@ -631,22 +631,24 @@ static int create_ai_column_triggers(const share::schema::ObTableSchema &table_s
           0 == MEMCMP(cname.ptr(), ai_col_name.ptr(), cname.length())) {
         continue;
       }
+      if (cname.length() == pk_name.length() &&
+          0 == MEMCMP(cname.ptr(), pk_name.ptr(), cname.length())) {
+        continue;
+      }
       bool found = false;
       for (int64_t p = 0; !found && p + cname.length() <= expr.length(); ++p) {
         if (0 == MEMCMP(expr.ptr() + p, cname.ptr(), cname.length())) {
           found = true;
         }
       }
-      if (found) {
-        if (dep_list.length() > 0 && OB_FAIL(dep_list.append(", "))) {
-          break;
-        } else if (OB_FAIL(dep_list.append(cname))) {
-          break;
-        }
+      if (found && OB_FAIL(dep_cond.append_fmt(
+              " OR NOT (NEW.`%.*s` <=> OLD.`%.*s`)",
+              cname.length(), cname.ptr(), cname.length(), cname.ptr()))) {
+        break;
       }
     }
 
-    // 三个触发器
+    // 三个触发器：同一行同一次变更共享同一个 request_id（任务表即状态源）
     for (int64_t t = 0; OB_SUCC(ret) && t < 3; ++t) {
       ObSqlString sql;
       const char *suffix = (0 == t) ? "bi" : ((1 == t) ? "bu" : "bd");
@@ -656,55 +658,71 @@ static int create_ai_column_triggers(const share::schema::ObTableSchema &table_s
             table_name.length(), table_name.ptr(),
             ai_col_name.length(), ai_col_name.ptr(), suffix))) {
       } else if (0 == t) {
-        if (OB_FAIL(sql.append_fmt(
-              "BEFORE INSERT ON `%.*s`.`%.*s` FOR EACH ROW "
-              "BEGIN "
-              "SET NEW.`%.*s` = NULL; "
-              "INSERT INTO `oceanbase`.`__all_ai_column_task`"
-              "(table_id,column_id,rowkey_predicate,state,retry_count,eligible_ts) "
-              "VALUES (%lu,%ld,CONCAT('`%.*s` = ',NEW.`%.*s`),0,0,UNIX_TIMESTAMP()); "
-              "END",
-              db_name.length(), db_name.ptr(), table_name.length(), table_name.ptr(),
-              ai_col_name.length(), ai_col_name.ptr(),
-              table_id, ai_col_id,
-              pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        if (OB_FAIL(sql.append("BEFORE INSERT ON "))) {
+        } else if (OB_FAIL(sql.append_fmt("`%.*s`.`%.*s` FOR EACH ROW BEGIN ",
+                     db_name.length(), db_name.ptr(),
+                     table_name.length(), table_name.ptr()))) {
+        } else if (OB_FAIL(sql.append_fmt("SET NEW.`%.*s` = NULL; ",
+                     ai_col_name.length(), ai_col_name.ptr()))) {
+        } else if (OB_FAIL(sql.append(
+                     "INSERT INTO `oceanbase`.`__all_ai_column_task`"
+                     "(table_id,column_id,rowkey_predicate,state,retry_count,eligible_ts,request_id) "
+                     "VALUES "))) {
+        } else if (OB_FAIL(sql.append_fmt(
+                     "(%lu,%ld,CONCAT('`%.*s` = ',NEW.`%.*s`),0,0,UNIX_TIMESTAMP(),"
+                     "CONCAT(connection_id(), '-', FLOOR(UNIX_TIMESTAMP(NOW(6)) * 10), '-', NEW.`%.*s`)); ",
+                     table_id, ai_col_id,
+                     pk_name.length(), pk_name.ptr(),
+                     pk_name.length(), pk_name.ptr(),
+                     pk_name.length(), pk_name.ptr()))) {
+        } else if (OB_FAIL(sql.append("END"))) {
         }
       } else if (1 == t) {
-        if (OB_FAIL(sql.append_fmt(
-              "BEFORE UPDATE ON `%.*s`.`%.*s` FOR EACH ROW "
-              "BEGIN "
-              "IF NOT (NEW.`%.*s` <=> OLD.`%.*s`) THEN "
-              "SET NEW.`%.*s` = NULL; "
-              "END IF; "
-              "IF NOT (NEW.`%.*s` <=> OLD.`%.*s`) OR NOT (NEW.`%.*s` <=> OLD.`%.*s`) THEN "
-              "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
-              "AND rowkey_predicate=CONCAT('`%.*s` = ',OLD.`%.*s`); "
-              "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
-              "AND rowkey_predicate=CONCAT('`%.*s` = ',NEW.`%.*s`); "
-              "INSERT INTO `oceanbase`.`__all_ai_column_task`"
-              "(table_id,column_id,rowkey_predicate,state,retry_count,eligible_ts) "
-              "VALUES (%lu,%ld,CONCAT('`%.*s` = ',NEW.`%.*s`),0,0,UNIX_TIMESTAMP()); "
-              "END IF; "
-              "END",
-              db_name.length(), db_name.ptr(), table_name.length(), table_name.ptr(),
-              pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr(),
-              ai_col_name.length(), ai_col_name.ptr(),
-              pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr(),
-              ai_col_name.length(), ai_col_name.ptr(), ai_col_name.length(), ai_col_name.ptr(),
-              table_id, ai_col_id, pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr(),
-              table_id, ai_col_id, pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr(),
-              table_id, ai_col_id, pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        if (OB_FAIL(sql.append("BEFORE UPDATE ON "))) {
+        } else if (OB_FAIL(sql.append_fmt("`%.*s`.`%.*s` FOR EACH ROW BEGIN ",
+                     db_name.length(), db_name.ptr(),
+                     table_name.length(), table_name.ptr()))) {
+        } else if (OB_FAIL(sql.append_fmt(
+                     "IF NOT (NEW.`%.*s` <=> OLD.`%.*s`)",
+                     pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        } else if (OB_FAIL(sql.append(dep_cond.string()))) {
+        } else if (OB_FAIL(sql.append(" THEN "))) {
+        } else if (OB_FAIL(sql.append_fmt("SET NEW.`%.*s` = NULL; ",
+                     ai_col_name.length(), ai_col_name.ptr()))) {
+        } else if (OB_FAIL(sql.append_fmt(
+                     "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
+                     "AND rowkey_predicate=CONCAT('`%.*s` = ',OLD.`%.*s`); ",
+                     table_id, ai_col_id,
+                     pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        } else if (OB_FAIL(sql.append_fmt(
+                     "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
+                     "AND rowkey_predicate=CONCAT('`%.*s` = ',NEW.`%.*s`); ",
+                     table_id, ai_col_id,
+                     pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        } else if (OB_FAIL(sql.append(
+                     "INSERT INTO `oceanbase`.`__all_ai_column_task`"
+                     "(table_id,column_id,rowkey_predicate,state,retry_count,eligible_ts,request_id) "
+                     "VALUES "))) {
+        } else if (OB_FAIL(sql.append_fmt(
+                     "(%lu,%ld,CONCAT('`%.*s` = ',NEW.`%.*s`),0,0,UNIX_TIMESTAMP(),"
+                     "CONCAT(connection_id(), '-', FLOOR(UNIX_TIMESTAMP(NOW(6)) * 10), '-', NEW.`%.*s`)); ",
+                     table_id, ai_col_id,
+                     pk_name.length(), pk_name.ptr(),
+                     pk_name.length(), pk_name.ptr(),
+                     pk_name.length(), pk_name.ptr()))) {
+        } else if (OB_FAIL(sql.append("END IF; END"))) {
         }
       } else {
-        if (OB_FAIL(sql.append_fmt(
-              "AFTER DELETE ON `%.*s`.`%.*s` FOR EACH ROW "
-              "BEGIN "
-              "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
-              "AND rowkey_predicate=CONCAT('`%.*s` = ',OLD.`%.*s`); "
-              "END",
-              db_name.length(), db_name.ptr(), table_name.length(), table_name.ptr(),
-              table_id, ai_col_id,
-              pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        if (OB_FAIL(sql.append("AFTER DELETE ON "))) {
+        } else if (OB_FAIL(sql.append_fmt("`%.*s`.`%.*s` FOR EACH ROW BEGIN ",
+                     db_name.length(), db_name.ptr(),
+                     table_name.length(), table_name.ptr()))) {
+        } else if (OB_FAIL(sql.append_fmt(
+                     "DELETE FROM `oceanbase`.`__all_ai_column_task` WHERE table_id=%lu AND column_id=%ld "
+                     "AND rowkey_predicate=CONCAT('`%.*s` = ',OLD.`%.*s`); ",
+                     table_id, ai_col_id,
+                     pk_name.length(), pk_name.ptr(), pk_name.length(), pk_name.ptr()))) {
+        } else if (OB_FAIL(sql.append("END"))) {
         }
       }
       if (OB_SUCC(ret)) {

@@ -329,19 +329,27 @@ static void escape_sql_string(const ObString &in, ObSqlString &out)
   }
 }
 
-// 执行一条“取单个字符串结果”的 SQL
-static int query_one_value(const char *sql, ObString &value, ObArenaAllocator &allocator)
+// 执行一条 DML/会话语句
+static int exec_sql(ObSingleConnectionProxy &conn, const char *sql)
 {
   int ret = OB_SUCCESS;
-  ObSingleConnectionProxy conn_proxy;
-  if (OB_ISNULL(GCTX.sql_proxy_)) {
-    ret = OB_ERR_UNEXPECTED;
-  } else if (OB_FAIL(conn_proxy.connect(0, GCTX.sql_proxy_))) {
-  } else {
+  int64_t affected_rows = 0;
+  if (OB_FAIL(conn.write(sql, affected_rows))) {
+  }
+  return ret;
+}
+
+// 执行一条“取单个字符串结果”的 SQL
+static int query_one_value(ObSingleConnectionProxy &conn,
+                           const char *sql,
+                           ObString &value,
+                           ObArenaAllocator &allocator)
+{
+  int ret = OB_SUCCESS;
   SMART_VAR(common::ObMySQLProxy::MySQLResult, res) {
     common::sqlclient::ObMySQLResult *result = nullptr;
     ObString whole;
-    if (OB_FAIL(conn_proxy.read(res, sql, 0))) {
+    if (OB_FAIL(conn.read(res, sql, 0))) {
     } else if (OB_ISNULL(result = res.get_result())) {
       ret = OB_ERR_UNEXPECTED;
     } else if (OB_FAIL(result->next())) {
@@ -353,100 +361,192 @@ static int query_one_value(const char *sql, ObString &value, ObArenaAllocator &a
     } else if (OB_FAIL(ob_write_string(allocator, whole, value))) {
     }
   }
-  }
   return ret;
 }
 
-static int exec_dml(const char *sql)
+static void escape_sql_string(const ObString &in, ObSqlString &out);
+
+const char *AI_JSON_SYSTEM_PROMPT = "Return exactly one valid JSON value.";
+const char *AI_INT_SYSTEM_PROMPT = "Return a base-10 integer.";
+
+struct AiColumnTask
 {
-  int ret = OB_SUCCESS;
-  int64_t affected_rows = 0;
-  ObSingleConnectionProxy conn_proxy;
-  if (OB_ISNULL(GCTX.sql_proxy_)) {
-    ret = OB_ERR_UNEXPECTED;
-  } else if (OB_FAIL(conn_proxy.connect(0, GCTX.sql_proxy_))) {
-  } else if (OB_FAIL(conn_proxy.write(sql, affected_rows))) {
+  uint64_t table_id_;
+  uint64_t column_id_;
+  int64_t retry_count_;
+  int64_t max_retries_;
+  int64_t data_type_;
+  ObString db_name_;
+  ObString table_name_;
+  ObString column_name_;
+  ObString predicate_;
+  ObString expr_;
+  ObString request_id_;
+};
+
+static const char *system_prompt_for_type(int64_t data_type)
+{
+  const char *prompt = "";
+  if (ObJsonType == data_type) {
+    prompt = AI_JSON_SYSTEM_PROMPT;
+  } else if (ObIntType == data_type || ObUInt64Type == data_type) {
+    prompt = AI_INT_SYSTEM_PROMPT;
   }
-  return ret;
+  return prompt;
 }
 
-static void process_one_task(ObArenaAllocator &allocator,
-                             const ObString &db_name,
-                             const ObString &table_name,
-                             const ObString &column_name,
-                             const ObString &predicate,
-                             const ObString &expr,
-                             int64_t retry_count,
-                             int64_t max_retries)
+// 处理同一 request_id 下的一批任务，成功后在同一事务里发布全部结果
+static int query_one_int(ObSingleConnectionProxy &conn, const char *sql, int64_t &value)
 {
   int ret = OB_SUCCESS;
-  ObSqlString sql;
-  ObString result;
-  // 去掉 JSON 列的提示词后缀，按原始表达式求值
-  ObString raw_expr = expr;
-  static const char *SUFFIX = " Return exactly one valid JSON value.";
-  const int64_t slen = static_cast<int64_t>(STRLEN(SUFFIX));
-  if (raw_expr.length() > slen &&
-      0 == MEMCMP(raw_expr.ptr() + raw_expr.length() - slen, SUFFIX, slen)) {
-    raw_expr.assign_ptr(raw_expr.ptr(), static_cast<int32_t>(raw_expr.length() - slen));
-  }
-  ai_worker_log("task begin db=%s tbl=%s col=%s pred=%s retry=%ld",
-                std::string(db_name.ptr(), db_name.length()).c_str(),
-                std::string(table_name.ptr(), table_name.length()).c_str(),
-                std::string(column_name.ptr(), column_name.length()).c_str(),
-                std::string(predicate.ptr(), predicate.length()).c_str(), retry_count);
-  if (OB_FAIL(sql.assign_fmt("SELECT %.*s AS v FROM `%.*s`.`%.*s` WHERE %.*s",
-                             raw_expr.length(), raw_expr.ptr(),
-                             db_name.length(), db_name.ptr(),
-                             table_name.length(), table_name.ptr(),
-                             predicate.length(), predicate.ptr()))) {
-  } else if (OB_FAIL(query_one_value(sql.ptr(), result, allocator))) {
-    ai_worker_log("select failed ret=%d sql=%s", ret, sql.ptr());
-  } else if (result.empty()) {
-    ai_worker_log("select empty sql=%s", sql.ptr());
-    ret = OB_ERR_UNEXPECTED;
-  } else {
-    ObSqlString update;
-    ObSqlString value;
-    escape_sql_string(result, value);
-    if (OB_FAIL(update.assign_fmt("UPDATE `%.*s`.`%.*s` SET `%.*s` = '%.*s' WHERE %.*s",
-                                  db_name.length(), db_name.ptr(),
-                                  table_name.length(), table_name.ptr(),
-                                  column_name.length(), column_name.ptr(),
-                                  value.length(), value.ptr(),
-                                  predicate.length(), predicate.ptr()))) {
-    } else if (OB_FAIL(exec_dml(update.ptr()))) {
-      ai_worker_log("update failed ret=%d sql=%s", ret, update.ptr());
-    } else {
+  SMART_VAR(common::ObMySQLProxy::MySQLResult, res) {
+    common::sqlclient::ObMySQLResult *result = nullptr;
+    if (OB_FAIL(conn.read(res, sql, 0))) {
+    } else if (OB_ISNULL(result = res.get_result())) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(result->next())) {
+    } else if (OB_FAIL(result->get_int("v", value))) {
     }
   }
-  // 清理/重试
-  ObSqlString clean;
-  if (OB_SUCC(ret)) {
-    clean.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task WHERE rowkey_predicate = '%.*s' "
-                     "AND column_id = (SELECT column_id FROM oceanbase.__all_column WHERE table_id = "
-                     "(SELECT table_id FROM oceanbase.__all_table WHERE table_name = '%.*s') AND column_name = '%.*s')",
-                     predicate.length(), predicate.ptr(),
-                     table_name.length(), table_name.ptr(),
-                     column_name.length(), column_name.ptr());
-  } else if (retry_count + 1 > max_retries) {
-    clean.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task WHERE rowkey_predicate = '%.*s' AND column_id = "
-                     "(SELECT column_id FROM oceanbase.__all_column WHERE table_id = "
-                     "(SELECT table_id FROM oceanbase.__all_table WHERE table_name = '%.*s') AND column_name = '%.*s')",
-                     predicate.length(), predicate.ptr(),
-                     table_name.length(), table_name.ptr(),
-                     column_name.length(), column_name.ptr());
-  } else {
-    clean.assign_fmt("UPDATE oceanbase.__all_ai_column_task SET retry_count = retry_count + 1, "
-                     "eligible_ts = unix_timestamp() + 1 WHERE rowkey_predicate = '%.*s' AND column_id = "
-                     "(SELECT column_id FROM oceanbase.__all_column WHERE table_id = "
-                     "(SELECT table_id FROM oceanbase.__all_table WHERE table_name = '%.*s') AND column_name = '%.*s')",
-                     predicate.length(), predicate.ptr(),
-                     table_name.length(), table_name.ptr(),
-                     column_name.length(), column_name.ptr());
+  return ret;
+}
+
+static void process_task_group(ObArenaAllocator &allocator,
+                               AiColumnTask *tasks,
+                               const int64_t count)
+{
+  int ret = OB_SUCCESS;
+  bool ok[64];
+  ObString results[64];
+  MEMSET(ok, 0, sizeof(ok));
+  ObSingleConnectionProxy conn;
+  if (OB_ISNULL(GCTX.sql_proxy_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(conn.connect(0, GCTX.sql_proxy_))) {
   }
-  if (clean.length() > 0) {
-    int tmp_ret = exec_dml(clean.ptr());
+
+  // 1. 逐列求值
+  for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
+    AiColumnTask &task = tasks[i];
+    ObSqlString set_prompt;
+    const char *prompt = system_prompt_for_type(task.data_type_);
+    if (OB_FAIL(set_prompt.assign_fmt("SET SESSION ai_complete_system_prompt='%s'", prompt))) {
+    } else if (OB_FAIL(exec_sql(conn, set_prompt.ptr()))) {
+      ai_worker_log("set prompt failed ret=%d", ret);
+    } else {
+      ObSqlString sql;
+      ObString value;
+      ObString raw_expr = task.expr_;
+      static const char *JSON_SUFFIX = " Return exactly one valid JSON value.";
+      const int64_t suffix_len = static_cast<int64_t>(STRLEN(JSON_SUFFIX));
+      if (raw_expr.length() > suffix_len &&
+          0 == MEMCMP(raw_expr.ptr() + raw_expr.length() - suffix_len, JSON_SUFFIX, suffix_len)) {
+        raw_expr.assign_ptr(raw_expr.ptr(), static_cast<int32_t>(raw_expr.length() - suffix_len));
+      }
+      if (OB_FAIL(sql.assign_fmt("SELECT %.*s AS v FROM `%.*s`.`%.*s` WHERE %.*s",
+                                 raw_expr.length(), raw_expr.ptr(),
+                                 task.db_name_.length(), task.db_name_.ptr(),
+                                 task.table_name_.length(), task.table_name_.ptr(),
+                                 task.predicate_.length(), task.predicate_.ptr()))) {
+      } else if (OB_FAIL(query_one_value(conn, sql.ptr(), value, allocator))) {
+        ai_worker_log("select failed ret=%d sql=%s", ret, sql.ptr());
+      } else if (value.empty()) {
+        ai_worker_log("select empty sql=%s", sql.ptr());
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        results[i] = value;
+        ok[i] = true;
+      }
+    }
+    if (OB_SUCC(ret)) {
+      ret = OB_SUCCESS;
+    } else {
+      ai_worker_log("task failed tbl=%.*s col=%.*s ret=%d",
+                    task.table_name_.length(), task.table_name_.ptr(),
+                    task.column_name_.length(), task.column_name_.ptr(), ret);
+      ret = OB_SUCCESS;
+    }
+  }
+  (void)exec_sql(conn, "SET SESSION ai_complete_system_prompt=''");
+  // 失败的 SELECT 可能让连接停在错误事务里，先回滚再开始发布事务
+  (void)exec_sql(conn, "ROLLBACK");
+
+  // 2. 同一事务内发布成功结果 / 更新失败状态
+  ObSingleConnectionProxy tx_conn;
+  if (OB_FAIL(tx_conn.connect(0, GCTX.sql_proxy_))) {
+    ai_worker_log("tx connect failed ret=%d", ret);
+  } else if (OB_FAIL(exec_sql(tx_conn, "BEGIN"))) {
+    ai_worker_log("begin failed ret=%d", ret);
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
+      AiColumnTask &task = tasks[i];
+      ObSqlString sql;
+      ObSqlString escaped_req;
+      ObSqlString escaped_pred;
+      escape_sql_string(task.request_id_, escaped_req);
+      escape_sql_string(task.predicate_, escaped_pred);
+      ai_worker_log("publish task tbl=%.*s col=%.*s ok=%d retry=%ld max=%ld req=%.*s",
+                    task.table_name_.length(), task.table_name_.ptr(),
+                    task.column_name_.length(), task.column_name_.ptr(),
+                    static_cast<int>(ok[i]), task.retry_count_, task.max_retries_,
+                    escaped_req.length(), escaped_req.ptr());
+      if (ok[i]) {
+        ObSqlString value;
+        ObSqlString check;
+        int64_t live_tasks = 0;
+        escape_sql_string(results[i], value);
+        if (OB_FAIL(check.assign_fmt(
+              "SELECT COUNT(*) AS v FROM oceanbase.__all_ai_column_task "
+              "WHERE table_id=%lu AND column_id=%lu AND rowkey_predicate='%.*s' AND request_id='%.*s'",
+              task.table_id_, task.column_id_,
+              escaped_pred.length(), escaped_pred.ptr(),
+              escaped_req.length(), escaped_req.ptr()))) {
+        } else if (OB_FAIL(query_one_int(conn, check.ptr(), live_tasks))) {
+        } else if (live_tasks <= 0) {
+          ai_worker_log("stale task skipped tbl=%.*s col=%.*s",
+                        task.table_name_.length(), task.table_name_.ptr(),
+                        task.column_name_.length(), task.column_name_.ptr());
+        } else if (OB_FAIL(sql.assign_fmt(
+                     "UPDATE `%.*s`.`%.*s` SET `%.*s` = '%.*s' WHERE %.*s",
+                     task.db_name_.length(), task.db_name_.ptr(),
+                     task.table_name_.length(), task.table_name_.ptr(),
+                     task.column_name_.length(), task.column_name_.ptr(),
+                     value.length(), value.ptr(),
+                     task.predicate_.length(), task.predicate_.ptr()))) {
+        } else if (OB_FAIL(exec_sql(conn, sql.ptr()))) {
+          ai_worker_log("publish failed ret=%d sql=%s", ret, sql.ptr());
+        } else if (OB_FAIL(sql.assign_fmt(
+                     "DELETE FROM oceanbase.__all_ai_column_task WHERE table_id=%lu AND column_id=%lu "
+                     "AND request_id='%.*s'",
+                     task.table_id_, task.column_id_,
+                     escaped_req.length(), escaped_req.ptr()))) {
+        } else if (OB_FAIL(exec_sql(conn, sql.ptr()))) {
+        }
+      } else if (task.retry_count_ + 1 > task.max_retries_) {
+        if (OB_FAIL(sql.assign_fmt(
+                     "DELETE FROM oceanbase.__all_ai_column_task WHERE table_id=%lu AND column_id=%lu "
+                     "AND request_id='%.*s'",
+                     task.table_id_, task.column_id_,
+                     escaped_req.length(), escaped_req.ptr()))) {
+        } else if (OB_FAIL(exec_sql(tx_conn, sql.ptr()))) {
+        }
+      } else {
+        if (OB_FAIL(sql.assign_fmt(
+              "UPDATE oceanbase.__all_ai_column_task SET state=3, retry_count=retry_count+1, "
+              "eligible_ts=unix_timestamp()+2 WHERE table_id=%lu AND column_id=%lu AND request_id='%.*s'",
+              task.table_id_, task.column_id_,
+              escaped_req.length(), escaped_req.ptr()))) {
+        } else if (OB_FAIL(exec_sql(tx_conn, sql.ptr()))) {
+        }
+      }
+    }
+    if (OB_SUCC(ret)) {
+      if (OB_FAIL(exec_sql(tx_conn, "COMMIT"))) {
+        ai_worker_log("commit failed ret=%d", ret);
+      }
+    } else {
+      (void)exec_sql(tx_conn, "ROLLBACK");
+    }
   }
 }
 
@@ -454,32 +554,35 @@ static void process_ai_column_tasks()
 {
   int ret = OB_SUCCESS;
   ObArenaAllocator allocator("AiColWorker");
+  AiColumnTask tasks[64];
+  int64_t task_count = 0;
   const char *task_sql =
-      "SELECT d.database_name, t.table_name, c.column_name, a.rowkey_predicate, m.normalized_expr, "
-      "a.retry_count "
+      "SELECT a.table_id, a.column_id, d.database_name, t.table_name, c.column_name, "
+      "a.rowkey_predicate, m.normalized_expr, a.retry_count, m.max_retries, "
+      "a.request_id, c.data_type "
       "FROM oceanbase.__all_ai_column_task a "
       "JOIN oceanbase.__all_table t ON t.table_id = a.table_id "
       "JOIN oceanbase.__all_database d ON d.database_id = t.database_id "
       "JOIN oceanbase.__all_column c ON c.table_id = a.table_id AND c.column_id = a.column_id "
       "JOIN oceanbase.__all_ai_column m ON m.table_id = a.table_id AND m.column_id = a.column_id "
-      "WHERE a.state = 0 AND a.eligible_ts <= unix_timestamp() LIMIT 4";
+      "WHERE (a.state = 0 OR a.state = 3) AND a.eligible_ts <= unix_timestamp() "
+      "ORDER BY a.request_id LIMIT 64";
   SMART_VAR(common::ObMySQLProxy::MySQLResult, res) {
     common::sqlclient::ObMySQLResult *result = nullptr;
     if (OB_ISNULL(GCTX.sql_proxy_)) {
-      // do nothing
     } else if (OB_FAIL(GCTX.sql_proxy_->read(res, task_sql, 0))) {
       ai_worker_log("task query failed ret=%d", ret);
     } else if (OB_ISNULL(result = res.get_result())) {
     } else {
-      ai_worker_log("round: reading tasks");
-      while (OB_SUCC(result->next())) {
-        ObString db_name;
-        ObString table_name;
-        ObString column_name;
-        ObString predicate;
-        ObString expr;
-        int64_t retry_count = 0;
-        if (OB_FAIL(result->get_varchar("database_name", db_name))) {
+      while (OB_SUCC(result->next()) && task_count < 64) {
+        AiColumnTask &task = tasks[task_count];
+        ObString db_name, table_name, column_name, predicate, expr, request_id;
+        int64_t table_id = 0, column_id = 0, retry_count = 0, max_retries = 0, data_type = 0;
+        if (OB_FAIL(result->get_int("table_id", table_id))) {
+          break;
+        } else if (OB_FAIL(result->get_int("column_id", column_id))) {
+          break;
+        } else if (OB_FAIL(result->get_varchar("database_name", db_name))) {
           break;
         } else if (OB_FAIL(result->get_varchar("table_name", table_name))) {
           break;
@@ -491,12 +594,55 @@ static void process_ai_column_tasks()
           break;
         } else if (OB_FAIL(result->get_int("retry_count", retry_count))) {
           break;
+        } else if (OB_FAIL(result->get_int("max_retries", max_retries))) {
+          break;
+        } else if (OB_FAIL(result->get_int("data_type", data_type))) {
+          break;
+        } else if (OB_FAIL(result->get_varchar("request_id", request_id))) {
+          break;
+        } else if (OB_FAIL(ob_write_string(allocator, db_name, task.db_name_))) {
+          break;
+        } else if (OB_FAIL(ob_write_string(allocator, table_name, task.table_name_))) {
+          break;
+        } else if (OB_FAIL(ob_write_string(allocator, column_name, task.column_name_))) {
+          break;
+        } else if (OB_FAIL(ob_write_string(allocator, predicate, task.predicate_))) {
+          break;
+        } else if (OB_FAIL(ob_write_string(allocator, expr, task.expr_))) {
+          break;
+        } else if (OB_FAIL(ob_write_string(allocator, request_id, task.request_id_))) {
+          break;
+        } else {
+          task.table_id_ = static_cast<uint64_t>(table_id);
+          task.column_id_ = static_cast<uint64_t>(column_id);
+          task.retry_count_ = retry_count;
+          task.max_retries_ = max_retries;
+          task.data_type_ = data_type;
+          ++task_count;
         }
-        process_one_task(allocator, db_name, table_name, column_name, predicate, expr,
-                         retry_count, 3);
-        allocator.reuse();
       }
     }
+  }
+
+  bool done[64];
+  MEMSET(done, 0, sizeof(done));
+  for (int64_t i = 0; i < task_count; ++i) {
+    if (done[i]) {
+      continue;
+    }
+    AiColumnTask group[64];
+    int64_t group_count = 0;
+    for (int64_t j = i; j < task_count; ++j) {
+      if (done[j]) {
+        continue;
+      }
+      if (0 == tasks[j].request_id_.length() ||
+          0 == tasks[i].request_id_.compare(tasks[j].request_id_)) {
+        group[group_count++] = tasks[j];
+        done[j] = true;
+      }
+    }
+    process_task_group(allocator, group, group_count);
   }
 }
 

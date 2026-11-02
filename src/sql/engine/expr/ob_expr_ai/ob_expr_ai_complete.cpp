@@ -137,6 +137,24 @@ int ObExprAIComplete::eval_ai_complete(const ObExpr &expr,
     }
 
     if (OB_FAIL(ret)) {
+    } else {
+      ObString system_prompt;
+      ObSQLSessionInfo *session = ctx.exec_ctx_.get_my_session();
+      if (OB_NOT_NULL(session)
+          && OB_FAIL(session->get_sys_variable(
+                 share::SYS_VAR_AI_COMPLETE_SYSTEM_PROMPT, system_prompt))) {
+      } else if (!system_prompt.empty()) {
+        ObJsonString *system_json = nullptr;
+        if (OB_ISNULL(config)
+            && OB_FAIL(ObAIFuncJsonUtils::get_json_object(temp_allocator, config))) {
+        } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(
+                       temp_allocator, system_prompt, system_json))) {
+        } else if (OB_FAIL(config->add("__system_prompt", system_json))) {
+        }
+      }
+    }
+
+    if (OB_FAIL(ret)) {
     } else if (model_id.empty() || prompt.empty()) {
       ret = OB_INVALID_ARGUMENT;
       LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, model id or input is empty");

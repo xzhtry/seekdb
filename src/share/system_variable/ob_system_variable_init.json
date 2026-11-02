@@ -2144,7 +2144,7 @@
     "ref_url": ""
   },
   "_nlj_batching_enabled": {
-    "id": 10080,
+    "id": 10760,
     "name": "_nlj_batching_enabled",
     "default_value": "1",
     "base_value": "1",
@@ -10971,6 +10971,46 @@
     "flags": "SESSION",
     "min_val": "0",
     "max_val": "100",
+    "publish_version": "1.0.0.0",
+    "info_cn": "",
+    "background_cn": "",
+    "ref_url": ""
+  }
+,
+  "ai_column_strict_read": {
+    "id": 10078,
+    "name": "ai_column_strict_read",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
+    "info": "When enabled, reading an AI column that still has unfinished rows raises an error.",
+    "flags": "GLOBAL | SESSION",
+    "publish_version": "1.0.0.0",
+    "info_cn": "",
+    "background_cn": "",
+    "ref_url": ""
+  },
+  "ai_column_internal_write": {
+    "id": 10079,
+    "name": "ai_column_internal_write",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
+    "info": "Internal flag used by the AI column worker to suppress maintenance triggers.",
+    "flags": "SESSION | INVISIBLE",
+    "publish_version": "1.0.0.0",
+    "info_cn": "",
+    "background_cn": "",
+    "ref_url": ""
+  },
+  "ai_complete_system_prompt": {
+    "id": 10761,
+    "name": "ai_complete_system_prompt",
+    "default_value": "",
+    "base_value": "",
+    "data_type": "varchar",
+    "info": "Optional system prompt injected into AI_COMPLETE requests on this session.",
+    "flags": "SESSION | INVISIBLE",
     "publish_version": "1.0.0.0",
     "info_cn": "",
     "background_cn": "",

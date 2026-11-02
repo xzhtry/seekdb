@@ -1881,6 +1881,7 @@ DEFINE_ERROR_EXT(OB_EXCEED_QUERY_MEM_LIMIT, -11049, -1, "HY000", "Exceed query m
 DEFINE_ERROR_EXT(OB_ERR_INCORRECT_STRING_VALUE_FOR_INET, -11062, ER_WRONG_VALUE_FOR_TYPE, "HY000", "Incorrect string value for function inet", "Incorrect string value for function %s")
 DEFINE_ERROR(OB_SKIP_PARSE_HEADER_CONFLICT, -11081, -1, "HY000", "skip_header and parse_header cannot be used at the same time");
 DEFINE_ERROR_EXT(OB_REACH_DIAGNOSIS_ERROR_LIMIT, -11088, -1, "HY000", "reject limit reached", "reject limit %ld reached");
+DEFINE_ERROR_EXT(OB_ERR_AI_COLUMN_NOT_READY, -11120, -1, "HY000", "AI column has unfinished tasks", "AI column has unfinished tasks for table_id=%ld, column_id=%ld");
 DEFINE_ERROR_EXT(OB_AI_FUNC_ENDPOINT_NOT_FOUND, -11112, -1, "HY000", "This AI model endpoint is not found", "This AI model endpoint \'%.*s\' was not found");
 DEFINE_ERROR_EXT(OB_AI_FUNC_ENDPOINT_EXISTS, -11113, -1, "HY000", "This ai model endpoint is already exists", "This ai model endpoint \'%.*s\' is already exists");
 DEFINE_ERROR_EXT(OB_AI_FUNC_PARAM_EMPTY, -11114, -1, "HY000", "The param is empty or null", "The param \'%.*s\' is empty or null");

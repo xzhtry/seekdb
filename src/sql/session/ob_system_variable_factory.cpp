@@ -475,6 +475,7 @@ int ObSysVarFactory::try_init_store_mem()
     void *store_ptr = NULL;
     if (OB_ISNULL(store_ptr = allocator_.alloc(sizeof(ObBasicSysVar *) * share::ObSysVarMeta::ALL_SYS_VARS_COUNT))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
+      LOG_WARN("fail to alloc store_.", K(ret));
     } else {
       store_ = static_cast<ObBasicSysVar **>(store_ptr);
       MEMSET(store_, 0, sizeof(ObBasicSysVar *) * share::ObSysVarMeta::ALL_SYS_VARS_COUNT);
@@ -484,6 +485,7 @@ int ObSysVarFactory::try_init_store_mem()
     void *store_buf_ptr = NULL;
     if (OB_ISNULL(store_buf_ptr = allocator_.alloc(sizeof(ObBasicSysVar *) * share::ObSysVarMeta::ALL_SYS_VARS_COUNT))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
+      LOG_WARN("fail to alloc store_buf_.", K(ret));
     } else {
       store_buf_ = static_cast<ObBasicSysVar **>(store_buf_ptr);
       MEMSET(store_buf_, 0, sizeof(ObBasicSysVar *) * share::ObSysVarMeta::ALL_SYS_VARS_COUNT);
@@ -550,6 +552,7 @@ int ObSysVarFactory::create_all_sys_vars_()
 {
   int ret = OB_SUCCESS;
   if (OB_FAIL(try_init_store_mem())) {
+    LOG_WARN("Fail to init", K(ret));
   } else if (!all_sys_vars_created_) {
     int64_t store_idx = -1;
     ObBasicSysVar *sys_var_ptr = NULL;
@@ -676,7 +679,8 @@ int ObSysVarFactory::create_all_sys_vars_()
         + sizeof(ObSysVarParallelServersTarget)
         + sizeof(ObSysVarObTrxIdleTimeout)
         + sizeof(ObSysVarBlockEncryptionMode)
-        + sizeof(ObSysVarNljBatchingEnabled)
+        + sizeof(ObSysVarAiColumnStrictRead)
+        + sizeof(ObSysVarAiColumnInternalWrite)
         + sizeof(ObSysVarTransactionIsolation)
         + sizeof(ObSysVarObTrxLockTimeout)
         + sizeof(ObSysVarValidatePasswordCheckUserName)
@@ -1273,6 +1277,8 @@ int ObSysVarFactory::create_all_sys_vars_()
         + sizeof(ObSysVarObHnswExtraInfoMaxSize)
         + sizeof(ObSysVarPushJoinPredicate)
         + sizeof(ObSysVarObSparseDropRatioSearch)
+        + sizeof(ObSysVarNljBatchingEnabled)
+        + sizeof(ObSysVarAiCompleteSystemPrompt)
         ;
     void *ptr = NULL;
     if (OB_ISNULL(ptr = allocator_.alloc(total_mem_size))) {
@@ -2380,12 +2386,21 @@ int ObSysVarFactory::create_all_sys_vars_()
       }
     }
     if (OB_SUCC(ret)) {
-      if (OB_ISNULL(sys_var_ptr = new (ptr)ObSysVarNljBatchingEnabled())) {
+      if (OB_ISNULL(sys_var_ptr = new (ptr)ObSysVarAiColumnStrictRead())) {
         ret = OB_ALLOCATE_MEMORY_FAILED;
-        LOG_ERROR("fail to new ObSysVarNljBatchingEnabled", K(ret));
+        LOG_ERROR("fail to new ObSysVarAiColumnStrictRead", K(ret));
       } else {
-        store_buf_[share::ObSysVarsToIdxMap::get_store_idx(static_cast<int64_t>(share::SYS_VAR__NLJ_BATCHING_ENABLED))] = sys_var_ptr;
-        ptr = (void *)((char *)ptr + sizeof(ObSysVarNljBatchingEnabled));
+        store_buf_[share::ObSysVarsToIdxMap::get_store_idx(static_cast<int64_t>(share::SYS_VAR_AI_COLUMN_STRICT_READ))] = sys_var_ptr;
+        ptr = (void *)((char *)ptr + sizeof(ObSysVarAiColumnStrictRead));
+      }
+    }
+    if (OB_SUCC(ret)) {
+      if (OB_ISNULL(sys_var_ptr = new (ptr)ObSysVarAiColumnInternalWrite())) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+        LOG_ERROR("fail to new ObSysVarAiColumnInternalWrite", K(ret));
+      } else {
+        store_buf_[share::ObSysVarsToIdxMap::get_store_idx(static_cast<int64_t>(share::SYS_VAR_AI_COLUMN_INTERNAL_WRITE))] = sys_var_ptr;
+        ptr = (void *)((char *)ptr + sizeof(ObSysVarAiColumnInternalWrite));
       }
     }
     if (OB_SUCC(ret)) {
@@ -7752,6 +7767,24 @@ int ObSysVarFactory::create_all_sys_vars_()
         ptr = (void *)((char *)ptr + sizeof(ObSysVarObSparseDropRatioSearch));
       }
     }
+    if (OB_SUCC(ret)) {
+      if (OB_ISNULL(sys_var_ptr = new (ptr)ObSysVarNljBatchingEnabled())) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+        LOG_ERROR("fail to new ObSysVarNljBatchingEnabled", K(ret));
+      } else {
+        store_buf_[share::ObSysVarsToIdxMap::get_store_idx(static_cast<int64_t>(share::SYS_VAR__NLJ_BATCHING_ENABLED))] = sys_var_ptr;
+        ptr = (void *)((char *)ptr + sizeof(ObSysVarNljBatchingEnabled));
+      }
+    }
+    if (OB_SUCC(ret)) {
+      if (OB_ISNULL(sys_var_ptr = new (ptr)ObSysVarAiCompleteSystemPrompt())) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+        LOG_ERROR("fail to new ObSysVarAiCompleteSystemPrompt", K(ret));
+      } else {
+        store_buf_[share::ObSysVarsToIdxMap::get_store_idx(static_cast<int64_t>(share::SYS_VAR_AI_COMPLETE_SYSTEM_PROMPT))] = sys_var_ptr;
+        ptr = (void *)((char *)ptr + sizeof(ObSysVarAiCompleteSystemPrompt));
+      }
+    }
 
   }
   return ret;
@@ -8265,8 +8298,12 @@ int ObSysVarFactory::create_sys_var(ObIAllocator &allocator_, share::ObSysVarCla
       ret = create_one_sys_var<ObSysVarBlockEncryptionMode>(allocator_, sys_var_ptr, "ObSysVarBlockEncryptionMode");
       break;
     }
-    case share::SYS_VAR__NLJ_BATCHING_ENABLED: {
-      ret = create_one_sys_var<ObSysVarNljBatchingEnabled>(allocator_, sys_var_ptr, "ObSysVarNljBatchingEnabled");
+    case share::SYS_VAR_AI_COLUMN_STRICT_READ: {
+      ret = create_one_sys_var<ObSysVarAiColumnStrictRead>(allocator_, sys_var_ptr, "ObSysVarAiColumnStrictRead");
+      break;
+    }
+    case share::SYS_VAR_AI_COLUMN_INTERNAL_WRITE: {
+      ret = create_one_sys_var<ObSysVarAiColumnInternalWrite>(allocator_, sys_var_ptr, "ObSysVarAiColumnInternalWrite");
       break;
     }
     case share::SYS_VAR_TRANSACTION_ISOLATION: {
@@ -10653,6 +10690,14 @@ int ObSysVarFactory::create_sys_var(ObIAllocator &allocator_, share::ObSysVarCla
       ret = create_one_sys_var<ObSysVarObSparseDropRatioSearch>(allocator_, sys_var_ptr, "ObSysVarObSparseDropRatioSearch");
       break;
     }
+    case share::SYS_VAR__NLJ_BATCHING_ENABLED: {
+      ret = create_one_sys_var<ObSysVarNljBatchingEnabled>(allocator_, sys_var_ptr, "ObSysVarNljBatchingEnabled");
+      break;
+    }
+    case share::SYS_VAR_AI_COMPLETE_SYSTEM_PROMPT: {
+      ret = create_one_sys_var<ObSysVarAiCompleteSystemPrompt>(allocator_, sys_var_ptr, "ObSysVarAiCompleteSystemPrompt");
+      break;
+    }
 
     default: {
       ret = OB_ERR_UNEXPECTED;
@@ -10668,11 +10713,15 @@ int ObSysVarFactory::create_sys_var(share::ObSysVarClassType sys_var_id, ObBasic
   int ret = OB_SUCCESS;
   ObBasicSysVar *sys_var_ptr = NULL;
   if (OB_FAIL(try_init_store_mem())) {
+    LOG_WARN("fail to init", K(ret));
   } else if (-1 == store_idx && OB_FAIL(share::ObSysVarMeta::calc_sys_var_store_idx(sys_var_id, store_idx))) {
+    LOG_WARN("fail to calc sys var store idx", K(ret), K(sys_var_id));
   } else if (store_idx < 0 || store_idx >= share::ObSysVarMeta::ALL_SYS_VARS_COUNT) {
     ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("unexpected store idx", K(ret), K(store_idx), K(sys_var_id));
   } else if (OB_NOT_NULL(store_[store_idx])) {
     ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("store ptr shoule be null", K(ret), K(store_idx), K(sys_var_id));
   } else {
     if (OB_NOT_NULL(store_buf_[store_idx])) {
       sys_var_ptr = store_buf_[store_idx];
@@ -10681,6 +10730,7 @@ int ObSysVarFactory::create_sys_var(share::ObSysVarClassType sys_var_id, ObBasic
   }
   if (OB_SUCC(ret) && OB_ISNULL(sys_var_ptr)) {
     if (OB_FAIL(create_sys_var(allocator_, sys_var_id, sys_var_ptr))) {
+      LOG_WARN("fail to calc sys var", K(ret), K(sys_var_id));
     }
   }
   if (OB_SUCC(ret)) {
@@ -10689,6 +10739,7 @@ int ObSysVarFactory::create_sys_var(share::ObSysVarClassType sys_var_id, ObBasic
       LOG_ERROR("ret is OB_SUCCESS, but sys_var_ptr is NULL", K(ret), K(sys_var_id));
     } else if (OB_NOT_NULL(store_[store_idx])) {
       ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("store_[store_idx] should be NULL", K(ret), K(sys_var_id));
     } else {
       store_[store_idx] = sys_var_ptr;
       sys_var = sys_var_ptr;

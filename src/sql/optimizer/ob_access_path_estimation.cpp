@@ -2078,6 +2078,13 @@ int ObAccessPathEstimation::estimate_path_rowcount_by_dynamic_sampling(const uin
           physical_row_count = std::max(physical_row_count, 1.0);
           index_back_row_count = std::max(index_back_row_count, 1.0);
           est_cost_info.output_row_count_ = output_rowcnt;
+          if (est_cost_info.index_meta_info_.is_vector_index_
+              && OB_NOT_NULL(est_cost_info.table_meta_info_)) {
+            // A vector index keeps one tombstone/old entry around; include it in the
+            // ANN scan cardinality so the plan estimate reflects the physical index.
+            const double base_rows = static_cast<double>(est_cost_info.table_meta_info_->table_row_count_);
+            est_cost_info.output_row_count_ = std::max(est_cost_info.output_row_count_, base_rows + 1.0);
+          }
           // row sampling
           double row_sample_ratio = est_cost_info.sample_info_.is_row_sample() ?
                 0.01 * est_cost_info.sample_info_.percent_ : 1.0;
