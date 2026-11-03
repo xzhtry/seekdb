@@ -4410,6 +4410,14 @@ int ObJsonTableDef::deep_copy(const ObJsonTableDef& src, ObIRawExprCopier &expr_
 {
   int ret = OB_SUCCESS;
   table_type_ = src.table_type_;
+  file_format_ = src.file_format_;
+  csv_header_ = src.csv_header_;
+  csv_sample_size_ = src.csv_sample_size_;
+  csv_delimiter_ = src.csv_delimiter_;
+  if (OB_NOT_NULL(allocator) && !src.file_path_.empty()
+      && OB_FAIL(ob_write_string(*allocator, src.file_path_, file_path_))) {
+    LOG_WARN("failed to copy file path", K(ret));
+  }
   for (size_t i = 0; OB_SUCC(ret) && i < src.doc_exprs_.count(); ++i) {
     if (OB_ISNULL(src.doc_exprs_.at(i))) {
       ret = OB_ERR_UNEXPECTED;

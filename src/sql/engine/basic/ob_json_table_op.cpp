@@ -16,6 +16,8 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_json_table_op.h"
+#include "sql/ob_file_sql_util.h"
+#include "share/system_variable/ob_sys_var_class_type.h"
 #include "sql/engine/expr/ob_expr_multi_mode_func_helper.h"
 #include "sql/engine/expr/ob_expr_json_value.h"
 #include "sql/engine/expr/ob_expr_json_query.h"
@@ -326,12 +328,21 @@ OB_DEF_SERIALIZE(ObJsonTableSpec)
     OB_UNIS_ENCODE(info);
   }
   if (OB_FAIL(ret)) {
-  } else if (table_type_ == MulModeTableType::OB_UNNEST_TABLE_TYPE) {
+  } else if (table_type_ == MulModeTableType::OB_UNNEST_TABLE_TYPE
+             || table_type_ == MulModeTableType::OB_FILE_TABLE_TYPE) {
     OB_UNIS_ENCODE(table_type_);
-    int32_t value_exprs_count = value_exprs_.count() - 1;
-    OB_UNIS_ENCODE(value_exprs_count);
-    for (size_t i = 1; OB_SUCC(ret) && i < value_exprs_.count(); ++i) {
-      OB_UNIS_ENCODE(value_exprs_.at(i));
+    if (OB_FILE_TABLE_TYPE == table_type_) {
+      OB_UNIS_ENCODE(file_path_);
+      OB_UNIS_ENCODE(file_format_);
+      OB_UNIS_ENCODE(csv_header_);
+      OB_UNIS_ENCODE(csv_sample_size_);
+      OB_UNIS_ENCODE(csv_delimiter_);
+    } else {
+      int32_t value_exprs_count = value_exprs_.count() - 1;
+      OB_UNIS_ENCODE(value_exprs_count);
+      for (size_t i = 1; OB_SUCC(ret) && i < value_exprs_.count(); ++i) {
+        OB_UNIS_ENCODE(value_exprs_.at(i));
+      }
     }
   }
   
@@ -354,12 +365,21 @@ OB_DEF_SERIALIZE_SIZE(ObJsonTableSpec)
     const ObJtColInfo& info = *cols_def_.at(i);
     OB_UNIS_ADD_LEN(info);
   }
-  if (table_type_ == MulModeTableType::OB_UNNEST_TABLE_TYPE) {
+  if (table_type_ == MulModeTableType::OB_UNNEST_TABLE_TYPE
+      || table_type_ == MulModeTableType::OB_FILE_TABLE_TYPE) {
     OB_UNIS_ADD_LEN(table_type_);
-    int32_t value_exprs_count = value_exprs_.count() - 1;
-    OB_UNIS_ADD_LEN(value_exprs_count);
-    for (size_t i = 1; i < value_exprs_.count(); ++i) {
-      OB_UNIS_ADD_LEN(value_exprs_.at(i));
+    if (OB_FILE_TABLE_TYPE == table_type_) {
+      OB_UNIS_ADD_LEN(file_path_);
+      OB_UNIS_ADD_LEN(file_format_);
+      OB_UNIS_ADD_LEN(csv_header_);
+      OB_UNIS_ADD_LEN(csv_sample_size_);
+      OB_UNIS_ADD_LEN(csv_delimiter_);
+    } else {
+      int32_t value_exprs_count = value_exprs_.count() - 1;
+      OB_UNIS_ADD_LEN(value_exprs_count);
+      for (size_t i = 1; i < value_exprs_.count(); ++i) {
+        OB_UNIS_ADD_LEN(value_exprs_.at(i));
+      }
     }
   }
   return len;
@@ -395,22 +415,36 @@ OB_DEF_DESERIALIZE(ObJsonTableSpec)
       if (OB_FAIL(cols_def_.push_back(col_info))) {
       } else if (col_info->col_type_ == COL_TYPE_UNNEST) {
         table_type_flag = OB_UNNEST_TABLE;
+      } else if (col_info->col_type_ == COL_TYPE_FILE) {
+        table_type_flag = OB_FILE_TABLE;
       }
     }
   }
 
   if (OB_FAIL(ret)) {
-  } else if (table_type_flag == OB_UNNEST_TABLE) {
+  } else if (table_type_flag == OB_UNNEST_TABLE || table_type_flag == OB_FILE_TABLE) {
     OB_UNIS_DECODE(table_type_);
-    int32_t value_exprs_count = 0;
-    OB_UNIS_DECODE(value_exprs_count);
-    if (OB_FAIL(ret)) {
-    } else if (OB_FAIL(value_exprs_.init(value_exprs_count + 1))) {
-    } else if (OB_FAIL(value_exprs_.push_back(value_expr))) {
-    }
-    for (size_t i = 0; OB_SUCC(ret) && i < value_exprs_count; ++i) {
-      OB_UNIS_DECODE(value_expr);
-      if (OB_SUCC(ret) && OB_FAIL(value_exprs_.push_back(value_expr))) {
+    if (table_type_flag == OB_FILE_TABLE) {
+      OB_UNIS_DECODE(file_path_);
+      OB_UNIS_DECODE(file_format_);
+      OB_UNIS_DECODE(csv_header_);
+      OB_UNIS_DECODE(csv_sample_size_);
+      OB_UNIS_DECODE(csv_delimiter_);
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(value_exprs_.init(1))) {
+      } else if (OB_FAIL(value_exprs_.push_back(value_expr))) {
+      }
+    } else {
+      int32_t value_exprs_count = 0;
+      OB_UNIS_DECODE(value_exprs_count);
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(value_exprs_.init(value_exprs_count + 1))) {
+      } else if (OB_FAIL(value_exprs_.push_back(value_expr))) {
+      }
+      for (size_t i = 0; OB_SUCC(ret) && i < value_exprs_count; ++i) {
+        OB_UNIS_DECODE(value_expr);
+        if (OB_SUCC(ret) && OB_FAIL(value_exprs_.push_back(value_expr))) {
+        }
       }
     }
   } else if (OB_FAIL(value_exprs_.init(1))) {
@@ -581,10 +615,23 @@ int ObJsonTableOp::generate_column_trees(JtColTreeNode*& root)
   return ret;
 }
 
+struct ObJsonTableOp::FileScanState
+{
+  FileScanState() : reader_(), row_alloc_(), columns_(), values_() {}
+  filesql::FileSqlReader reader_;
+  common::ObArenaAllocator row_alloc_;
+  common::ObSEArray<filesql::FileSqlColumn, 8> columns_;
+  common::ObSEArray<filesql::FileSqlValue, 8> values_;
+};
+
 int ObJsonTableOp::inner_open()
 {
   INIT_SUCC(ret);
-  if (OB_FAIL(init())) {
+  const ObJsonTableSpec *spec_ptr = static_cast<const ObJsonTableSpec *>(&spec_);
+  if (OB_NOT_NULL(spec_ptr) && MulModeTableType::OB_FILE_TABLE_TYPE == spec_ptr->table_type_) {
+    if (OB_FAIL(open_file_table())) {
+    }
+  } else if (OB_FAIL(init())) {
   } else if (MY_SPEC.value_exprs_.empty()) {
     ret = OB_ERR_UNEXPECTED;
   } else if (OB_FAIL(root_->open(&jt_ctx_))) {
@@ -595,15 +642,119 @@ int ObJsonTableOp::inner_open()
   return ret;
 }
 
+int ObJsonTableOp::open_file_table()
+{
+  INIT_SUCC(ret);
+  const ObJsonTableSpec *spec_ptr = static_cast<const ObJsonTableSpec *>(&spec_);
+  ObSQLSessionInfo *session = ctx_.get_my_session();
+  bool enable_file_sql = false;
+  void *buf = NULL;
+  if (OB_ISNULL(spec_ptr) || OB_ISNULL(session)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(session->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enable_file_sql))) {
+  } else if (!enable_file_sql) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "file table function, please enable enable_file_sql first");
+  } else if (OB_ISNULL(buf = ctx_.get_allocator().alloc(sizeof(FileScanState)))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    file_state_ = new (buf) FileScanState();
+    for (int64_t i = 0; OB_SUCC(ret) && i < spec_ptr->cols_def_.count(); ++i) {
+      const ObJtColInfo *info = spec_ptr->cols_def_.at(i);
+      filesql::FileSqlColumn col;
+      if (OB_ISNULL(info)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        col.name_ = info->col_name_;
+        col.type_ = info->data_type_.get_obj_type();
+        col.id_ = i;
+        col.max_len_ = info->data_type_.get_length();
+        col.nullable_ = true;
+        if (OB_FAIL(file_state_->columns_.push_back(col))) {
+        }
+      }
+    }
+    if (OB_SUCC(ret)) {
+      filesql::FileSqlCsvOptions csv_options;
+      csv_options.has_header_ = (0 != spec_ptr->csv_header_);
+      csv_options.sample_size_ = spec_ptr->csv_sample_size_;
+      csv_options.delimiter_ = static_cast<char>(spec_ptr->csv_delimiter_);
+      if (OB_FAIL(file_state_->reader_.init(spec_ptr->file_path_, spec_ptr->file_format_,
+                                            csv_options, file_state_->columns_,
+                                            ctx_.get_allocator()))) {
+      }
+    }
+  }
+  return ret;
+}
+
+int ObJsonTableOp::reset_file_table()
+{
+  INIT_SUCC(ret);
+  if (OB_NOT_NULL(file_state_)) {
+    file_state_->~FileScanState();
+    file_state_ = NULL;
+  }
+  if (OB_FAIL(open_file_table())) {
+  }
+  return ret;
+}
+
+int ObJsonTableOp::file_table_get_next_row()
+{
+  int ret = OB_SUCCESS;
+  const ObJsonTableSpec *spec_ptr = static_cast<const ObJsonTableSpec *>(&spec_);
+  if (OB_ISNULL(spec_ptr) || OB_ISNULL(file_state_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    clear_evaluated_flag();
+    file_state_->row_alloc_.reuse();
+    file_state_->values_.reuse();
+    if (OB_FAIL(file_state_->reader_.next_row(file_state_->row_alloc_, file_state_->values_))) {
+    } else {
+      for (int64_t c = 0; OB_SUCC(ret) && c < spec_ptr->cols_def_.count(); ++c) {
+        const ObJtColInfo *info = spec_ptr->cols_def_.at(c);
+        if (OB_ISNULL(info)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (info->output_column_idx_ < 0) {
+          // column not projected
+        } else if (info->output_column_idx_ >= spec_ptr->column_exprs_.count()) {
+          ret = OB_ERR_UNEXPECTED;
+        } else {
+          ObExpr *expr = spec_ptr->column_exprs_.at(info->output_column_idx_);
+          ObDatum &datum = expr->locate_datum_for_write(eval_ctx_);
+          filesql::FileSqlValue empty_value;
+          const filesql::FileSqlValue &value = (c < file_state_->values_.count())
+                                                   ? file_state_->values_.at(c) : empty_value;
+          if (OB_FAIL(filesql::file_sql_value_to_datum(value, expr->datum_meta_.type_,
+                                                       expr->datum_meta_.cs_type_,
+                                                       file_state_->row_alloc_, datum))) {
+          } else {
+            expr->get_eval_info(eval_ctx_).evaluated_ = true;
+          }
+        }
+      }
+    }
+  }
+  return ret;
+}
+
 int ObJsonTableOp::inner_rescan()
 {
   int ret = OB_SUCCESS;
-  if (OB_FAIL(ObOperator::inner_rescan())) {
+  const ObJsonTableSpec *spec_ptr = static_cast<const ObJsonTableSpec *>(&spec_);
+  if (OB_NOT_NULL(spec_ptr) && MulModeTableType::OB_FILE_TABLE_TYPE == spec_ptr->table_type_) {
+    if (OB_FAIL(ObOperator::inner_rescan())) {
+    } else if (OB_FAIL(reset_file_table())) {
+    }
   } else {
-    jt_ctx_.row_alloc_.reuse();
-  }
-  if (OB_FAIL(ret)) {
-  } else if (OB_FAIL(reset_variable())) {
+    if (OB_FAIL(ObOperator::inner_rescan())) {
+    } else {
+      jt_ctx_.row_alloc_.reuse();
+    }
+    if (OB_FAIL(ret)) {
+    } else if (OB_FAIL(reset_variable())) {
+    }
   }
   return ret;
 }
@@ -685,6 +836,10 @@ int ObJsonTableOp::init()
 int ObJsonTableOp::inner_close()
 {
   INIT_SUCC(ret);
+  if (OB_NOT_NULL(file_state_)) {
+    file_state_->~FileScanState();
+    file_state_ = NULL;
+  }
   if (OB_NOT_NULL(root_)) {
     if (OB_FAIL(root_->reset(&jt_ctx_))) {
     }
@@ -1402,7 +1557,10 @@ int ObJsonTableOp::inner_get_next_row()
 {
   INIT_SUCC(ret);
   bool is_root_null = false;
-  if (!(jt_ctx_.is_json_table_func()
+  const ObJsonTableSpec *spec_ptr = static_cast<const ObJsonTableSpec *>(&spec_);
+  if (OB_NOT_NULL(spec_ptr) && MulModeTableType::OB_FILE_TABLE_TYPE == spec_ptr->table_type_) {
+    ret = file_table_get_next_row();
+  } else if (!(jt_ctx_.is_json_table_func()
         || jt_ctx_.is_unnest_table_func())) {
     ret = OB_ERR_UNEXPECTED;
   } else if (is_evaled_) {

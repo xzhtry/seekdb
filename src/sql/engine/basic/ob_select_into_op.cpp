@@ -38,7 +38,7 @@ OB_SERIALIZE_MEMBER(ObSelectIntoOpInput, task_id_, sqc_id_);
 OB_SERIALIZE_MEMBER((ObSelectIntoSpec, ObOpSpec), into_type_, user_vars_, outfile_name_,
     field_str_, line_str_, closed_cht_, is_optional_, select_exprs_, is_single_, max_file_size_,
     escaped_cht_, cs_type_, parallel_, buffer_size_, is_overwrite_,
-    external_properties_);
+    external_properties_, header_str_, is_file_sql_copy_);
 
 
 int ObSelectIntoOp::inner_open()
@@ -182,6 +182,7 @@ int ObSelectIntoOp::calc_outfile_path()
   } else if (OB_FAIL(ob_write_string(ctx_.get_allocator(), path, basic_url_, true))) {
   }
   if (OB_SUCC(ret) && (T_INTO_OUTFILE == into_type || T_INTO_DUMPFILE == into_type)
+      && !MY_SPEC.is_file_sql_copy_
       && OB_FAIL(check_secure_file_path(basic_url_))) {
   }
   return ret;
@@ -199,6 +200,11 @@ int ObSelectIntoOp::inner_get_next_row()
   if (OB_SUCC(ret) && ObExternalFileFormat::FormatType::CSV_FORMAT == format_type_
       && T_INTO_VARIABLES != into_type
       && OB_FAIL(create_the_only_data_writer(data_writer))) {
+  }
+  if (OB_SUCC(ret) && T_INTO_OUTFILE == into_type && !header_written_
+      && !MY_SPEC.header_str_.empty() && OB_NOT_NULL(data_writer)) {
+    if (OB_FAIL(write_csv_header(static_cast<ObCsvFileWriter *>(data_writer)))) {
+    }
   }
   while (OB_SUCC(ret) && row_count < top_limit_cnt_) {
     clear_evaluated_flag();
@@ -253,6 +259,9 @@ int ObSelectIntoOp::inner_get_next_batch(const int64_t max_row_cnt)
     if (OB_FAIL(create_the_only_data_writer(data_writer))) {
     } else if (OB_ISNULL(data_writer)) {
       ret = OB_ERR_UNEXPECTED;
+    } else if (!header_written_ && !MY_SPEC.header_str_.empty() && T_INTO_OUTFILE == into_type) {
+      if (OB_FAIL(write_csv_header(static_cast<ObCsvFileWriter *>(data_writer)))) {
+      }
     }
   }
 
@@ -917,6 +926,24 @@ int ObSelectIntoOp::print_lob_field(const ObObj &obj,
   return ret;
 }
 
+int ObSelectIntoOp::write_csv_header(ObCsvFileWriter *data_writer)
+{
+  int ret = OB_SUCCESS;
+  ObObj header_obj;
+  if (OB_ISNULL(data_writer)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    header_obj.set_varchar(MY_SPEC.header_str_);
+    header_obj.set_collation_type(ObCharset::get_system_collation());
+    if (OB_FAIL(write_obj_to_file(header_obj, *data_writer, false))) {
+    } else if (OB_FAIL(write_obj_to_file(line_str_, *data_writer))) {
+    } else {
+      header_written_ = true;
+    }
+  }
+  return ret;
+}
+
 int ObSelectIntoOp::print_field(const ObObj &obj, ObCsvFileWriter &data_writer)
 {
   int ret = OB_SUCCESS;
@@ -932,8 +959,15 @@ int ObSelectIntoOp::print_field(const ObObj &obj, ObCsvFileWriter &data_writer)
   if (!has_escape_) {
     OZ(write_obj_to_file(obj, data_writer, false));
   } else if (obj.is_null()) {
-    OZ(write_single_char_to_file(&char_escape_, data_writer));
-    OZ(write_single_char_to_file(&char_n, data_writer));
+    if (external_properties_.csv_format_.null_if_.count() > 0) {
+      ObObj null_obj;
+      null_obj.set_varchar(external_properties_.csv_format_.null_if_.at(0));
+      null_obj.set_collation_type(ObCharset::get_system_collation());
+      OZ(write_obj_to_file(null_obj, data_writer, has_escape_));
+    } else {
+      OZ(write_single_char_to_file(&char_escape_, data_writer));
+      OZ(write_single_char_to_file(&char_n, data_writer));
+    }
   } else {
     OZ(write_obj_to_file(obj, data_writer, true));
   }

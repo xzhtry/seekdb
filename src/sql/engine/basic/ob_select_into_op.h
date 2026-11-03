@@ -71,7 +71,9 @@ public:
       parallel_(1),
       buffer_size_(DEFAULT_BUFFER_SIZE),
       is_overwrite_(false),
-      external_properties_(alloc)
+      external_properties_(alloc),
+      header_str_(),
+      is_file_sql_copy_(false)
   {
   }
 
@@ -91,6 +93,8 @@ public:
   int64_t buffer_size_;
   bool is_overwrite_;
   ObExternalFileFormat::StringData external_properties_;
+  common::ObString header_str_;
+  bool is_file_sql_copy_;
   static const int64_t DEFAULT_MAX_FILE_SIZE = 256LL * 1024 * 1024;
   static const int64_t DEFAULT_BUFFER_SIZE = 1LL * 1024 * 1024;
 };
@@ -114,6 +118,7 @@ public:
       has_escape_(true),
       has_lob_(false),
       has_json_(false),
+      header_written_(false),
       has_coll_(false),
       print_params_(),
       escape_printer_(),
@@ -211,6 +216,7 @@ private:
                          ObString &str,
                          ObCollationType coll_type);
   int print_field(const ObObj &obj, ObCsvFileWriter &data_writer);
+  int write_csv_header(ObCsvFileWriter *data_writer);
   int print_lob_field(const ObObj &obj,
                       const ObExpr &expr,
                       const ObDatum &datum,
@@ -279,6 +285,7 @@ private:
   bool has_escape_;
   bool has_lob_;
   bool has_json_;
+  bool header_written_;
   bool has_coll_;
   common::ObObjPrintParams print_params_;
   ObEscapePrinter escape_printer_;

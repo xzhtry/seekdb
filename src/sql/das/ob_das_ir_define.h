@@ -83,6 +83,7 @@ public:
       avg_doc_len_est_spec_(alloc),
       mode_flag_(NATURAL_LANGUAGE_MODE),
       flags_(0),
+      need_calc_relevance_(true),
       field_boost_expr_(nullptr) {}
   bool need_calc_relevance() const { return nullptr != relevance_expr_; }
   bool need_proj_relevance_score() const { return nullptr != relevance_proj_col_; }
@@ -194,6 +195,7 @@ public:
       uint8_t reserved_:3;
     };
   };
+  bool need_calc_relevance_;  // whether relevance score needs to be calculated
   ObExpr *field_boost_expr_;
 };
 

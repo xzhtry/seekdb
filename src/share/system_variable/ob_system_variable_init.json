@@ -10975,8 +10975,7 @@
     "info_cn": "",
     "background_cn": "",
     "ref_url": ""
-  }
-,
+  },
   "ai_column_strict_read": {
     "id": 10078,
     "name": "ai_column_strict_read",
@@ -11011,6 +11010,19 @@
     "data_type": "varchar",
     "info": "Optional system prompt injected into AI_COMPLETE requests on this session.",
     "flags": "SESSION | INVISIBLE",
+    "publish_version": "1.0.0.0",
+    "info_cn": "",
+    "background_cn": "",
+    "ref_url": ""
+  },
+  "enable_file_sql": {
+    "id": 10762,
+    "name": "enable_file_sql",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
+    "info": "Enables file SQL table functions (read_csv/read_json/read_parquet/glob) and COPY TO.",
+    "flags": "GLOBAL | SESSION",
     "publish_version": "1.0.0.0",
     "info_cn": "",
     "background_cn": "",

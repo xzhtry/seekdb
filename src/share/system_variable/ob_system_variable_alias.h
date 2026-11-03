@@ -742,6 +742,7 @@ namespace share
   static const char* const OB_SV_SPARSE_DROP_RATIO_SEARCH = "ob_sparse_drop_ratio_search";
   static const char* const OB_SV__NLJ_BATCHING_ENABLED = "_nlj_batching_enabled";
   static const char* const OB_SV_AI_COMPLETE_SYSTEM_PROMPT = "ai_complete_system_prompt";
+  static const char* const OB_SV_ENABLE_FILE_SQL = "enable_file_sql";
 
 }
 }

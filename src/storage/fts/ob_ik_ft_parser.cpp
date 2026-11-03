@@ -40,6 +40,78 @@ namespace oceanbase
 {
 namespace storage
 {
+
+namespace
+{
+// Per-thread cache of the three IK dictionary range containers (main / quantifier /
+// stopword). A container pins KV-cache handles; rebuilding it on every tokenize() call
+// or every indexed document shows up as ~7% of the tokenizer's CPU time, while the
+// dictionaries themselves never change for the lifetime of the process.
+struct ObIKDictContainerCache
+{
+  explicit ObIKDictContainerCache() : alloc(lib::ObMemAttr("IKDictCache"))
+  {
+    containers[0] = nullptr;
+    containers[1] = nullptr;
+    containers[2] = nullptr;
+  }
+  ObArenaAllocator alloc;
+  ObFTCacheRangeContainer *containers[3];
+};
+
+thread_local ObIKDictContainerCache g_ik_dict_container_cache;
+
+int cache_slot_of(const ObFTDictType type)
+{
+  int slot = -1;
+  if (ObFTDictType::DICT_IK_MAIN == type) {
+    slot = 0;
+  } else if (ObFTDictType::DICT_IK_QUAN == type) {
+    slot = 1;
+  } else if (ObFTDictType::DICT_IK_STOP == type) {
+    slot = 2;
+  }
+  return slot;
+}
+
+int load_dict_container(ObFTDictHub *hub, const ObFTDictDesc &desc,
+                        ObFTCacheRangeContainer &container)
+{
+  int ret = OB_SUCCESS;
+  if (OB_FAIL(hub->load_cache(desc, container))) {
+    if (OB_ENTRY_NOT_EXIST == ret) {
+      if (OB_FAIL(hub->build_cache(desc, container))) {
+      }
+    }
+  }
+  return ret;
+}
+
+int get_ik_dict_container(ObFTDictHub *hub, const ObFTDictDesc &desc,
+                          ObFTCacheRangeContainer *&container)
+{
+  int ret = OB_SUCCESS;
+  const int slot = cache_slot_of(desc.type_);
+  ObIKDictContainerCache &cache = g_ik_dict_container_cache;
+  container = nullptr;
+  if (OB_UNLIKELY(slot < 0)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_NOT_NULL(cache.containers[slot])) {
+    container = cache.containers[slot];
+  } else {
+    ObFTCacheRangeContainer *tmp = nullptr;
+    if (OB_ISNULL(tmp = OB_NEWx(ObFTCacheRangeContainer, &cache.alloc, cache.alloc))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else if (OB_FAIL(load_dict_container(hub, desc, *tmp))) {
+      OB_DELETEx(ObFTCacheRangeContainer, &cache.alloc, tmp);
+    } else {
+      cache.containers[slot] = tmp;
+      container = tmp;
+    }
+  }
+  return ret;
+}
+} // namespace
 int ObIKFTParser::init(const ObFTParserParam &param)
 {
   int ret = OB_SUCCESS;
@@ -253,20 +325,21 @@ int ObIKFTParser::init_dict(const ObFTParserParam &param)
                                   ObCharsetType::CHARSET_UTF8MB4,
                                   ObCollationType::CS_TYPE_UTF8MB4_BIN);
 
+  ObFTCacheRangeContainer *container_main = nullptr;
+  ObFTCacheRangeContainer *container_quan = nullptr;
+  ObFTCacheRangeContainer *container_stop = nullptr;
   if (should_read_newest_table()) {
     // clear dict cache, always false now
-  } else {
-    if (OB_FAIL(init_single_dict(main_dict_desc, cache_main_))) {
-    } else if (OB_FAIL(init_single_dict(quan_dict_desc, cache_quan_))) {
-    } else if (OB_FAIL(init_single_dict(stopword_dict_desc, cache_stop_))) {
-    }
+  } else if (OB_FAIL(get_ik_dict_container(hub_, main_dict_desc, container_main))) {
+  } else if (OB_FAIL(get_ik_dict_container(hub_, quan_dict_desc, container_quan))) {
+  } else if (OB_FAIL(get_ik_dict_container(hub_, stopword_dict_desc, container_stop))) {
   }
 
   if (OB_FAIL(ret)) {
     // already logged.
-  } else if (OB_FAIL(build_dict_from_cache(main_dict_desc, cache_main_, dict_main_))) {
-  } else if (OB_FAIL(build_dict_from_cache(quan_dict_desc, cache_quan_, dict_quan_))) {
-  } else if (OB_FAIL(build_dict_from_cache(stopword_dict_desc, cache_stop_, dict_stop_))) {
+  } else if (OB_FAIL(build_dict_from_cache(main_dict_desc, *container_main, dict_main_))) {
+  } else if (OB_FAIL(build_dict_from_cache(quan_dict_desc, *container_quan, dict_quan_))) {
+  } else if (OB_FAIL(build_dict_from_cache(stopword_dict_desc, *container_stop, dict_stop_))) {
   }
 
   return ret;

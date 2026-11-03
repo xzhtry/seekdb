@@ -18,6 +18,7 @@
 #include <ctype.h>
 #include <string>
 #include "config_bridge.h"
+#include "sql/resolver/ddl/ob_explain_stmt.h"
 #include "sql/ob_sql.h"
 #include "lib/json/ob_json_print_utils.h"
 #include "lib/stat/ob_diagnostic_info_guard.h"
@@ -324,17 +325,38 @@ int ObSql::fill_result_set(ObResultSet &result_set,
     case stmt::T_EXPLAIN: {
       ObString tname = ObString::make_string("explain_table");
       ObString cname = ObString::make_string("Query Plan");
-      field.tname_ = tname;
-      field.org_tname_ = tname;
-      field.cname_ = cname;
-      field.org_cname_ = cname;
-      field.type_.set_type(ObVarcharType);
-      field.charsetnr_ = CS_TYPE_UTF8MB4_GENERAL_CI;
-      field.type_.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
-      field.type_.set_collation_level(CS_LEVEL_IMPLICIT);
-      field.type_.set_varchar(type_name);
-      if (OB_FAIL(result_set.reserve_field_columns(1))) {
-      } else if (OB_FAIL(result_set.add_field_column(field))) {
+      const ObExplainStmt *explain_stmt = static_cast<const ObExplainStmt *>(&basic_stmt);
+      if (NULL != explain_stmt && explain_stmt->is_describe_select()) {
+        static const char *const describe_columns[] = {
+            "column_name", "column_type", "null", "key", "default", "extra"};
+        if (OB_FAIL(result_set.reserve_field_columns(6))) {
+        }
+        for (int64_t i = 0; OB_SUCC(ret) && i < 6; ++i) {
+          field.tname_ = tname;
+          field.org_tname_ = tname;
+          field.cname_ = ObString::make_string(describe_columns[i]);
+          field.org_cname_ = field.cname_;
+          field.type_.set_type(ObVarcharType);
+          field.charsetnr_ = CS_TYPE_UTF8MB4_GENERAL_CI;
+          field.type_.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+          field.type_.set_collation_level(CS_LEVEL_IMPLICIT);
+          field.type_.set_varchar(type_name);
+          if (OB_FAIL(result_set.add_field_column(field))) {
+          }
+        }
+      } else {
+        field.tname_ = tname;
+        field.org_tname_ = tname;
+        field.cname_ = cname;
+        field.org_cname_ = cname;
+        field.type_.set_type(ObVarcharType);
+        field.charsetnr_ = CS_TYPE_UTF8MB4_GENERAL_CI;
+        field.type_.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+        field.type_.set_collation_level(CS_LEVEL_IMPLICIT);
+        field.type_.set_varchar(type_name);
+        if (OB_FAIL(result_set.reserve_field_columns(1))) {
+        } else if (OB_FAIL(result_set.add_field_column(field))) {
+        }
       }
       break;
     }

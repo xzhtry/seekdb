@@ -5458,6 +5458,8 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
   } else if (OB_FAIL(deep_copy_obj(alloc, op.get_closed_cht(), spec.closed_cht_))) {
   } else if (OB_FAIL(deep_copy_obj(alloc, op.get_escaped_cht(), spec.escaped_cht_))) {
   } else if (OB_FAIL(spec.external_properties_.store_str(op.get_external_properties()))) {
+  } else if (OB_FAIL(ob_write_string(alloc, op.get_header_str(), spec.header_str_))) {
+  } else if (OB_FALSE_IT(spec.is_file_sql_copy_ = op.get_is_file_sql_copy())) {
   } else if (OB_FAIL(spec.user_vars_.init(op.get_user_vars().count()))) {
   } else if (OB_FAIL(spec.select_exprs_.init(op.get_select_exprs().count()))) {
   } else {
@@ -5570,7 +5572,12 @@ int ObStaticEngineCG::generate_spec(ObLogJsonTable &op, ObJsonTableSpec &spec,
   if (OB_SUCC(ret)) {
     spec.table_type_ = op.get_table_type();  // table func type
 
-    if (OB_FAIL(spec.dup_origin_column_defs(op.get_origin_cols_def()))) {
+    if (OB_FAIL(ob_write_string(alloc, op.get_file_path(), spec.file_path_))) {
+    } else if (OB_FALSE_IT(spec.file_format_ = op.get_file_format())) {
+    } else if (OB_FALSE_IT(spec.csv_header_ = op.get_csv_header())) {
+    } else if (OB_FALSE_IT(spec.csv_sample_size_ = op.get_csv_sample_size())) {
+    } else if (OB_FALSE_IT(spec.csv_delimiter_ = op.get_csv_delimiter())) {
+    } else if (OB_FAIL(spec.dup_origin_column_defs(op.get_origin_cols_def()))) {
     }
 
     for (int64_t i = 0; OB_SUCC(ret) && i < op.get_output_exprs().count(); ++i) {
@@ -5615,7 +5622,9 @@ int ObStaticEngineCG::generate_spec(ObLogJsonTable &op, ObJsonTableSpec &spec,
           col_info->output_column_idx_ = spec.column_exprs_.count() - 1;
 
           if (OB_ISNULL(col_def = op.get_column_param_default_val(col_item->column_id_))) {
-            ret = OB_ERR_UNEXPECTED;
+            if (MulModeTableType::OB_FILE_TABLE_TYPE != spec.table_type_) {
+              ret = OB_ERR_UNEXPECTED;
+            }
           } else if (OB_NOT_NULL(default_val = col_def->default_error_expr_)) {
             ObExpr *err_expr = nullptr;
             OZ (mark_expr_self_produced(default_val));

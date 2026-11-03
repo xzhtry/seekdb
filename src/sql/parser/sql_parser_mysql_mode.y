@@ -349,6 +349,7 @@ END_P SET_VAR DELIMITER
         SUBCLASS_ORIGIN SUBDATE SUBJECT SUBPARTITION SUBPARTITIONS SUBSTR SUBSTRING SUCCESSFUL SUM
         SUPER SUSPEND SWAPS SWITCH SWITCHES SWITCHOVER SYSTEM SYSTEM_USER SYSDATE SESSION_ALIAS
         SIZE SKEWONLY SEQUENCE STATEMENT_ID SKIP_HEADER PARSE_HEADER IGNORE_LAST_EMPTY_COLUMN SKIP_BLANK_LINES STATEMENT SUM_OPNSIZE SPARSEVECTOR
+        READ_CSV READ_JSON READ_PARQUET GLOB HEADER NULLSTR
 
         TABLE_MODE TABLE_NAME TABLES TABLET TABLET_ID TABLET_MAX_SIZE TASK_ID
         TEMPLATE TEMPORARY TEMPTABLE TEXT THAN TIME TIMESTAMP TIMESTAMPADD TIMESTAMPDIFF TP_NO
@@ -499,6 +500,8 @@ END_P SET_VAR DELIMITER
 %type <node> skip_index_type opt_skip_index_type_list
 %type <node> vec_index_params vec_index_param vec_index_param_value opt_with_vector_index_parameters
 %type <node> json_table_expr unnest_expr mock_jt_on_error_on_empty jt_column_list json_table_column_def
+%type <node> file_table_expr file_table_func_name file_table_args file_table_named_arg file_table_named_arg_list
+%type <node> copy_stmt copy_option copy_option_list
 %type <node> json_table_ordinality_column_def json_table_exists_column_def json_table_value_column_def json_table_nested_column_def
 %type <node> opt_value_on_empty_or_error_or_mismatch opt_on_mismatch
 %type <node> table_values_clause table_values_clause_with_order_by_and_limit values_row_list row_value
@@ -583,6 +586,7 @@ stmt:
   | drop_table_stmt         { $$ = $1; check_question_mark($$, result); }
   | drop_view_stmt          { $$ = $1; check_question_mark($$, result); }
   | explain_stmt            { $$ = $1; question_mark_issue($$, result); }
+  | copy_stmt               { $$ = $1; question_mark_issue($$, result); }
   | create_outline_stmt     { $$ = $1; question_mark_issue($$, result); }
   | alter_outline_stmt      { $$ = $1; question_mark_issue($$, result); }
   | drop_outline_stmt       { $$ = $1; check_question_mark($$, result); }
@@ -10866,6 +10870,10 @@ tbl_name
 {
   $$ = $1;
 }
+| file_table_expr
+{
+  $$ = $1;
+}
 | '(' table_references ')'
 {
   $$ = $2;
@@ -12296,7 +12304,16 @@ explain_or_desc relation_factor opt_desc_column_option
   malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_COLUMNS, 4, $$, $2, NULL, $3);
 }
 
-| explain_or_desc explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL);}
+| explain_or_desc explainable_stmt
+{
+  if (NULL != $1 && 1 == $1->value_ && NULL != $2 && T_SELECT == $2->type_) {
+    // DESCRIBE SELECT returns the column metadata of the query
+    malloc_non_terminal_node($$, result->malloc_pool_, T_DESCRIBE_SELECT, 1, $2);
+    $$->value_ = INT64_MAX;
+  } else {
+    GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL);
+  }
+}
 | explain_or_desc PRETTY explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY, $3, NULL, NULL);}
 | explain_or_desc PRETTY_COLOR explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY_COLOR, $3, NULL, NULL);}
 
@@ -12336,9 +12353,111 @@ explain_or_desc relation_factor opt_desc_column_option
 ;
 
 explain_or_desc:
-EXPLAIN {$$ = NULL;}
-| DESCRIBE {$$ = NULL;}
-| DESC  {$$ = NULL;}
+EXPLAIN
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 0;
+  $$->is_hidden_const_ = 1;
+}
+| DESCRIBE
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 1;
+  $$->is_hidden_const_ = 1;
+}
+| DESC
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 1;
+  $$->is_hidden_const_ = 1;
+}
+;
+
+/*****************************************************************************
+ *
+ *	COPY statement (file sql export)
+ *
+ *****************************************************************************/
+copy_stmt:
+COPY '(' select_stmt ')' TO STRING_VALUE copy_option_list
+{
+  ParseNode *format_list = NULL;
+  ParseNode *into_node = NULL;
+  if (NULL == $3 || NULL == $3->children_) {
+    yyerror(&@1, result, "");
+    YYERROR;
+  } else if (NULL != $3->children_[PARSE_SELECT_INTO]
+             || NULL != $3->children_[PARSE_SELECT_INTO_EXTRA]) {
+    yyerror(&@1, result, "");
+    YYERROR;
+  } else {
+    merge_nodes(format_list, result, T_EXTERNAL_FILE_FORMAT, $7);
+    malloc_non_terminal_node(into_node, result->malloc_pool_, T_INTO_OUTFILE, 3, $6, format_list, NULL);
+    into_node->value_ = 1;  // 1 means this into outfile comes from the COPY statement
+    $$ = $3;
+    $$->children_[PARSE_SELECT_INTO_EXTRA] = into_node;
+  }
+}
+| COPY '(' select_stmt ')' TO STRING_VALUE '(' copy_option_list ')'
+{
+  ParseNode *format_list = NULL;
+  ParseNode *into_node = NULL;
+  if (NULL == $3 || NULL == $3->children_) {
+    yyerror(&@1, result, "");
+    YYERROR;
+  } else if (NULL != $3->children_[PARSE_SELECT_INTO]
+             || NULL != $3->children_[PARSE_SELECT_INTO_EXTRA]) {
+    yyerror(&@1, result, "");
+    YYERROR;
+  } else {
+    merge_nodes(format_list, result, T_EXTERNAL_FILE_FORMAT, $8);
+    malloc_non_terminal_node(into_node, result->malloc_pool_, T_INTO_OUTFILE, 3, $6, format_list, NULL);
+    into_node->value_ = 1;  // 1 means this into outfile comes from the COPY statement
+    $$ = $3;
+    $$->children_[PARSE_SELECT_INTO_EXTRA] = into_node;
+  }
+}
+;
+
+copy_option_list:
+copy_option
+{
+  $$ = $1;
+}
+| copy_option_list opt_comma copy_option
+{
+  (void)($2);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+copy_option:
+FORMAT opt_equal_mark relation_name
+{
+  (void)($2);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_EXTERNAL_FILE_FORMAT_TYPE, 1, $3);
+}
+| HEADER
+{
+  ParseNode *flag = NULL;
+  malloc_terminal_node(flag, result->malloc_pool_, T_INT);
+  flag->value_ = 1;
+  flag->is_hidden_const_ = 1;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_PARSE_HEADER, 1, flag);
+}
+| NULLSTR opt_equal_mark STRING_VALUE
+{
+  (void)($2);
+  ParseNode *expr_list = NULL;
+  merge_nodes(expr_list, result, T_EXPR_LIST, $3);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_NULL_IF_EXETERNAL, 1, expr_list);
+}
+| FIELD_DELIMITER opt_equal_mark STRING_VALUE
+{
+  (void)($2);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FIELD_TERMINATED_STR, 1, $3);
+  dup_expr_string($$, result, @3.first_column, @3.last_column);
+}
 ;
 
 explainable_stmt:
@@ -17481,6 +17600,105 @@ UNNEST '(' simple_expr_list ')'
   malloc_non_terminal_node($$, result->malloc_pool_, T_UNNEST_EXPRESSION, 3, $3, $6, $8);
 }
 ;
+
+/*===========================================================
+*
+*  FILE SQL TABLE FUNCTIONS
+*
+*============================================================*/
+
+file_table_func_name:
+READ_CSV
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 1;
+  $$->is_hidden_const_ = 1;
+}
+| READ_JSON
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 2;
+  $$->is_hidden_const_ = 1;
+}
+| READ_PARQUET
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 3;
+  $$->is_hidden_const_ = 1;
+}
+| GLOB
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 4;
+  $$->is_hidden_const_ = 1;
+}
+;
+
+file_table_expr:
+file_table_func_name '(' simple_expr file_table_args ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $4, NULL);
+  if (result->pl_parse_info_.is_pl_parse_ && !result->pl_parse_info_.is_pl_parse_expr_) {
+    result->pl_parse_info_.is_forbid_pl_fp_ = true;
+  }
+}
+| file_table_func_name '(' simple_expr file_table_args ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $4, $6);
+  if (result->pl_parse_info_.is_pl_parse_ && !result->pl_parse_info_.is_pl_parse_expr_) {
+    result->pl_parse_info_.is_forbid_pl_fp_ = true;
+  }
+}
+| file_table_func_name '(' simple_expr file_table_args ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $4, $7);
+  if (result->pl_parse_info_.is_pl_parse_ && !result->pl_parse_info_.is_pl_parse_expr_) {
+    result->pl_parse_info_.is_forbid_pl_fp_ = true;
+  }
+}
+;
+
+file_table_args:
+/* EMPTY */
+{
+  $$ = NULL;
+}
+| ',' file_table_named_arg_list
+{
+  $$ = $2;
+}
+;
+
+file_table_named_arg_list:
+file_table_named_arg
+{
+  $$ = $1;
+}
+| file_table_named_arg_list ',' file_table_named_arg
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+file_table_named_arg:
+relation_name COMP_EQ simple_expr
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_ARG, 2, $1, $3);
+}
+| HEADER COMP_EQ simple_expr
+{
+  ParseNode *name_node = NULL;
+  make_name_node(name_node, result->malloc_pool_, "header");
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_ARG, 2, name_node, $3);
+}
+| NULLSTR COMP_EQ simple_expr
+{
+  ParseNode *name_node = NULL;
+  make_name_node(name_node, result->malloc_pool_, "nullstr");
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_ARG, 2, name_node, $3);
+}
+;
+
 
 hybrid_search_expr:
 HYBRID_SEARCH '(' literal ',' hybrid_search_param ')'

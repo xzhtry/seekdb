@@ -30,7 +30,9 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
 {
   int ret = OB_SUCCESS;
   ObExplainStmt *explain_stmt = NULL;
-  if (!(T_EXPLAIN == parse_tree.type_  && 5 == parse_tree.num_child_)) {
+  const bool is_describe_select = (T_DESCRIBE_SELECT == parse_tree.type_);
+  if (!((T_EXPLAIN == parse_tree.type_ && 5 == parse_tree.num_child_)
+        || (is_describe_select && 1 == parse_tree.num_child_))) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("invalid EXPLAIN syntax",
              "type", parse_tree.type_,
@@ -39,7 +41,8 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
     ret = OB_SQL_RESOLVER_NO_MEMORY;
     LOG_WARN("failed to create explain stmt");
   } else {
-    ParseNode *child_node = parse_tree.children_[EXPLAIN_CHILD_STMT];
+    ParseNode *child_node = is_describe_select ? parse_tree.children_[0]
+                                              : parse_tree.children_[EXPLAIN_CHILD_STMT];
     ObStmt *child_stmt = NULL;
     ObExplainDisplayOpt opt;
     opt.with_tree_line_ = true;
@@ -64,7 +67,10 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
         LOG_WARN("failed to generate stmt for child stmt");
       } else {
         explain_stmt->set_explain_query_stmt(static_cast<ObDMLStmt *>(child_stmt));
-        ParseNode *format = parse_tree.children_[EXPLAIN_FORMAT];
+        if (is_describe_select && child_stmt->is_select_stmt()) {
+          explain_stmt->set_describe_select(true);
+        }
+        ParseNode *format = is_describe_select ? NULL : parse_tree.children_[EXPLAIN_FORMAT];
         if (NULL != format) {
           switch (format->type_) {
           case T_OUTLINE:
@@ -115,7 +121,7 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
         }
       }
     }
-    ParseNode *opt_node = parse_tree.children_[EXPLAIN_DISPLAY_OPTION];
+    ParseNode *opt_node = is_describe_select ? NULL : parse_tree.children_[EXPLAIN_DISPLAY_OPTION];
     if (OB_SUCC(ret) && NULL != opt_node) {
       switch (opt_node->type_) {
       case T_PRETTY_COLOR:

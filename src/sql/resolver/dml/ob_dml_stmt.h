@@ -47,6 +47,7 @@ enum MulModeTableType {
   OB_ORA_JSON_TABLE_TYPE, // 1
   OB_ORA_XML_TABLE_TYPE = 2,
   OB_UNNEST_TABLE_TYPE = 3,
+  OB_FILE_TABLE_TYPE = 4,
 };
 
 typedef struct ObJtColBaseInfo
@@ -76,7 +77,8 @@ typedef struct ObJtColBaseInfo
     int32_t value_;
     struct {
       int32_t is_name_quoted_ : 1;
-      int32_t reserved_ : 31;
+      uint32_t is_nullable_ : 1;
+      uint32_t reserved_ : 30;
     };
   };
 
@@ -92,13 +94,24 @@ typedef struct ObJsonTableDef {
     : all_cols_(),
       doc_exprs_(),
       table_type_(MulModeTableType::INVALID_TABLE_TYPE),
-      namespace_arr_() {}
+      namespace_arr_(),
+      file_path_(),
+      file_format_(0),
+      csv_header_(1),
+      csv_sample_size_(-1),
+      csv_delimiter_(',') {}
 
   int deep_copy(const ObJsonTableDef& src, ObIRawExprCopier &expr_copier, ObIAllocator* allocator);
   common::ObSEArray<ObJtColBaseInfo*, 4, common::ModulePageAllocator, true> all_cols_;
   common::ObSEArray<ObRawExpr*, 1, common::ModulePageAllocator, true> doc_exprs_;
   MulModeTableType table_type_;
   common::ObSEArray<ObString, 16, common::ModulePageAllocator, true> namespace_arr_;
+  // file sql table function properties
+  common::ObString file_path_;
+  int64_t file_format_;
+  int64_t csv_header_;
+  int64_t csv_sample_size_;
+  int64_t csv_delimiter_;
 } ObJsonTableDef;
 
 struct ObValuesTableDef {

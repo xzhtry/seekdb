@@ -33,7 +33,12 @@ public:
         access_exprs_(),
         all_cols_def_(),
         table_type_(MulModeTableType::INVALID_TABLE_TYPE),
-        namespace_arr_() {}
+        namespace_arr_(),
+        file_path_(),
+        file_format_(0),
+        csv_header_(1),
+        csv_sample_size_(-1),
+        csv_delimiter_(',') {}
 
   virtual ~ObLogJsonTable() {}
   int add_values_expr(ObIArray<ObRawExpr*> &exprs) { return append(value_exprs_, exprs); }
@@ -57,6 +62,22 @@ public:
   inline void set_table_type(MulModeTableType table_type) { table_type_ = table_type; }
   inline MulModeTableType get_table_type() { return table_type_; }
   int set_namespace_arr(ObIArray<ObString> &namespace_arr);
+  int set_file_properties(const common::ObString &path, const int64_t format,
+                          const int64_t header, const int64_t sample_size,
+                          const int64_t delimiter)
+  {
+    file_path_ = path;
+    file_format_ = format;
+    csv_header_ = header;
+    csv_sample_size_ = sample_size;
+    csv_delimiter_ = delimiter;
+    return common::OB_SUCCESS;
+  }
+  const common::ObString &get_file_path() const { return file_path_; }
+  int64_t get_file_format() const { return file_format_; }
+  int64_t get_csv_header() const { return csv_header_; }
+  int64_t get_csv_sample_size() const { return csv_sample_size_; }
+  int64_t get_csv_delimiter() const { return csv_delimiter_; }
   int get_namespace_arr(ObIArray<ObString> &namespace_arr);
   int64_t get_ns_size() { return namespace_arr_.count(); }
   int64_t get_column_param_default_size() { return column_param_default_exprs_.count(); }
@@ -73,6 +94,11 @@ private:
   MulModeTableType table_type_;
   // xml table param
   common::ObSEArray<ObString, 16, common::ModulePageAllocator, true> namespace_arr_;
+  common::ObString file_path_;
+  int64_t file_format_;
+  int64_t csv_header_;
+  int64_t csv_sample_size_;
+  int64_t csv_delimiter_;
   // default value array
   common::ObSEArray<ObColumnDefault, 1, common::ModulePageAllocator, true> column_param_default_exprs_;
 

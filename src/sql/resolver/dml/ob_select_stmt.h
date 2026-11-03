@@ -128,7 +128,9 @@ struct ObSelectIntoItem
         max_file_size_(DEFAULT_MAX_FILE_SIZE),
         escaped_cht_(),
         buffer_size_(DEFAULT_BUFFER_SIZE),
-        external_properties_()
+        external_properties_(),
+        header_str_(),
+        is_file_sql_copy_(false)
   {
     field_str_.set_varchar(DEFAULT_FIELD_TERM_STR);
     field_str_.set_collation_type(ObCharset::get_system_collation());
@@ -154,6 +156,8 @@ struct ObSelectIntoItem
     escaped_cht_ = other.escaped_cht_;
     cs_type_ = other.cs_type_;
     buffer_size_ = other.buffer_size_;
+    header_str_ = other.header_str_;
+    is_file_sql_copy_ = other.is_file_sql_copy_;
     external_properties_ = other.external_properties_;
     return user_vars_.assign(other.user_vars_);
   }
@@ -195,6 +199,8 @@ struct ObSelectIntoItem
   static const int64_t DEFAULT_MAX_FILE_SIZE;
   static const int64_t DEFAULT_BUFFER_SIZE;
   static const char DEFAULT_FIELD_ESCAPED_CHAR;
+  common::ObString header_str_;
+  bool is_file_sql_copy_;
 };
 
 struct ObGroupbyExpr

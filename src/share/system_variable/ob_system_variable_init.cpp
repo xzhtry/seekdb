@@ -9949,13 +9949,26 @@ static struct VarsInit{
     ObSysVars[721].alias_ = "OB_SV_AI_COMPLETE_SYSTEM_PROMPT" ;
     }();
 
+    [&] (){
+      ObSysVars[722].id_ = SYS_VAR_ENABLE_FILE_SQL ;
+      cur_max_var_id = MAX(cur_max_var_id, static_cast<int64_t>(SYS_VAR_ENABLE_FILE_SQL)) ;
+      ObSysVarsIdToArrayIdx[SYS_VAR_ENABLE_FILE_SQL] = 722 ;
+      ObSysVars[722].name_ = "enable_file_sql" ;
+      ObSysVars[722].default_value_ = "0" ;
+      ObSysVars[722].base_value_ = "0" ;
+      ObSysVars[722].data_type_ = ObIntType ;
+      ObSysVars[722].info_ = "Enables file SQL table functions (read_csv/read_json/read_parquet/glob) and COPY TO." ;
+      ObSysVars[722].flags_ = ObSysVarFlag::GLOBAL_SCOPE | ObSysVarFlag::SESSION_SCOPE ;
+    ObSysVars[722].alias_ = "OB_SV_ENABLE_FILE_SQL" ;
+    }();
+
     if (cur_max_var_id >= ObSysVarMeta::OB_MAX_SYS_VAR_ID) {
       HasInvalidSysVar = true;
     }
   }
 }vars_init;
 
-static int64_t var_amount = 722;
+static int64_t var_amount = 723;
 
 int64_t ObSysVariables::get_all_sys_var_count(){ return ObSysVarMeta::ALL_SYS_VARS_COUNT;}
 ObSysVarClassType ObSysVariables::get_sys_var_id(int64_t i){ return ObSysVars[i].id_;}

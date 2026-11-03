@@ -1314,6 +1314,7 @@ public:
   }
 
   int allocate_output_expr_for_values_op(ObLogicalOperator &values_op);
+  int allocate_output_exprs_for_values_op(ObLogicalOperator &values_op, const int64_t count);
 
   inline common::ObIArray<JoinPath*> &get_recycled_join_paths()
   {
