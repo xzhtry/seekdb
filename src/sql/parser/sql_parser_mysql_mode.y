@@ -40,6 +40,20 @@
 #include "../../../src/sql/parser/sql_parser_mysql_mode_lex.h"
 #include "../../../src/sql/parser/sql_parser_base.h"
 
+/* File table arguments must stay literal: the inferred schema depends on them,
+ * and the plan cache key is built from the parameterized statement text. */
+static void fsq_mark_not_param(ParseNode *node)
+{
+  if (NULL != node) {
+    node->is_tree_not_param_ = 1;
+    if (NULL != node->children_) {
+      for (int32_t i = 0; i < node->num_child_; ++i) {
+        fsq_mark_not_param(node->children_[i]);
+      }
+    }
+  }
+}
+
 #define GEN_EXPLAN_STMT(no_use, explain_stmt, explain_type, display_type, stmt, into_table, set_statement_id) \
   (void)(no_use); \
   ParseNode *type_node = NULL; \
@@ -17637,6 +17651,8 @@ READ_CSV
 file_table_expr:
 file_table_func_name '(' simple_expr file_table_args ')'
 {
+  fsq_mark_not_param($3);
+  fsq_mark_not_param($4);
   malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $4, NULL);
   if (result->pl_parse_info_.is_pl_parse_ && !result->pl_parse_info_.is_pl_parse_expr_) {
     result->pl_parse_info_.is_forbid_pl_fp_ = true;
@@ -17644,6 +17660,8 @@ file_table_func_name '(' simple_expr file_table_args ')'
 }
 | file_table_func_name '(' simple_expr file_table_args ')' relation_name
 {
+  fsq_mark_not_param($3);
+  fsq_mark_not_param($4);
   malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $4, $6);
   if (result->pl_parse_info_.is_pl_parse_ && !result->pl_parse_info_.is_pl_parse_expr_) {
     result->pl_parse_info_.is_forbid_pl_fp_ = true;
@@ -17651,6 +17669,8 @@ file_table_func_name '(' simple_expr file_table_args ')'
 }
 | file_table_func_name '(' simple_expr file_table_args ')' AS relation_name
 {
+  fsq_mark_not_param($3);
+  fsq_mark_not_param($4);
   malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $4, $7);
   if (result->pl_parse_info_.is_pl_parse_ && !result->pl_parse_info_.is_pl_parse_expr_) {
     result->pl_parse_info_.is_forbid_pl_fp_ = true;
