@@ -479,6 +479,7 @@ int ObDDLInsertDag::init_by_param(const share::ObIDagInitParam *param)
         } else if (OB_ISNULL(range_task)) {
           tmp_ret = OB_ERR_UNEXPECTED;
         } else if (OB_FAIL(range_task->init(this, tablet_ids_.at(i), 0, 1, true /*dry_run*/))) {
+        } else if (OB_FAIL(write_macro_block_tasks.at(write_macro_block_tasks.count() - 1)->add_child(*range_task))) {
         } else if (OB_FAIL(extra_tasks.push_back(range_task))) {
         }
       }
