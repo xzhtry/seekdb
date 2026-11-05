@@ -52,8 +52,8 @@ public:
   ObFtsRangeBuildTask();
   virtual ~ObFtsRangeBuildTask() = default;
   // One task per base-table block range; slice_idx identifies the slice it writes.
-  int init(const common::ObTabletID &tablet_id,
-           const common::ObStoreRange &range,
+  int init(ObDDLIndependentDag *dag,
+           const common::ObTabletID &tablet_id,
            const int64_t slice_idx,
            const int64_t slice_count);
   virtual int process() override;
@@ -93,10 +93,13 @@ public:
                  const common::ObString &parser_properties,
                  const int64_t snapshot_version,
                  blocksstable::ObDatumRange &range,
+                 common::ObIAllocator &alloc,
+                 common::ObIArray<FtsAuxRow> &out_rows,
                  int64_t &row_cnt,
                  int64_t &token_cnt);
 private:
   bool is_inited_;
+  ObDDLIndependentDag *dag_;
   common::ObTabletID tablet_id_;
   int64_t slice_idx_;
   int64_t slice_count_;

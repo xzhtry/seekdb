@@ -39,23 +39,24 @@ using namespace oceanbase::share::schema;
 
 ObFtsRangeBuildTask::ObFtsRangeBuildTask()
   : share::ObITask(share::ObITask::TASK_TYPE_DDL_WRITE_PIPELINE),
-    is_inited_(false), tablet_id_(), slice_idx_(0), slice_count_(0),
+    is_inited_(false), dag_(nullptr), tablet_id_(), slice_idx_(0), slice_count_(0),
     table_schema_alloc_(lib::ObMemAttr("FtsRangeBatch"))
 {
 }
 
-int ObFtsRangeBuildTask::init(const common::ObTabletID &tablet_id,
-                              const common::ObStoreRange &range,
+int ObFtsRangeBuildTask::init(ObDDLIndependentDag *dag,
+                              const common::ObTabletID &tablet_id,
                               const int64_t slice_idx,
                               const int64_t slice_count)
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(is_inited_)) {
     ret = OB_INIT_TWICE;
-  } else if (OB_UNLIKELY(!tablet_id.is_valid() || slice_idx < 0 || slice_count <= 0 || slice_idx >= slice_count)) {
+  } else if (OB_UNLIKELY(OB_ISNULL(dag) || !tablet_id.is_valid() ||
+                         slice_idx < 0 || slice_count <= 0 || slice_idx >= slice_count)) {
     ret = OB_INVALID_ARGUMENT;
   } else {
-    UNUSED(range);
+    dag_ = dag;
     tablet_id_ = tablet_id;
     slice_idx_ = slice_idx;
     slice_count_ = slice_count;
@@ -90,7 +91,6 @@ int ObFtsRangeBuildTask::build_word_rows(const storage::ObFTWordMap &word_map,
                                          common::ObIArray<FtsAuxRow> &rows)
 {
   int ret = OB_SUCCESS;
-  rows.reuse();
   for (storage::ObFTWordMap::const_iterator it = word_map.begin();
        OB_SUCC(ret) && it != word_map.end(); ++it) {
     const common::ObDatum &word_datum = it->first.get_word();
@@ -294,6 +294,8 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
                                     const common::ObString &parser_properties,
                                     const int64_t snapshot_version,
                                     blocksstable::ObDatumRange &range,
+                                    common::ObIAllocator &alloc,
+                                    common::ObIArray<FtsAuxRow> &out_rows,
                                     int64_t &row_cnt,
                                     int64_t &token_cnt)
 {
@@ -349,8 +351,7 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
                  K(ret), K(text_col_idx), K(doc_id_col_idx));
       } else {
         const blocksstable::ObDatumRow *row = nullptr;
-        common::ObArenaAllocator row_alloc(lib::ObMemAttr("FtsRangeRow"));
-        common::ObSEArray<FtsAuxRow, 64> aux_rows;
+        common::ObSEArray<FtsAuxRow, 1024> doc_rows;
         storage::ObFTWordMap word_map;
         while (OB_SUCC(local_scan.get_next_row(row))) {
           int64_t doc_len = 0;
@@ -358,13 +359,14 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
             ret = OB_ERR_UNEXPECTED;
           } else if (OB_FAIL(tokenize_text(row->storage_datums_[text_col_idx].get_string(),
                                            parser_name, parser_properties,
-                                           row_alloc, word_map, doc_len))) {
+                                           alloc, word_map, doc_len))) {
+          } else if (FALSE_IT(doc_rows.reuse())) {
           } else if (OB_FAIL(build_word_rows(word_map, row->storage_datums_[doc_id_col_idx].get_int(),
-                                             doc_len, row_alloc, aux_rows))) {
-          } else if (OB_FAIL(sort_rows(aux_rows))) {
+                                             doc_len, alloc, doc_rows))) {
+          } else if (OB_FAIL(out_rows.assign(doc_rows))) {
           } else {
             ++row_cnt;
-            token_cnt += aux_rows.count();
+            token_cnt += doc_rows.count();
           }
         }
         if (OB_ITER_END == ret) {
@@ -379,14 +381,44 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
 int ObFtsRangeBuildTask::process()
 {
   int ret = OB_SUCCESS;
+  share::schema::ObSchemaGetterGuard schema_guard;
+  const share::schema::ObTableSchema *aux_schema = nullptr;
+  const share::schema::ObTableSchema *data_schema = nullptr;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = OB_NOT_INIT;
+  } else if (OB_ISNULL(dag_)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_ISNULL(GCTX.schema_service_)) {
+    ret = OB_ERR_UNEXPECTED;
   } else {
-    // Placeholder: the data path (scan this range -> tokenize -> sort -> write the
-    // slice) is not implemented yet. Keep the task observable in the DDL log.
-    LOG_INFO("fts range build task start",
-             "tablet_id", tablet_id_, "slice_idx", slice_idx_, "slice_count", slice_count_);
-    if (OB_FAIL(dag_yield())) {
+    const uint64_t aux_table_id = dag_->get_ddl_task_param().target_table_id_;
+    if (OB_FAIL(GCTX.schema_service_->get_runtime_schema_guard(schema_guard))) {
+    } else if (OB_FAIL(schema_guard.get_table_schema(aux_table_id, aux_schema))) {
+    } else if (OB_ISNULL(aux_schema)) {
+      ret = OB_TABLE_NOT_EXIST;
+      LOG_WARN("aux table schema not found", K(ret), K(aux_table_id));
+    } else if (OB_FAIL(schema_guard.get_table_schema(aux_schema->get_data_table_id(), data_schema))) {
+    } else if (OB_ISNULL(data_schema)) {
+      ret = OB_TABLE_NOT_EXIST;
+    } else {
+      common::ObArenaAllocator alloc(lib::ObMemAttr("FtsRangeTask"));
+      common::ObSEArray<FtsAuxRow, 1024> rows;
+      blocksstable::ObDatumRange whole_range;
+      whole_range.set_whole_range();
+      int64_t row_cnt = 0;
+      int64_t token_cnt = 0;
+      if (OB_FAIL(scan_range(*data_schema, *aux_schema,
+                             aux_schema->get_parser_name_str(),
+                             aux_schema->get_parser_property_str(),
+                             dag_->get_ddl_task_param().snapshot_version_,
+                             whole_range, alloc, rows, row_cnt, token_cnt))) {
+        LOG_WARN("failed to scan/build rows", K(ret));
+      } else if (OB_FAIL(sort_rows(rows))) {
+      } else if (OB_FAIL(write_slice(dag_, rows))) {
+      } else {
+        LOG_INFO("fts range build done", K(ret), K(row_cnt), K(token_cnt), K(rows.count()),
+                 K_(slice_idx), K_(slice_count));
+      }
     }
   }
   return ret;
