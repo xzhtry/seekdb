@@ -22,6 +22,7 @@
 #include "storage/ddl/ob_ddl_direct_load_utils.h"
 #include "storage/tx_storage/ob_ls_service.h"
 #include "storage/ddl/ob_ddl_merge_task_v2.h"
+#include "data_plane/fts/ob_fts_parser_helper.h"
 
 #define USING_LOG_PREFIX STORAGE
 
@@ -52,6 +53,25 @@ int ObFtsRangeBuildTask::init(const common::ObTabletID &tablet_id,
     slice_idx_ = slice_idx;
     slice_count_ = slice_count;
     is_inited_ = true;
+  }
+  return ret;
+}
+
+int ObFtsRangeBuildTask::tokenize_text(const common::ObString &text,
+                                        const common::ObString &parser_name,
+                                        const common::ObString &properties,
+                                        common::ObIAllocator &alloc,
+                                        storage::ObFTWordMap &word_map,
+                                        int64_t &doc_len)
+{
+  int ret = OB_SUCCESS;
+  storage::ObFTParseHelper helper;
+  common::ObObjMeta meta;
+  meta.set_varchar();
+  const int64_t bkt_cnt = MIN(MAX(text.length() / 2, 2), 997);
+  if (OB_FAIL(helper.init(&alloc, parser_name, properties))) {
+  } else if (OB_FAIL(word_map.create(bkt_cnt, common::ObMemAttr("FtsRangeWordMap")))) {
+  } else if (0 != text.length() && OB_FAIL(helper.segment(meta, text.ptr(), text.length(), doc_len, word_map))) {
   }
   return ret;
 }

@@ -20,6 +20,7 @@
 #include "storage/ddl/ob_ddl_struct.h"
 #include "storage/ddl/ob_ddl_independent_dag.h"
 #include "data_plane/scheduler/ob_dag_scheduler.h"
+#include "data_plane/fts/ob_fts_struct.h"
 
 namespace oceanbase
 {
@@ -49,6 +50,14 @@ public:
            const int64_t slice_idx,
            const int64_t slice_count);
   virtual int process() override;
+  // Tokenize one document's fulltext into a word->count map (building block for the
+  // per-range aux row generation).
+  int tokenize_text(const common::ObString &text,
+                    const common::ObString &parser_name,
+                    const common::ObString &properties,
+                    common::ObIAllocator &alloc,
+                    storage::ObFTWordMap &word_map,
+                    int64_t &doc_len);
 private:
   bool is_inited_;
   common::ObTabletID tablet_id_;
