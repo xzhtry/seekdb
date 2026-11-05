@@ -147,6 +147,11 @@ protected:
   sql::ObExpr *token_weight_expr_;
   sql::ObBitVector *skip_;
   int64_t token_doc_cnt_;
+  // COUNT(*)-only path: match count computed once, then emitted as synthetic rows.
+  bool count_only_;
+  bool count_done_;
+  int64_t matched_doc_cnt_;
+  int64_t remaining_cnt_;
   int64_t max_batch_size_;
   bool need_inv_idx_agg_;
   bool inv_idx_agg_evaluated_;

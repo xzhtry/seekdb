@@ -48,6 +48,7 @@ public:
   virtual ~ObDASLegacyTRMergeIter() {}
   virtual int do_table_scan() override;
   virtual int rescan() override;
+  virtual int count_matches(int64_t &count) override;
 
   INHERIT_TO_STRING_KV("ObDASIter", ObDASIter, K_(ir_ctdef), K_(ir_rtdef), K_(tx_desc),
       K_(snapshot), K_(query_tokens), K_(sr_iter_param), K_(sparse_retrieval_iter), K_(dim_iters),

@@ -129,6 +129,8 @@ public:
                               ObIAllocator *alloc,
                               int64_t group_id) { return OB_NOT_IMPLEMENT; }
   int get_domain_id_merge_iter(ObDASDomainIdMergeIter *&domain_id_merge_iter);
+  // COUNT(*)-only consumers may ask the iterator for the match count directly.
+  virtual int count_matches(int64_t &count) { UNUSED(count); return OB_NOT_SUPPORTED; }
   virtual int get_diagnosis_info(common::ObRowDiagnosisInfo *diagnosis_info) override
   { UNUSED(diagnosis_info); return OB_SUCCESS; }
 protected:

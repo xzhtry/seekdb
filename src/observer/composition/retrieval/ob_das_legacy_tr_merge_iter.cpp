@@ -776,6 +776,18 @@ int ObDASLegacyTRMergeIter::inner_reuse()
   return ret;
 }
 
+int ObDASLegacyTRMergeIter::count_matches(int64_t &count)
+{
+  int ret = OB_SUCCESS;
+  if (IS_NOT_INIT) {
+    ret = OB_NOT_INIT;
+  } else if (OB_ISNULL(sparse_retrieval_iter_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(sparse_retrieval_iter_->count_matches(count))) {
+  }
+  return ret;
+}
+
 int ObDASLegacyTRMergeIter::rescan()
 {
   int ret = OB_SUCCESS;

@@ -143,6 +143,8 @@ public:
   virtual void reset() = 0;
   virtual int get_next_row() = 0;
   virtual int get_next_rows(const int64_t capacity, int64_t &count) = 0;
+  // Count matching documents without materializing output rows.
+  virtual int count_matches(int64_t &count) { UNUSED(count); return OB_NOT_SUPPORTED; }
   virtual int get_query_max_score(double &score) {
     return OB_NOT_SUPPORTED;
   }

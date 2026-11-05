@@ -44,6 +44,10 @@ ObDASTextRetrievalIter::ObDASTextRetrievalIter()
     token_weight_expr_(nullptr),
     skip_(nullptr),
     token_doc_cnt_(0),
+    count_only_(false),
+    count_done_(false),
+    matched_doc_cnt_(0),
+    remaining_cnt_(0),
     max_batch_size_(0),
     need_inv_idx_agg_(false),
     inv_idx_agg_evaluated_(false),
@@ -149,6 +153,7 @@ int ObDASTextRetrievalIter::inner_init(ObDASIterParam &param)
   } else {
     ObDASTextRetrievalIterParam &retrieval_param = static_cast<ObDASTextRetrievalIterParam &>(param);
     inverted_idx_scan_iter_ = static_cast<ObDASScanIter *>(retrieval_param.inv_idx_scan_iter_);
+    count_only_ = ir_ctdef_->is_count_only_;
     ir_ctdef_ = retrieval_param.ir_ctdef_;
     ir_rtdef_ = retrieval_param.ir_rtdef_;
     tx_desc_ = retrieval_param.tx_desc_;
@@ -359,6 +364,27 @@ int ObDASTextRetrievalIter::inner_get_next_rows(int64_t &count, int64_t capacity
     }
   }
   count = 0;
+  if (count_only_) {
+    // COUNT(*) only needs the number of matching documents: compute it once with a
+    // storage-side counting walk, then hand the aggregate synthetic rows instead of
+    // materializing ids/relevance through the DAAT merge.
+    if (!count_done_) {
+      if (OB_FAIL(inverted_idx_scan_iter_->count_matches(matched_doc_cnt_))) {
+      } else {
+        count_done_ = true;
+        remaining_cnt_ = matched_doc_cnt_;
+      }
+    }
+    if (OB_SUCC(ret)) {
+      if (remaining_cnt_ <= 0) {
+        ret = OB_ITER_END;
+      } else {
+        count = OB_MIN(capacity, remaining_cnt_);
+        remaining_cnt_ -= count;
+      }
+    }
+    return ret;
+  }
   int64_t real_capacity = OB_MIN(max_batch_size_, capacity);
   if (OB_FAIL(ret)) {
   } else if (max_batch_size_ == 0) {
