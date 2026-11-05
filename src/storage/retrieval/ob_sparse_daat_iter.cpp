@@ -248,6 +248,37 @@ int ObSRDaaTIterImpl::get_next_rows(const int64_t capacity, int64_t &count)
   return ret;
 }
 
+int ObSRDaaTIterImpl::fill_merge_heap_for_count()
+{
+  int ret = OB_SUCCESS;
+  ObSRMergeItem item;
+  for (int64_t i = 0; OB_SUCC(ret) && i < next_round_cnt_; ++i) {
+    const int64_t iter_idx = next_round_iter_idxes_[i];
+    ObISRDaaTDimIter *dim_iter = nullptr;
+    if (OB_ISNULL(dim_iter = dim_iters_->at(iter_idx))) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(dim_iter->get_next_row())) {
+      if (OB_UNLIKELY(OB_ITER_END != ret)) {
+        LOG_WARN("fail to try load next batch dimension data", K(ret));
+      } else {
+        ret = OB_SUCCESS;
+      }
+    } else if (OB_FAIL(dim_iter->get_curr_id(iter_domain_ids_[iter_idx]))) {
+    } else if (FALSE_IT(item.iter_idx_ = iter_idx)) {
+    } else if (FALSE_IT(item.relevance_ = 0.0)) {
+    } else if (OB_FAIL(merge_heap_->push(item))) {
+    }
+  }
+
+  if (OB_FAIL(ret)) {
+  } else if (merge_heap_->empty()) {
+    ret = OB_ITER_END;
+  } else {
+    next_round_cnt_ = 0;
+  }
+  return ret;
+}
+
 int ObSRDaaTIterImpl::count_matches(int64_t &count)
 {
   int ret = OB_SUCCESS;
@@ -266,7 +297,7 @@ int ObSRDaaTIterImpl::count_matches(int64_t &count)
       const ObSRMergeItem *top_item = nullptr;
       bool curr_doc_end = false;
       int64_t iter_idx = 0;
-      if (OB_FAIL(fill_merge_heap())) {
+      if (OB_FAIL(fill_merge_heap_for_count())) {
         if (OB_UNLIKELY(OB_ITER_END != ret)) {
         } else {
           ret = OB_SUCCESS;
