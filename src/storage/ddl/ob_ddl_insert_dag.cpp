@@ -25,6 +25,7 @@
 #include "data_plane/fts/ob_fts_parser_helper.h"
 #include "storage/ddl/ob_complement_data_task.h"
 #include "storage/ddl/ob_pipeline.h"
+#include "storage/ddl/ob_ddl_batch_datum_rows.h"
 
 #include <algorithm>
 #include <vector>
@@ -38,7 +39,8 @@ using namespace oceanbase::share::schema;
 
 ObFtsRangeBuildTask::ObFtsRangeBuildTask()
   : share::ObITask(share::ObITask::TASK_TYPE_DDL_WRITE_PIPELINE),
-    is_inited_(false), tablet_id_(), slice_idx_(0), slice_count_(0)
+    is_inited_(false), tablet_id_(), slice_idx_(0), slice_count_(0),
+    table_schema_alloc_(lib::ObMemAttr("FtsRangeBatch"))
 {
 }
 
@@ -131,6 +133,44 @@ int ObFtsRangeBuildTask::sort_rows(common::ObIArray<FtsAuxRow> &rows)
     for (int64_t i = 0; OB_SUCC(ret) && i < rows.count(); ++i) {
       rows.at(i) = sorted.at(static_cast<size_t>(i));
     }
+  }
+  return ret;
+}
+
+int ObFtsRangeBuildTask::build_batch(ObDDLIndependentDag *dag,
+                                     const common::ObIArray<FtsAuxRow> &rows,
+                                     const int64_t max_batch_size,
+                                     storage::ObDDLBatchDatumRows *&batch)
+{
+  int ret = OB_SUCCESS;
+  batch = nullptr;
+  const storage::ObDDLTableSchema &table_schema = dag->get_ddl_table_schema();
+  if (OB_UNLIKELY(rows.count() <= 0 || max_batch_size <= 0)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_UNLIKELY(table_schema.column_items_.count() <= 0)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_ISNULL(batch = OB_NEWx(storage::ObDDLBatchDatumRows, &table_schema_alloc_))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    storage::ObDDLRowFlag row_flag;
+    const int64_t batch_size = MIN(max_batch_size, rows.count());
+    if (OB_FAIL(batch->batch_rows_.init(table_schema.column_items_, batch_size, row_flag))) {
+      LOG_WARN("failed to init ddl batch rows", K(ret));
+    } else {
+      for (int64_t i = 0; OB_SUCC(ret) && i < batch_size; ++i) {
+        const FtsAuxRow &row = rows.at(i);
+        blocksstable::ObStorageDatum datums[4];
+        datums[0].set_string(row.word_);
+        datums[1].set_int(row.doc_id_);
+        datums[2].set_int(row.word_count_);
+        datums[3].set_int(row.doc_length_);
+        if (OB_FAIL(batch->batch_rows_.append_row(datums, 4))) {
+          LOG_WARN("failed to append aux row", K(ret));
+        }
+      }
+    }
+    // TODO: link batch_rows_ vectors into datum_rows_ (ObIVector vs ObDDLVector)
+    // before the batch is pushed into the pipeline.
   }
   return ret;
 }

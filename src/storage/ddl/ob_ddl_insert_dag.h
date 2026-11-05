@@ -79,6 +79,12 @@ public:
   // Drive the DDL write pipeline for this task's slice (opens the slice writer and
   // closes it via an end chunk; row batches are added incrementally).
   int write_slice(ObDDLIndependentDag *dag);
+  // Convert sorted aux rows into a DDL batch (row order == aux column order:
+  // word, doc id, word count, doc length).
+  int build_batch(ObDDLIndependentDag *dag,
+                  const common::ObIArray<FtsAuxRow> &rows,
+                  const int64_t max_batch_size,
+                  storage::ObDDLBatchDatumRows *&batch);
   int scan_range(const share::schema::ObTableSchema &data_schema,
                  const share::schema::ObTableSchema &aux_schema,
                  const common::ObString &parser_name,
@@ -92,6 +98,7 @@ private:
   common::ObTabletID tablet_id_;
   int64_t slice_idx_;
   int64_t slice_count_;
+  common::ObArenaAllocator table_schema_alloc_;
 };
 
 class ObDDLInsertDag : public ObDDLIndependentDag
