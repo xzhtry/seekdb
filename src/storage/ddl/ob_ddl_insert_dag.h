@@ -42,6 +42,13 @@ public:
 class ObFtsRangeBuildTask final : public share::ObITask
 {
 public:
+  struct FtsAuxRow
+  {
+    common::ObString word_;
+    int64_t doc_id_;
+    int64_t word_count_;
+    int64_t doc_length_;
+  };
   ObFtsRangeBuildTask();
   virtual ~ObFtsRangeBuildTask() = default;
   // One task per base-table block range; slice_idx identifies the slice it writes.
@@ -58,6 +65,12 @@ public:
                     common::ObIAllocator &alloc,
                     storage::ObFTWordMap &word_map,
                     int64_t &doc_len);
+  // Expand one document's word map into the aux-table rows (one row per distinct word).
+  int build_word_rows(const storage::ObFTWordMap &word_map,
+                      const int64_t doc_id,
+                      const int64_t doc_len,
+                      common::ObIAllocator &alloc,
+                      common::ObIArray<FtsAuxRow> &rows);
 private:
   bool is_inited_;
   common::ObTabletID tablet_id_;

@@ -76,6 +76,39 @@ int ObFtsRangeBuildTask::tokenize_text(const common::ObString &text,
   return ret;
 }
 
+int ObFtsRangeBuildTask::build_word_rows(const storage::ObFTWordMap &word_map,
+                                         const int64_t doc_id,
+                                         const int64_t doc_len,
+                                         common::ObIAllocator &alloc,
+                                         common::ObIArray<FtsAuxRow> &rows)
+{
+  int ret = OB_SUCCESS;
+  rows.reuse();
+  for (storage::ObFTWordMap::const_iterator it = word_map.begin();
+       OB_SUCC(ret) && it != word_map.end(); ++it) {
+    const common::ObDatum &word_datum = it->first.get_word();
+    const common::ObString &word = word_datum.get_string();
+    char *buf = nullptr;
+    if (word.length() > 0 && OB_ISNULL(buf = static_cast<char *>(alloc.alloc(word.length())))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+      LOG_WARN("failed to allocate word buffer", K(ret), K(word.length()));
+    } else {
+      if (word.length() > 0) {
+        MEMCPY(buf, word.ptr(), word.length());
+      }
+      FtsAuxRow row;
+      row.word_.assign_ptr(buf, word.length());
+      row.doc_id_ = doc_id;
+      row.word_count_ = it->second;
+      row.doc_length_ = doc_len;
+      if (OB_FAIL(rows.push_back(row))) {
+        LOG_WARN("failed to push aux row", K(ret));
+      }
+    }
+  }
+  return ret;
+}
+
 int ObFtsRangeBuildTask::process()
 {
   int ret = OB_SUCCESS;
