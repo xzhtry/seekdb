@@ -388,14 +388,20 @@ int ObFtsRangeBuildTask::process()
   const share::schema::ObTableSchema *data_schema = nullptr;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = OB_NOT_INIT;
+    LOG_WARN("fts range build task not inited", K(ret));
   } else if (OB_ISNULL(dag_)) {
     ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("fts range build task without dag", K(ret));
   } else if (OB_ISNULL(GCTX.schema_service_)) {
     ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("schema service is null", K(ret));
   } else {
     const uint64_t aux_table_id = dag_->get_ddl_task_param().target_table_id_;
+    LOG_INFO("fts range build task start", K(aux_table_id), K_(slice_idx), K_(slice_count));
     if (OB_FAIL(GCTX.schema_service_->get_runtime_schema_guard(schema_guard))) {
+      LOG_WARN("failed to get schema guard", K(ret));
     } else if (OB_FAIL(schema_guard.get_table_schema(aux_table_id, aux_schema))) {
+      LOG_WARN("failed to get aux table schema", K(ret), K(aux_table_id));
     } else if (OB_ISNULL(aux_schema)) {
       ret = OB_TABLE_NOT_EXIST;
       LOG_WARN("aux table schema not found", K(ret), K(aux_table_id));
@@ -460,24 +466,28 @@ int ObDDLInsertDag::init_by_param(const share::ObIDagInitParam *param)
     } else if (OB_FAIL(batch_add_task(write_macro_block_tasks))) {
     } else if (OB_SUCC(ret) && ENABLE_FTS_RANGE_DRYRUN) {
       // Experimental: run the per-range FTS row builder alongside the normal build to
-      // validate scan/tokenize/sort numbers. It does not touch the DDL output.
+      // validate scan/tokenize/sort numbers. Scheduling problems must not fail the DDL.
+      int tmp_ret = OB_SUCCESS;
       ObArray<ObITask *> extra_tasks;
       ObITask *scan_task = write_macro_block_tasks.empty() ? nullptr : write_macro_block_tasks.at(0);
-      if (OB_ISNULL(scan_task)) {
-        ret = OB_ERR_UNEXPECTED;
-      }
-      for (int64_t i = 0; OB_SUCC(ret) && i < tablet_ids_.count(); ++i) {
+      LOG_INFO("fts dryrun: scheduling range tasks", "tablets", tablet_ids_.count(),
+               "tasks", write_macro_block_tasks.count());
+      UNUSED(scan_task);
+      for (int64_t i = 0; OB_SUCC(tmp_ret) && i < tablet_ids_.count(); ++i) {
         ObFtsRangeBuildTask *range_task = nullptr;
         if (OB_FAIL(alloc_task(range_task))) {
         } else if (OB_ISNULL(range_task)) {
-          ret = OB_ERR_UNEXPECTED;
+          tmp_ret = OB_ERR_UNEXPECTED;
         } else if (OB_FAIL(range_task->init(this, tablet_ids_.at(i), 0, 1, true /*dry_run*/))) {
-        } else if (OB_FAIL(scan_task->add_child(*range_task))) {
         } else if (OB_FAIL(extra_tasks.push_back(range_task))) {
         }
       }
-      if (OB_FAIL(ret)) {
-      } else if (OB_FAIL(batch_add_task(extra_tasks))) {
+      if (OB_FAIL(tmp_ret)) {
+        LOG_WARN("fts dryrun: failed to build range tasks", K(tmp_ret));
+      } else if (OB_FAIL(tmp_ret = batch_add_task(extra_tasks))) {
+        LOG_WARN("fts dryrun: failed to add range tasks", K(tmp_ret));
+      } else {
+        LOG_INFO("fts dryrun: scheduled", "tasks", extra_tasks.count());
       }
     }
   }
