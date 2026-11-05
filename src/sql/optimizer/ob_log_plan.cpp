@@ -12060,6 +12060,26 @@ int ObLogPlan::prepare_text_retrieval_scan(const ObIArray<ObRawExpr *> &scan_mat
     if (OB_FAIL(table_scan->set_is_skip_rowkey_doc(tr_info.doc_id_idx_tid_ == OB_INVALID_ID))) {
     } else if (OB_FAIL(table_scan->set_is_skip_rowkey_doc(tr_info.rowkey_idx_tid_ == OB_INVALID_ID))) {
     }
+    // COUNT(*) whose only input is this scan can be answered by counting matching
+    // documents; no output rows need to be produced.
+    ObLogicalOperator *parent = table_scan->get_parent();
+    if (OB_SUCC(ret)
+        && nullptr != parent
+        && LOG_GROUP_BY == parent->get_type()
+        && 1 == parent->get_num_of_child()
+        && table_scan == parent->get_child(0)) {
+      ObLogGroupBy *group_by = static_cast<ObLogGroupBy *>(parent);
+      const ObIArray<ObRawExpr *> &aggr_funcs = group_by->get_aggr_funcs();
+      if (group_by->get_group_by_exprs().empty()
+          && group_by->get_rollup_exprs().empty()
+          && 1 == aggr_funcs.count()
+          && nullptr != aggr_funcs.at(0)
+          && T_FUN_COUNT == aggr_funcs.at(0)->get_expr_type()
+          && nullptr == tr_info.topk_limit_expr_
+          && !tr_info.need_sort()) {
+        tr_info.count_only_ = true;
+      }
+    }
   }
 
   for (int64_t i = 0; OB_SUCC(ret) && i < all_match_filters.count(); ++i) {

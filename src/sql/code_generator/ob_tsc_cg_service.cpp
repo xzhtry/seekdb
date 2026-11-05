@@ -3049,6 +3049,10 @@ int ObTscCgService::generate_text_ir_spec_exprs(const ObTextRetrievalInfo &tr_in
     text_ir_scan_ctdef.match_filter_ = nullptr;
   }
 
+  if (OB_SUCC(ret)) {
+    text_ir_scan_ctdef.is_count_only_ = tr_info.count_only_;
+  }
+
   if (OB_SUCC(ret) && tr_info.need_calc_relevance_) {
     if (OB_ISNULL(tr_info.relevance_expr_)) {
       ret = OB_ERR_UNEXPECTED;
