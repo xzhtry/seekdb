@@ -39,7 +39,7 @@ using namespace oceanbase::share::schema;
 
 ObFtsRangeBuildTask::ObFtsRangeBuildTask()
   : share::ObITask(share::ObITask::TASK_TYPE_DDL_WRITE_PIPELINE),
-    is_inited_(false), dag_(nullptr), tablet_id_(), slice_idx_(0), slice_count_(0),
+    is_inited_(false), dry_run_(false), dag_(nullptr), tablet_id_(), slice_idx_(0), slice_count_(0),
     table_schema_alloc_(lib::ObMemAttr("FtsRangeBatch"))
 {
 }
@@ -47,7 +47,8 @@ ObFtsRangeBuildTask::ObFtsRangeBuildTask()
 int ObFtsRangeBuildTask::init(ObDDLIndependentDag *dag,
                               const common::ObTabletID &tablet_id,
                               const int64_t slice_idx,
-                              const int64_t slice_count)
+                              const int64_t slice_count,
+                              const bool dry_run)
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(is_inited_)) {
@@ -57,6 +58,7 @@ int ObFtsRangeBuildTask::init(ObDDLIndependentDag *dag,
     ret = OB_INVALID_ARGUMENT;
   } else {
     dag_ = dag;
+    dry_run_ = dry_run;
     tablet_id_ = tablet_id;
     slice_idx_ = slice_idx;
     slice_count_ = slice_count;
@@ -414,6 +416,9 @@ int ObFtsRangeBuildTask::process()
                              whole_range, alloc, rows, row_cnt, token_cnt))) {
         LOG_WARN("failed to scan/build rows", K(ret));
       } else if (OB_FAIL(sort_rows(rows))) {
+      } else if (dry_run_) {
+        LOG_INFO("fts range build dry run", K(ret), K(row_cnt), K(token_cnt), K(rows.count()),
+                 K_(slice_idx), K_(slice_count));
       } else if (OB_FAIL(write_slice(dag_, rows))) {
       } else {
         LOG_INFO("fts range build done", K(ret), K(row_cnt), K(token_cnt), K(rows.count()),
@@ -423,6 +428,9 @@ int ObFtsRangeBuildTask::process()
   }
   return ret;
 }
+
+// Experimental switch: schedule the per-range FTS builder (dry run) during DDL insert.
+static constexpr bool ENABLE_FTS_RANGE_DRYRUN = false;
 
 ObDDLInsertDag::ObDDLInsertDag()
   : px_thread_count_(0), px_finished_count_(0), is_range_count_ready_(false), total_slice_count_(0), use_static_plan_(true)
@@ -450,6 +458,27 @@ int ObDDLInsertDag::init_by_param(const share::ObIDagInitParam *param)
     ObArray<ObITask *> write_macro_block_tasks;
     if (OB_FAIL(generate_write_macro_block_tasks(write_macro_block_tasks))) {
     } else if (OB_FAIL(batch_add_task(write_macro_block_tasks))) {
+    } else if (OB_SUCC(ret) && ENABLE_FTS_RANGE_DRYRUN) {
+      // Experimental: run the per-range FTS row builder alongside the normal build to
+      // validate scan/tokenize/sort numbers. It does not touch the DDL output.
+      ObArray<ObITask *> extra_tasks;
+      ObITask *scan_task = write_macro_block_tasks.empty() ? nullptr : write_macro_block_tasks.at(0);
+      if (OB_ISNULL(scan_task)) {
+        ret = OB_ERR_UNEXPECTED;
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < tablet_ids_.count(); ++i) {
+        ObFtsRangeBuildTask *range_task = nullptr;
+        if (OB_FAIL(alloc_task(range_task))) {
+        } else if (OB_ISNULL(range_task)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(range_task->init(this, tablet_ids_.at(i), 0, 1, true /*dry_run*/))) {
+        } else if (OB_FAIL(scan_task->add_child(*range_task))) {
+        } else if (OB_FAIL(extra_tasks.push_back(range_task))) {
+        }
+      }
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(batch_add_task(extra_tasks))) {
+      }
     }
   }
   FLOG_INFO("ddl insert dag init", K(ret), KPC(this));

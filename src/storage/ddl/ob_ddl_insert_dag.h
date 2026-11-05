@@ -55,7 +55,8 @@ public:
   int init(ObDDLIndependentDag *dag,
            const common::ObTabletID &tablet_id,
            const int64_t slice_idx,
-           const int64_t slice_count);
+           const int64_t slice_count,
+           const bool dry_run = false);
   virtual int process() override;
   // Tokenize one document's fulltext into a word->count map (building block for the
   // per-range aux row generation).
@@ -99,6 +100,7 @@ public:
                  int64_t &token_cnt);
 private:
   bool is_inited_;
+  bool dry_run_;
   ObDDLIndependentDag *dag_;
   common::ObTabletID tablet_id_;
   int64_t slice_idx_;
