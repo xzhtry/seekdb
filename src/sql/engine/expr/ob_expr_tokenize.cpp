@@ -39,6 +39,102 @@ namespace oceanbase
 {
 namespace sql
 {
+
+namespace
+{
+// Bounded thread-local cache for tokenize() results.  tokenize() is deterministic
+// in (parser, properties, input collation, output mode, text); repeated calls with
+// the same inputs (a generated column over low-cardinality text, or a client
+// re-issuing the same statement) currently redo segmentation and JSON packing
+// every time.  Eight entries cover the usual working set; full table -> clear.
+struct ObTokenizeResultCache
+{
+  static constexpr int64_t MAX_ENTRIES = 8;
+  struct Entry
+  {
+    ObString key_;
+    ObString val_;
+  };
+  ObTokenizeResultCache() : cnt_(0) {}
+  void clear()
+  {
+    cnt_ = 0;
+    alloc_.reset();
+  }
+  int64_t cnt_;
+  common::ObArenaAllocator alloc_;
+  Entry entries_[MAX_ENTRIES];
+};
+thread_local ObTokenizeResultCache g_tokenize_result_cache;
+
+int build_tokenize_cache_key(ObIAllocator &alloc,
+                             const ObString &parser_name,
+                             const ObString &properties,
+                             const ObString &fulltext,
+                             const int32_t collation,
+                             const int32_t mode,
+                             ObString &key)
+{
+  int ret = OB_SUCCESS;
+  const int32_t n_name = parser_name.length();
+  const int32_t n_props = properties.length();
+  const int32_t n_text = fulltext.length();
+  const int64_t total = 5 * sizeof(int32_t) + n_name + n_props + n_text;
+  char *buf = static_cast<char *>(alloc.alloc(total));
+  if (OB_ISNULL(buf)) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    int64_t pos = 0;
+    MEMCPY(buf + pos, &n_name, sizeof(int32_t)); pos += sizeof(int32_t);
+    MEMCPY(buf + pos, &n_props, sizeof(int32_t)); pos += sizeof(int32_t);
+    MEMCPY(buf + pos, &n_text, sizeof(int32_t)); pos += sizeof(int32_t);
+    MEMCPY(buf + pos, &collation, sizeof(int32_t)); pos += sizeof(int32_t);
+    MEMCPY(buf + pos, &mode, sizeof(int32_t)); pos += sizeof(int32_t);
+    if (n_name > 0) { MEMCPY(buf + pos, parser_name.ptr(), n_name); pos += n_name; }
+    if (n_props > 0) { MEMCPY(buf + pos, properties.ptr(), n_props); pos += n_props; }
+    if (n_text > 0) { MEMCPY(buf + pos, fulltext.ptr(), n_text); pos += n_text; }
+    key.assign_ptr(buf, static_cast<int32_t>(pos));
+  }
+  return ret;
+}
+
+bool tokenize_cache_lookup(const ObString &key, ObString &val)
+{
+  bool hit = false;
+  ObTokenizeResultCache &cache = g_tokenize_result_cache;
+  for (int64_t i = 0; !hit && i < cache.cnt_; ++i) {
+    const ObTokenizeResultCache::Entry &e = cache.entries_[i];
+    if (e.key_.length() == key.length()
+        && 0 == MEMCMP(e.key_.ptr(), key.ptr(), key.length())) {
+      val = e.val_;
+      hit = true;
+    }
+  }
+  return hit;
+}
+
+int tokenize_cache_store(const ObString &key, const ObString &val)
+{
+  int ret = OB_SUCCESS;
+  ObTokenizeResultCache &cache = g_tokenize_result_cache;
+  if (cache.cnt_ >= ObTokenizeResultCache::MAX_ENTRIES) {
+    cache.clear();
+  }
+  char *key_buf = static_cast<char *>(cache.alloc_.alloc(key.length()));
+  char *val_buf = static_cast<char *>(cache.alloc_.alloc(val.length()));
+  if (OB_ISNULL(key_buf) || OB_ISNULL(val_buf)) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    MEMCPY(key_buf, key.ptr(), key.length());
+    MEMCPY(val_buf, val.ptr(), val.length());
+    ObTokenizeResultCache::Entry &e = cache.entries_[cache.cnt_];
+    e.key_.assign_ptr(key_buf, key.length());
+    e.val_.assign_ptr(val_buf, val.length());
+    ++cache.cnt_;
+  }
+  return ret;
+}
+} // namespace
 ObExprTokenize::ObExprTokenize(common::ObIAllocator &alloc)
     : ObStringExprOperator(alloc,
                            T_FUN_TOKENIZE,
@@ -64,12 +160,32 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
   if (OB_UNLIKELY(expr.arg_cnt_ < 1 || expr.arg_cnt_ > 3)) {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
-  } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
-  } else if (OB_FAIL(ObJsonExprHelper::pack_json_res(expr,
-                                                     ctx,
-                                                     temp_allocator,
-                                                     json_result,
-                                                     expr_datum))) {
+  } else {
+    ObString cache_key;
+    ObString cached_val;
+    if (OB_FAIL(build_tokenize_cache_key(temp_allocator,
+                                         param.parser_name_,
+                                         param.properties_,
+                                         param.fulltext_,
+                                         static_cast<int32_t>(param.meta_.get_collation_type()),
+                                         static_cast<int32_t>(param.output_mode_),
+                                         cache_key))) {
+    } else if (tokenize_cache_lookup(cache_key, cached_val)) {
+      if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, expr_datum, cached_val))) {
+      }
+    } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
+    } else {
+      ObString raw_json;
+      if (OB_FAIL(share::ObJsonWrapper::get_raw_binary(json_result, raw_json, &temp_allocator))) {
+      } else if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, expr_datum, raw_json))) {
+      } else {
+        // Best effort: a cache store failure must not fail the statement.
+        int tmp_ret = tokenize_cache_store(cache_key, raw_json);
+        if (OB_SUCCESS != tmp_ret) {
+          LOG_WARN("failed to store tokenize cache entry", K(tmp_ret));
+        }
+      }
+    }
   }
 
   return ret;
