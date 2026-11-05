@@ -24,6 +24,7 @@
 #include "storage/ddl/ob_ddl_merge_task_v2.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
 #include "storage/ddl/ob_complement_data_task.h"
+#include "storage/ddl/ob_pipeline.h"
 
 #include <algorithm>
 #include <vector>
@@ -134,14 +135,65 @@ int ObFtsRangeBuildTask::sort_rows(common::ObIArray<FtsAuxRow> &rows)
   return ret;
 }
 
+int ObFtsRangeBuildTask::write_slice(ObDDLIndependentDag *dag)
+{
+  int ret = OB_SUCCESS;
+  ObDDLTabletContext *tablet_context = nullptr;
+  storage::ObWriteMacroParam param;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = OB_NOT_INIT;
+  } else if (OB_ISNULL(dag)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(dag->get_tablet_context(tablet_id_, tablet_context))) {
+  } else if (OB_ISNULL(tablet_context)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    const ObDDLTaskParam &task_param = dag->get_ddl_task_param();
+    param.tablet_id_ = tablet_id_;
+    param.data_format_version_ = task_param.data_format_version_;
+    param.schema_version_ = task_param.schema_version_;
+    param.slice_idx_ = slice_idx_;
+    param.slice_count_ = slice_count_;
+    param.ddl_thread_count_ = slice_count_;
+    param.snapshot_version_ = task_param.snapshot_version_;
+    param.direct_load_type_ = storage::ObDDLDirectLoadUtil::ddl_get_direct_load_type();
+    param.task_id_ = task_param.ddl_task_id_;
+    param.is_index_table_ = true;
+    param.ddl_table_schema_ = dag->get_ddl_table_schema();
+    param.tablet_param_ = tablet_context->tablet_param_;
+    param.ddl_dag_ = dag;
+    param.tablet_context_ = tablet_context;
+
+    storage::ObPipeline pipeline(share::ObITask::TASK_TYPE_DDL_WRITE_PIPELINE);
+    storage::ObDDLWriteMacroBlockOperator write_op(&pipeline);
+    if (OB_FAIL(write_op.init(param))) {
+      LOG_WARN("failed to init ddl write macro block operator", K(ret));
+    } else if (OB_FAIL(pipeline.add_op(&write_op))) {
+    } else {
+      storage::ObChunk end_chunk;
+      end_chunk.set_end_chunk();
+      if (OB_FAIL(pipeline.push(end_chunk))) {
+        LOG_WARN("failed to close slice writer", K(ret));
+      }
+    }
+  }
+  return ret;
+}
+
 int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_schema,
                                     const share::schema::ObTableSchema &aux_schema,
+                                    const common::ObString &parser_name,
+                                    const common::ObString &parser_properties,
                                     const int64_t snapshot_version,
                                     blocksstable::ObDatumRange &range,
-                                    int64_t &row_cnt)
+                                    int64_t &row_cnt,
+                                    int64_t &token_cnt)
 {
   int ret = OB_SUCCESS;
   row_cnt = 0;
+  token_cnt = 0;
+  int64_t text_col_idx = -1;
+  int64_t doc_id_col_idx = -1;
   common::ObSEArray<share::schema::ObColDesc, 16> col_ids;
   common::ObSEArray<int32_t, 16> projector;
   storage::ObLocalScan local_scan;
@@ -150,7 +202,14 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
   } else if (OB_FAIL(data_schema.get_column_ids(col_ids))) {
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < col_ids.count(); ++i) {
+      const share::schema::ObColumnSchemaV2 *column_schema = nullptr;
       if (OB_FAIL(projector.push_back(static_cast<int32_t>(i)))) {
+      } else if (OB_ISNULL(column_schema = data_schema.get_column_schema(col_ids.at(i).col_id_))) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (column_schema->is_word_segment_column()) {
+        text_col_idx = i;
+      } else if (column_schema->is_doc_id_column()) {
+        doc_id_col_idx = i;
       }
     }
   }
@@ -176,11 +235,28 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
       query_flag.disable_cache();
       query_flag.skip_read_lob_ = 1;
       if (OB_FAIL(local_scan.table_scan(data_schema, tablet_id_, table_iter, query_flag, range))) {
+      } else if (OB_UNLIKELY(text_col_idx < 0 || doc_id_col_idx < 0)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("fts aux build: word segment / doc id column not found",
+                 K(ret), K(text_col_idx), K(doc_id_col_idx));
       } else {
         const blocksstable::ObDatumRow *row = nullptr;
+        common::ObArenaAllocator row_alloc(lib::ObMemAttr("FtsRangeRow"));
+        common::ObSEArray<FtsAuxRow, 64> aux_rows;
+        storage::ObFTWordMap word_map;
         while (OB_SUCC(local_scan.get_next_row(row))) {
-          if (OB_NOT_NULL(row)) {
+          int64_t doc_len = 0;
+          if (OB_ISNULL(row)) {
+            ret = OB_ERR_UNEXPECTED;
+          } else if (OB_FAIL(tokenize_text(row->storage_datums_[text_col_idx].get_string(),
+                                           parser_name, parser_properties,
+                                           row_alloc, word_map, doc_len))) {
+          } else if (OB_FAIL(build_word_rows(word_map, row->storage_datums_[doc_id_col_idx].get_int(),
+                                             doc_len, row_alloc, aux_rows))) {
+          } else if (OB_FAIL(sort_rows(aux_rows))) {
+          } else {
             ++row_cnt;
+            token_cnt += aux_rows.count();
           }
         }
         if (OB_ITER_END == ret) {

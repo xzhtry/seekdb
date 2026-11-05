@@ -76,11 +76,17 @@ public:
   int sort_rows(common::ObIArray<FtsAuxRow> &rows);
   // Scan one base-table range through a local scan and count the rows (the row
   // payload processing is added incrementally).
+  // Drive the DDL write pipeline for this task's slice (opens the slice writer and
+  // closes it via an end chunk; row batches are added incrementally).
+  int write_slice(ObDDLIndependentDag *dag);
   int scan_range(const share::schema::ObTableSchema &data_schema,
                  const share::schema::ObTableSchema &aux_schema,
+                 const common::ObString &parser_name,
+                 const common::ObString &parser_properties,
                  const int64_t snapshot_version,
                  blocksstable::ObDatumRange &range,
-                 int64_t &row_cnt);
+                 int64_t &row_cnt,
+                 int64_t &token_cnt);
 private:
   bool is_inited_;
   common::ObTabletID tablet_id_;
