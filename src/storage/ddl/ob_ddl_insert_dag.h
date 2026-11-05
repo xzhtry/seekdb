@@ -71,6 +71,9 @@ public:
                       const int64_t doc_len,
                       common::ObIAllocator &alloc,
                       common::ObIArray<FtsAuxRow> &rows);
+  // Sort rows by (word, doc_id). TODO: use the aux column collation once the task
+  // carries the schema; binary order is used for now.
+  int sort_rows(common::ObIArray<FtsAuxRow> &rows);
 private:
   bool is_inited_;
   common::ObTabletID tablet_id_;

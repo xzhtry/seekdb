@@ -24,6 +24,9 @@
 #include "storage/ddl/ob_ddl_merge_task_v2.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
 
+#include <algorithm>
+#include <vector>
+
 #define USING_LOG_PREFIX STORAGE
 
 using namespace oceanbase;
@@ -104,6 +107,27 @@ int ObFtsRangeBuildTask::build_word_rows(const storage::ObFTWordMap &word_map,
       if (OB_FAIL(rows.push_back(row))) {
         LOG_WARN("failed to push aux row", K(ret));
       }
+    }
+  }
+  return ret;
+}
+
+int ObFtsRangeBuildTask::sort_rows(common::ObIArray<FtsAuxRow> &rows)
+{
+  int ret = OB_SUCCESS;
+  std::vector<FtsAuxRow> sorted;
+  sorted.reserve(rows.count());
+  // reserve() above makes these push_back calls allocation-free.
+  for (int64_t i = 0; i < rows.count(); ++i) {
+    sorted.push_back(rows.at(i));
+  }
+  if (OB_SUCC(ret)) {
+    std::sort(sorted.begin(), sorted.end(), [](const FtsAuxRow &l, const FtsAuxRow &r) {
+      const int cmp = l.word_.compare(r.word_);
+      return cmp < 0 ? true : (cmp > 0 ? false : l.doc_id_ < r.doc_id_);
+    });
+    for (int64_t i = 0; OB_SUCC(ret) && i < rows.count(); ++i) {
+      rows.at(i) = sorted.at(static_cast<size_t>(i));
     }
   }
   return ret;
