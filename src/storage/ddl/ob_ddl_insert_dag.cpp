@@ -137,6 +137,61 @@ int ObFtsRangeBuildTask::sort_rows(common::ObIArray<FtsAuxRow> &rows)
   return ret;
 }
 
+int ObFtsRangeBuildTask::write_slice(ObDDLIndependentDag *dag,
+                                     const common::ObIArray<FtsAuxRow> &rows)
+{
+  int ret = OB_SUCCESS;
+  ObDDLTabletContext *tablet_context = nullptr;
+  storage::ObWriteMacroParam param;
+  storage::ObDDLBatchDatumRows *batch = nullptr;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = OB_NOT_INIT;
+  } else if (OB_ISNULL(dag) || rows.empty()) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(dag->get_tablet_context(tablet_id_, tablet_context))) {
+  } else if (OB_ISNULL(tablet_context)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    const ObDDLTaskParam &task_param = dag->get_ddl_task_param();
+    param.tablet_id_ = tablet_id_;
+    param.data_format_version_ = task_param.data_format_version_;
+    param.schema_version_ = task_param.schema_version_;
+    param.slice_idx_ = slice_idx_;
+    param.slice_count_ = slice_count_;
+    param.ddl_thread_count_ = slice_count_;
+    param.snapshot_version_ = task_param.snapshot_version_;
+    param.direct_load_type_ = storage::ObDDLDirectLoadUtil::ddl_get_direct_load_type();
+    param.task_id_ = task_param.ddl_task_id_;
+    param.is_index_table_ = true;
+    param.ddl_table_schema_ = dag->get_ddl_table_schema();
+    param.tablet_param_ = tablet_context->tablet_param_;
+    param.ddl_dag_ = dag;
+    param.tablet_context_ = tablet_context;
+
+    storage::ObPipeline pipeline(share::ObITask::TASK_TYPE_DDL_WRITE_PIPELINE);
+    storage::ObDDLWriteMacroBlockOperator write_op(&pipeline);
+    if (OB_FAIL(write_op.init(param))) {
+      LOG_WARN("failed to init ddl write macro block operator", K(ret));
+    } else if (OB_FAIL(pipeline.add_op(&write_op))) {
+    } else if (OB_FAIL(build_batch(dag, rows, rows.count(), batch))) {
+    } else {
+      storage::ObChunk batch_chunk;
+      batch_chunk.type_ = storage::ObChunk::DDL_BATCH_DATUM_ROWS;
+      batch_chunk.ddl_batch_rows_ = batch;
+      if (OB_FAIL(pipeline.push(batch_chunk))) {
+        LOG_WARN("failed to push aux batch", K(ret));
+      } else {
+        storage::ObChunk end_chunk;
+        end_chunk.set_end_chunk();
+        if (OB_FAIL(pipeline.push(end_chunk))) {
+          LOG_WARN("failed to close slice writer", K(ret));
+        }
+      }
+    }
+  }
+  return ret;
+}
+
 int ObFtsRangeBuildTask::build_batch(ObDDLIndependentDag *dag,
                                      const common::ObIArray<FtsAuxRow> &rows,
                                      const int64_t max_batch_size,
@@ -169,8 +224,21 @@ int ObFtsRangeBuildTask::build_batch(ObDDLIndependentDag *dag,
         }
       }
     }
-    // TODO: link batch_rows_ vectors into datum_rows_ (ObIVector vs ObDDLVector)
-    // before the batch is pushed into the pipeline.
+    if (OB_SUCC(ret)) {
+      batch->datum_rows_.reset();
+      for (int64_t i = 0; OB_SUCC(ret) && i < batch->batch_rows_.get_vectors().count(); ++i) {
+        storage::ObDDLVector *ddl_vector = batch->batch_rows_.get_vectors().at(i);
+        blocksstable::ObIVector *vector = nullptr;
+        if (OB_ISNULL(ddl_vector) || OB_ISNULL(vector = ddl_vector->get_vector())) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(batch->datum_rows_.vectors_.push_back(vector))) {
+          LOG_WARN("failed to link vector", K(ret));
+        }
+      }
+      if (OB_SUCC(ret)) {
+        batch->datum_rows_.row_count_ = batch->batch_rows_.size();
+      }
+    }
   }
   return ret;
 }

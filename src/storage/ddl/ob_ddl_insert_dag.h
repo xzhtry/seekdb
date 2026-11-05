@@ -79,6 +79,8 @@ public:
   // Drive the DDL write pipeline for this task's slice (opens the slice writer and
   // closes it via an end chunk; row batches are added incrementally).
   int write_slice(ObDDLIndependentDag *dag);
+  // Same as above, but writes the given (sorted) rows into this slice before closing.
+  int write_slice(ObDDLIndependentDag *dag, const common::ObIArray<FtsAuxRow> &rows);
   // Convert sorted aux rows into a DDL batch (row order == aux column order:
   // word, doc id, word count, doc length).
   int build_batch(ObDDLIndependentDag *dag,
