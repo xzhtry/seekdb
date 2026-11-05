@@ -30,6 +30,48 @@ using namespace oceanbase::storage;
 using namespace oceanbase::share;
 using namespace oceanbase::share::schema;
 
+ObFtsRangeBuildTask::ObFtsRangeBuildTask()
+  : share::ObITask(share::ObITask::TASK_TYPE_DDL_WRITE_PIPELINE),
+    is_inited_(false), tablet_id_(), slice_idx_(0), slice_count_(0)
+{
+}
+
+int ObFtsRangeBuildTask::init(const common::ObTabletID &tablet_id,
+                              const common::ObStoreRange &range,
+                              const int64_t slice_idx,
+                              const int64_t slice_count)
+{
+  int ret = OB_SUCCESS;
+  if (OB_UNLIKELY(is_inited_)) {
+    ret = OB_INIT_TWICE;
+  } else if (OB_UNLIKELY(!tablet_id.is_valid() || slice_idx < 0 || slice_count <= 0 || slice_idx >= slice_count)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    UNUSED(range);
+    tablet_id_ = tablet_id;
+    slice_idx_ = slice_idx;
+    slice_count_ = slice_count;
+    is_inited_ = true;
+  }
+  return ret;
+}
+
+int ObFtsRangeBuildTask::process()
+{
+  int ret = OB_SUCCESS;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = OB_NOT_INIT;
+  } else {
+    // Placeholder: the data path (scan this range -> tokenize -> sort -> write the
+    // slice) is not implemented yet. Keep the task observable in the DDL log.
+    LOG_INFO("fts range build task start",
+             "tablet_id", tablet_id_, "slice_idx", slice_idx_, "slice_count", slice_count_);
+    if (OB_FAIL(dag_yield())) {
+    }
+  }
+  return ret;
+}
+
 ObDDLInsertDag::ObDDLInsertDag()
   : px_thread_count_(0), px_finished_count_(0), is_range_count_ready_(false), total_slice_count_(0), use_static_plan_(true)
 {

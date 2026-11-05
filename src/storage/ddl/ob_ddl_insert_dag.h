@@ -38,6 +38,24 @@ public:
   int64_t px_thread_count_;
 };
 
+class ObFtsRangeBuildTask final : public share::ObITask
+{
+public:
+  ObFtsRangeBuildTask();
+  virtual ~ObFtsRangeBuildTask() = default;
+  // One task per base-table block range; slice_idx identifies the slice it writes.
+  int init(const common::ObTabletID &tablet_id,
+           const common::ObStoreRange &range,
+           const int64_t slice_idx,
+           const int64_t slice_count);
+  virtual int process() override;
+private:
+  bool is_inited_;
+  common::ObTabletID tablet_id_;
+  int64_t slice_idx_;
+  int64_t slice_count_;
+};
+
 class ObDDLInsertDag : public ObDDLIndependentDag
 {
 public:
