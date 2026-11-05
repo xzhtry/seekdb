@@ -304,6 +304,7 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
   int ret = OB_SUCCESS;
   row_cnt = 0;
   token_cnt = 0;
+  LOG_INFO("fts range scan: enter", K_(tablet_id), K(snapshot_version));
   int64_t text_col_idx = -1;
   int64_t doc_id_col_idx = -1;
   common::ObSEArray<share::schema::ObColDesc, 16> col_ids;
@@ -332,7 +333,7 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
   } else {
     storage::ObLS *ls = nullptr;
     ObTabletTableIterator table_iter;
-    const bool allow_not_ready = false;
+    const bool allow_not_ready = true;
     if (OB_FAIL(share::server_service<storage::ObLSService>()->get_ls(ls))) {
     } else if (OB_ISNULL(ls)) {
       ret = OB_ERR_UNEXPECTED;
@@ -346,7 +347,9 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
       ObQueryFlag query_flag(ObQueryFlag::Forward, false, true, false, false, false, false);
       query_flag.disable_cache();
       query_flag.skip_read_lob_ = 1;
+      LOG_INFO("fts range scan: read tables ready", K_(tablet_id), K(snapshot_version));
       if (OB_FAIL(local_scan.table_scan(data_schema, tablet_id_, table_iter, query_flag, range))) {
+        LOG_WARN("fts range scan: table_scan failed", K(ret));
       } else if (OB_UNLIKELY(text_col_idx < 0 || doc_id_col_idx < 0)) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("fts aux build: word segment / doc id column not found",
@@ -365,15 +368,21 @@ int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_sch
           } else if (FALSE_IT(doc_rows.reuse())) {
           } else if (OB_FAIL(build_word_rows(word_map, row->storage_datums_[doc_id_col_idx].get_int(),
                                              doc_len, alloc, doc_rows))) {
-          } else if (OB_FAIL(out_rows.assign(doc_rows))) {
           } else {
-            ++row_cnt;
-            token_cnt += doc_rows.count();
+            for (int64_t i = 0; OB_SUCC(ret) && i < doc_rows.count(); ++i) {
+              if (OB_FAIL(out_rows.push_back(doc_rows.at(i)))) {
+              }
+            }
+            if (OB_SUCC(ret)) {
+              ++row_cnt;
+              token_cnt += doc_rows.count();
+            }
           }
         }
         if (OB_ITER_END == ret) {
           ret = OB_SUCCESS;
         }
+        LOG_INFO("fts range scan: finished", K(row_cnt), K(token_cnt));
       }
     }
   }
@@ -409,6 +418,7 @@ int ObFtsRangeBuildTask::process()
     } else if (OB_ISNULL(data_schema)) {
       ret = OB_TABLE_NOT_EXIST;
     } else {
+      LOG_INFO("fts range: schemas ready", K(aux_table_id), "data_table_id", data_schema->get_table_id());
       common::ObArenaAllocator alloc(lib::ObMemAttr("FtsRangeTask"));
       common::ObSEArray<FtsAuxRow, 1024> rows;
       blocksstable::ObDatumRange whole_range;
