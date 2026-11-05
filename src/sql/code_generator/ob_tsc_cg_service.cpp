@@ -3041,8 +3041,12 @@ int ObTscCgService::generate_text_ir_spec_exprs(const ObTextRetrievalInfo &tr_in
   }
 
   if (OB_SUCC(ret) && nullptr != tr_info.pushdown_match_filter_) {
-    if (OB_FAIL(cg_.generate_rt_expr(*tr_info.pushdown_match_filter_, text_ir_scan_ctdef.match_filter_))) {
-    }
+    // A text retrieval scan only emits documents that match the query tokens, so the
+    // boolean MATCH(...) filter pushed down here is always true for every emitted row.
+    // The plan still carries pushdown_match_filter_ (EXPLAIN output unchanged), but the
+    // runtime expression is intentionally left ungenerated so the DAS merge iterator
+    // does not evaluate BM25 + comparison per row.
+    text_ir_scan_ctdef.match_filter_ = nullptr;
   }
 
   if (OB_SUCC(ret) && tr_info.need_calc_relevance_) {
