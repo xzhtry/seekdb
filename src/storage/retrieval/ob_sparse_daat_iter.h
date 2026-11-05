@@ -72,6 +72,8 @@ public:
   virtual ~ObSRDaaTIterImpl() {}
   virtual int get_next_row() override;
   virtual int get_next_rows(const int64_t capacity, int64_t &count) override;
+  // Count matching documents without materializing output rows.
+  int count_matches(int64_t &count);
   int init(
       ObSparseRetrievalMergeParam &iter_param,
       ObIArray<ObISRDaaTDimIter *> &dim_iters,

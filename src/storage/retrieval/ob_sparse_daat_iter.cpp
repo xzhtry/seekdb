@@ -248,6 +248,44 @@ int ObSRDaaTIterImpl::get_next_rows(const int64_t capacity, int64_t &count)
   return ret;
 }
 
+int ObSRDaaTIterImpl::count_matches(int64_t &count)
+{
+  int ret = OB_SUCCESS;
+  count = 0;
+  if (IS_NOT_INIT) {
+    ret = OB_NOT_INIT;
+  } else if (0 == dim_iters_->count()) {
+    ret = OB_ITER_END;
+  } else if (OB_FAIL(pre_process())) {
+    if (OB_UNLIKELY(OB_ITER_END != ret)) {
+    } else {
+      ret = OB_SUCCESS;
+    }
+  } else {
+    while (OB_SUCC(ret)) {
+      const ObDatum *id_datum = nullptr;
+      double relevance = 0.0;
+      bool got_valid_id = false;
+      if (OB_FAIL(fill_merge_heap())) {
+        if (OB_UNLIKELY(OB_ITER_END != ret)) {
+        } else {
+          ret = OB_SUCCESS;
+          break;
+        }
+      } else if (OB_FAIL(collect_dims_by_id(id_datum, relevance, got_valid_id))) {
+        if (OB_UNLIKELY(OB_ITER_END != ret)) {
+        } else {
+          ret = OB_SUCCESS;
+          break;
+        }
+      } else if (got_valid_id) {
+        ++count;
+      }
+    }
+  }
+  return ret;
+}
+
 int ObSRDaaTIterImpl::pre_process()
 {
   return OB_NOT_IMPLEMENT;
