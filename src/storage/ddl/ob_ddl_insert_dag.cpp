@@ -407,38 +407,47 @@ int ObFtsRangeBuildTask::process()
   } else {
     const uint64_t aux_table_id = dag_->get_ddl_task_param().target_table_id_;
     LOG_INFO("fts range build task start", K(aux_table_id), K_(slice_idx), K_(slice_count));
-    if (OB_FAIL(GCTX.schema_service_->get_runtime_schema_guard(schema_guard))) {
-      LOG_WARN("failed to get schema guard", K(ret));
-    } else if (OB_FAIL(schema_guard.get_table_schema(aux_table_id, aux_schema))) {
-      LOG_WARN("failed to get aux table schema", K(ret), K(aux_table_id));
-    } else if (OB_ISNULL(aux_schema)) {
-      ret = OB_TABLE_NOT_EXIST;
-      LOG_WARN("aux table schema not found", K(ret), K(aux_table_id));
-    } else if (OB_FAIL(schema_guard.get_table_schema(aux_schema->get_data_table_id(), data_schema))) {
-    } else if (OB_ISNULL(data_schema)) {
-      ret = OB_TABLE_NOT_EXIST;
+    if (OB_FAIL(GCTX.schema_service_->get_runtime_schema_guard_with_version_in_inner_table(schema_guard))) {
+      LOG_WARN("failed to get ddl schema guard", K(ret));
     } else {
-      LOG_INFO("fts range: schemas ready", K(aux_table_id), "data_table_id", data_schema->get_table_id());
-      common::ObArenaAllocator alloc(lib::ObMemAttr("FtsRangeTask"));
-      common::ObSEArray<FtsAuxRow, 1024> rows;
-      blocksstable::ObDatumRange whole_range;
-      whole_range.set_whole_range();
-      int64_t row_cnt = 0;
-      int64_t token_cnt = 0;
-      if (OB_FAIL(scan_range(*data_schema, *aux_schema,
-                             aux_schema->get_parser_name_str(),
-                             aux_schema->get_parser_property_str(),
-                             dag_->get_ddl_task_param().snapshot_version_,
-                             whole_range, alloc, rows, row_cnt, token_cnt))) {
-        LOG_WARN("failed to scan/build rows", K(ret));
-      } else if (OB_FAIL(sort_rows(rows))) {
-      } else if (dry_run_) {
-        LOG_INFO("fts range build dry run", K(ret), K(row_cnt), K(token_cnt), K(rows.count()),
-                 K_(slice_idx), K_(slice_count));
-      } else if (OB_FAIL(write_slice(dag_, rows))) {
+      LOG_INFO("fts range: guard ok", K(aux_table_id));
+      if (OB_FAIL(schema_guard.get_table_schema(aux_table_id, aux_schema))) {
+        LOG_WARN("failed to get aux table schema", K(ret), K(aux_table_id));
+      } else if (OB_ISNULL(aux_schema)) {
+        ret = OB_TABLE_NOT_EXIST;
+        LOG_WARN("aux table schema not found", K(ret), K(aux_table_id));
       } else {
-        LOG_INFO("fts range build done", K(ret), K(row_cnt), K(token_cnt), K(rows.count()),
-                 K_(slice_idx), K_(slice_count));
+        const uint64_t data_table_id = aux_schema->get_data_table_id();
+        LOG_INFO("fts range: aux schema ok", K(aux_table_id), K(data_table_id));
+        if (OB_FAIL(schema_guard.get_table_schema(data_table_id, data_schema))) {
+          LOG_WARN("failed to get data table schema", K(ret), K(data_table_id));
+        } else if (OB_ISNULL(data_schema)) {
+          ret = OB_TABLE_NOT_EXIST;
+          LOG_WARN("data table schema not found", K(ret), K(data_table_id));
+        } else {
+          LOG_INFO("fts range: schemas ready", K(aux_table_id), K(data_table_id));
+          common::ObArenaAllocator alloc(lib::ObMemAttr("FtsRangeTask"));
+          common::ObSEArray<FtsAuxRow, 1024> rows;
+          blocksstable::ObDatumRange whole_range;
+          whole_range.set_whole_range();
+          int64_t row_cnt = 0;
+          int64_t token_cnt = 0;
+          if (OB_FAIL(scan_range(*data_schema, *aux_schema,
+                                 aux_schema->get_parser_name_str(),
+                                 aux_schema->get_parser_property_str(),
+                                 dag_->get_ddl_task_param().snapshot_version_,
+                                 whole_range, alloc, rows, row_cnt, token_cnt))) {
+            LOG_WARN("failed to scan/build rows", K(ret));
+          } else if (OB_FAIL(sort_rows(rows))) {
+          } else if (dry_run_) {
+            LOG_INFO("fts range build dry run", K(ret), K(row_cnt), K(token_cnt), K(rows.count()),
+                     K_(slice_idx), K_(slice_count));
+          } else if (OB_FAIL(write_slice(dag_, rows))) {
+          } else {
+            LOG_INFO("fts range build done", K(ret), K(row_cnt), K(token_cnt), K(rows.count()),
+                     K_(slice_idx), K_(slice_count));
+          }
+        }
       }
     }
   }
