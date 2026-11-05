@@ -1896,6 +1896,27 @@ int ObTscCgService::generate_text_ir_ctdef(const ObLogTableScan &op,
     root_ctdef = ir_scan_ctdef;
     if (OB_FAIL(generate_text_ir_spec_exprs(tr_info, *ir_scan_ctdef))) {
     } else {
+      // COUNT(*) whose only input is this text retrieval scan can be answered by
+      // counting matching documents; record it for the DAS iterator. Detection has to
+      // happen here: at access-path allocation time the scan has no parent yet.
+      const ObLogicalOperator *parent = op.get_parent();
+      if (nullptr != parent
+          && log_op_def::LOG_GROUP_BY == parent->get_type()
+          && 1 == parent->get_num_of_child()
+          && &op == parent->get_child(0)) {
+        ObLogGroupBy *group_by =
+            const_cast<ObLogGroupBy *>(static_cast<const ObLogGroupBy *>(parent));
+        const ObIArray<ObRawExpr *> &aggr_funcs = group_by->get_aggr_funcs();
+        if (group_by->get_group_by_exprs().empty()
+            && group_by->get_rollup_exprs().empty()
+            && 1 == aggr_funcs.count()
+            && nullptr != aggr_funcs.at(0)
+            && T_FUN_COUNT == aggr_funcs.at(0)->get_expr_type()
+            && nullptr == tr_info.topk_limit_expr_
+            && !tr_info.need_sort()) {
+          ir_scan_ctdef->is_count_only_ = true;
+        }
+      }
       const ObCostTableScanInfo *est_cost_info = op.get_est_cost_info();
       int partition_row_cnt = 0;
       if (nullptr == est_cost_info
@@ -3047,10 +3068,6 @@ int ObTscCgService::generate_text_ir_spec_exprs(const ObTextRetrievalInfo &tr_in
     // runtime expression is intentionally left ungenerated so the DAS merge iterator
     // does not evaluate BM25 + comparison per row.
     text_ir_scan_ctdef.match_filter_ = nullptr;
-  }
-
-  if (OB_SUCC(ret)) {
-    text_ir_scan_ctdef.is_count_only_ = tr_info.count_only_;
   }
 
   if (OB_SUCC(ret) && tr_info.need_calc_relevance_) {
