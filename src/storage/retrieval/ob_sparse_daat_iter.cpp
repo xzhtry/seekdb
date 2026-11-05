@@ -263,22 +263,32 @@ int ObSRDaaTIterImpl::count_matches(int64_t &count)
     }
   } else {
     while (OB_SUCC(ret)) {
-      const ObDatum *id_datum = nullptr;
-      double relevance = 0.0;
-      bool got_valid_id = false;
+      const ObSRMergeItem *top_item = nullptr;
+      bool curr_doc_end = false;
+      int64_t iter_idx = 0;
       if (OB_FAIL(fill_merge_heap())) {
         if (OB_UNLIKELY(OB_ITER_END != ret)) {
         } else {
           ret = OB_SUCCESS;
           break;
         }
-      } else if (OB_FAIL(collect_dims_by_id(id_datum, relevance, got_valid_id))) {
-        if (OB_UNLIKELY(OB_ITER_END != ret)) {
-        } else {
-          ret = OB_SUCCESS;
-          break;
+      } else if (merge_heap_->empty()) {
+        break;
+      }
+      // Same traversal as collect_dims_by_id, but without feeding the relevance
+      // collector: a COUNT(*) consumer never reads a score.
+      while (OB_SUCC(ret) && !merge_heap_->empty() && !curr_doc_end) {
+        if (merge_heap_->is_unique_champion()) {
+          curr_doc_end = true;
         }
-      } else if (got_valid_id) {
+        if (OB_FAIL(merge_heap_->top(top_item))) {
+        } else if (FALSE_IT(iter_idx = top_item->iter_idx_)) {
+        } else if (OB_FAIL(merge_heap_->pop())) {
+        } else {
+          next_round_iter_idxes_[next_round_cnt_++] = iter_idx;
+        }
+      }
+      if (OB_SUCC(ret)) {
         ++count;
       }
     }
