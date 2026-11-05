@@ -74,6 +74,13 @@ public:
   // Sort rows by (word, doc_id). TODO: use the aux column collation once the task
   // carries the schema; binary order is used for now.
   int sort_rows(common::ObIArray<FtsAuxRow> &rows);
+  // Scan one base-table range through a local scan and count the rows (the row
+  // payload processing is added incrementally).
+  int scan_range(const share::schema::ObTableSchema &data_schema,
+                 const share::schema::ObTableSchema &aux_schema,
+                 const int64_t snapshot_version,
+                 blocksstable::ObDatumRange &range,
+                 int64_t &row_cnt);
 private:
   bool is_inited_;
   common::ObTabletID tablet_id_;

@@ -23,6 +23,7 @@
 #include "storage/tx_storage/ob_ls_service.h"
 #include "storage/ddl/ob_ddl_merge_task_v2.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
+#include "storage/ddl/ob_complement_data_task.h"
 
 #include <algorithm>
 #include <vector>
@@ -128,6 +129,64 @@ int ObFtsRangeBuildTask::sort_rows(common::ObIArray<FtsAuxRow> &rows)
     });
     for (int64_t i = 0; OB_SUCC(ret) && i < rows.count(); ++i) {
       rows.at(i) = sorted.at(static_cast<size_t>(i));
+    }
+  }
+  return ret;
+}
+
+int ObFtsRangeBuildTask::scan_range(const share::schema::ObTableSchema &data_schema,
+                                    const share::schema::ObTableSchema &aux_schema,
+                                    const int64_t snapshot_version,
+                                    blocksstable::ObDatumRange &range,
+                                    int64_t &row_cnt)
+{
+  int ret = OB_SUCCESS;
+  row_cnt = 0;
+  common::ObSEArray<share::schema::ObColDesc, 16> col_ids;
+  common::ObSEArray<int32_t, 16> projector;
+  storage::ObLocalScan local_scan;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = OB_NOT_INIT;
+  } else if (OB_FAIL(data_schema.get_column_ids(col_ids))) {
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < col_ids.count(); ++i) {
+      if (OB_FAIL(projector.push_back(static_cast<int32_t>(i)))) {
+      }
+    }
+  }
+
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(local_scan.init(col_ids, col_ids, projector, data_schema,
+                                     snapshot_version, aux_schema, false /*unique_index_checking*/))) {
+  } else {
+    storage::ObLS *ls = nullptr;
+    ObTabletTableIterator table_iter;
+    const bool allow_not_ready = false;
+    if (OB_FAIL(share::server_service<storage::ObLSService>()->get_ls(ls))) {
+    } else if (OB_ISNULL(ls)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(ls->get_tablet_svr()->get_read_tables(
+                   tablet_id_, ObTabletCommon::DEFAULT_GET_TABLET_DURATION_US,
+                   snapshot_version, snapshot_version, table_iter, allow_not_ready))) {
+      if (OB_REPLICA_NOT_READABLE == ret) {
+        ret = OB_EAGAIN;
+      }
+    } else {
+      ObQueryFlag query_flag(ObQueryFlag::Forward, false, true, false, false, false, false);
+      query_flag.disable_cache();
+      query_flag.skip_read_lob_ = 1;
+      if (OB_FAIL(local_scan.table_scan(data_schema, tablet_id_, table_iter, query_flag, range))) {
+      } else {
+        const blocksstable::ObDatumRow *row = nullptr;
+        while (OB_SUCC(local_scan.get_next_row(row))) {
+          if (OB_NOT_NULL(row)) {
+            ++row_cnt;
+          }
+        }
+        if (OB_ITER_END == ret) {
+          ret = OB_SUCCESS;
+        }
+      }
     }
   }
   return ret;
