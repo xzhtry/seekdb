@@ -448,17 +448,23 @@ inline int ObFTCharUtil::do_classify(const char *input, const uint8_t char_len, 
   bool checker = false;
   type = CharType::USELESS;
 
-  if (OB_FAIL(is_alpha<CS_TYPE>(input, char_len, checker))) {
-  } else if (checker) {
+  // Decode the character once and classify it from the code point.  The old
+  // implementation called is_alpha / is_arabic / is_chinese / is_other_cjk in
+  // sequence and every one of those helpers decoded the very same character
+  // again, so a single Chinese character was decoded up to four times.  All
+  // four predicates are pure functions of the decoded code point, so the
+  // classification result is unchanged while the decode cost drops to one
+  // pass.  The surrogate helpers are kept as they are: for UTF8MB4 they are
+  // no-ops that never decode, for UTF16 they decode once more.
+  ob_wc_t unicode = 0;
+  if (OB_FAIL(decode_unicode<CS_TYPE>(input, char_len, unicode))) {
+  } else if (ObUnicodeBlockUtils::is_alpha(unicode)) {
     type = CharType::ENGLISH_LETTER;
-  } else if (OB_FAIL(is_arabic<CS_TYPE>(input, char_len, checker))) {
-  } else if (checker) {
+  } else if (ObUnicodeBlockUtils::is_arabic(unicode)) {
     type = CharType::ARABIC_LETTER;
-  } else if (OB_FAIL(is_chinese<CS_TYPE>(input, char_len, checker))) {
-  } else if (checker) {
+  } else if (ObUnicodeBlockUtils::is_chinese(unicode)) {
     type = CharType::CHINESE;
-  } else if (OB_FAIL(is_other_cjk<CS_TYPE>(input, char_len, checker))) {
-  } else if (checker) {
+  } else if (ObUnicodeBlockUtils::is_other_cjk(unicode)) {
     type = CharType::OTHER_CJK;
   } else if (OB_FAIL(is_surrogate_high<CS_TYPE>(input, char_len, checker))) {
   } else if (checker) {
