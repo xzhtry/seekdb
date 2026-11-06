@@ -705,6 +705,7 @@ private:
   int fetch_next_fts_index_rows();
   int fill_generated_fts_cols(blocksstable::ObDatumRow *row);
   int get_output_fts_col_expr_by_type(const ObExprOperatorType &type, ObExpr *&expr);
+  int resolve_fts_output_exprs();
   bool is_resume_point_saved();
 protected:
   DASOpResultIter scan_result_;
@@ -735,6 +736,14 @@ protected:
   bool in_rescan_;
   ObDomainIndexCache domain_index_;
   ObFTIndexRowCache fts_index_;
+  // FTS aux row output expressions.  The output expression array of the
+  // operator never changes, so the four expressions are resolved once instead
+  // of being searched for again for every generated aux row.
+  ObExpr *fts_word_segment_expr_;
+  ObExpr *fts_doc_id_expr_;
+  ObExpr *fts_word_count_expr_;
+  ObExpr *fts_doc_length_expr_;
+  bool fts_exprs_resolved_;
 
   // output_ is used to output data, TSC operator directly invokes output_::get_next_row(s),
   // it points to fold_iter_ in group rescan and iter_tree_ in normal scan.
