@@ -50,22 +50,35 @@ namespace
 struct ObTokenizeResultCache
 {
   static constexpr int64_t MAX_ENTRIES = 8;
+  static constexpr int64_t SHARD_NUM = 64;
   struct Entry
   {
     ObString key_;
     ObString val_;
   };
-  ObTokenizeResultCache() : cnt_(0) {}
-  void clear()
+  struct Shard
   {
-    cnt_ = 0;
-    alloc_.reset();
+    lib::ObMutex lock_;
+    int64_t cnt_ = 0;
+    common::ObArenaAllocator alloc_;
+    Entry entries_[MAX_ENTRIES];
+  };
+  static uint64_t hash_key(const char *data, const int64_t len)
+  {
+    uint64_t hash = 14695981039346656037ULL;
+    for (int64_t i = 0; i < len; ++i) {
+      hash ^= static_cast<uint64_t>(static_cast<unsigned char>(data[i]));
+      hash *= 1099511628211ULL;
+    }
+    return hash;
   }
-  int64_t cnt_;
-  common::ObArenaAllocator alloc_;
-  Entry entries_[MAX_ENTRIES];
+  Shard &shard_of(const ObString &key)
+  {
+    return shards_[hash_key(key.ptr(), key.length()) % SHARD_NUM];
+  }
+  Shard shards_[SHARD_NUM];
 };
-thread_local ObTokenizeResultCache g_tokenize_result_cache;
+ObTokenizeResultCache g_tokenize_result_cache;
 
 int build_tokenize_cache_key(ObIAllocator &alloc,
                              const ObString &parser_name,
@@ -101,9 +114,10 @@ int build_tokenize_cache_key(ObIAllocator &alloc,
 bool tokenize_cache_lookup(const ObString &key, ObString &val)
 {
   bool hit = false;
-  ObTokenizeResultCache &cache = g_tokenize_result_cache;
-  for (int64_t i = 0; !hit && i < cache.cnt_; ++i) {
-    const ObTokenizeResultCache::Entry &e = cache.entries_[i];
+  ObTokenizeResultCache::Shard &shard = g_tokenize_result_cache.shard_of(key);
+  lib::ObMutexGuard guard(shard.lock_);
+  for (int64_t i = 0; !hit && i < shard.cnt_; ++i) {
+    const ObTokenizeResultCache::Entry &e = shard.entries_[i];
     if (e.key_.length() == key.length()
         && 0 == MEMCMP(e.key_.ptr(), key.ptr(), key.length())) {
       val = e.val_;
@@ -116,21 +130,23 @@ bool tokenize_cache_lookup(const ObString &key, ObString &val)
 int tokenize_cache_store(const ObString &key, const ObString &val)
 {
   int ret = OB_SUCCESS;
-  ObTokenizeResultCache &cache = g_tokenize_result_cache;
-  if (cache.cnt_ >= ObTokenizeResultCache::MAX_ENTRIES) {
-    cache.clear();
+  ObTokenizeResultCache::Shard &shard = g_tokenize_result_cache.shard_of(key);
+  lib::ObMutexGuard guard(shard.lock_);
+  if (shard.cnt_ >= ObTokenizeResultCache::MAX_ENTRIES) {
+    shard.cnt_ = 0;
+    shard.alloc_.reset();
   }
-  char *key_buf = static_cast<char *>(cache.alloc_.alloc(key.length()));
-  char *val_buf = static_cast<char *>(cache.alloc_.alloc(val.length()));
+  char *key_buf = static_cast<char *>(shard.alloc_.alloc(key.length()));
+  char *val_buf = static_cast<char *>(shard.alloc_.alloc(val.length()));
   if (OB_ISNULL(key_buf) || OB_ISNULL(val_buf)) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else {
     MEMCPY(key_buf, key.ptr(), key.length());
     MEMCPY(val_buf, val.ptr(), val.length());
-    ObTokenizeResultCache::Entry &e = cache.entries_[cache.cnt_];
+    ObTokenizeResultCache::Entry &e = shard.entries_[shard.cnt_];
     e.key_.assign_ptr(key_buf, key.length());
     e.val_.assign_ptr(val_buf, val.length());
-    ++cache.cnt_;
+    ++shard.cnt_;
   }
   return ret;
 }
@@ -164,8 +180,8 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
     ObString cache_key;
     ObString cached_val;
     if (OB_FAIL(build_tokenize_cache_key(temp_allocator,
-                                         param.parser_name_,
-                                         param.properties_,
+                                         param.raw_parser_name_,
+                                         param.raw_properties_,
                                          param.fulltext_,
                                          static_cast<int32_t>(param.meta_.get_collation_type()),
                                          static_cast<int32_t>(param.output_mode_),
@@ -173,6 +189,7 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
     } else if (tokenize_cache_lookup(cache_key, cached_val)) {
       if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, expr_datum, cached_val))) {
       }
+    } else if (OB_FAIL(param.prepare_for_segmentation())) {
     } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
     } else {
       ObString raw_json;
@@ -328,8 +345,6 @@ int ObExprTokenize::parse_param(const ObExpr &expr,
   } else if (OB_FAIL(parse_fulltext(expr, ctx, param))) {
   } else if (OB_FAIL(parse_parser_name(expr, ctx, param))) {
   } else if (OB_FAIL(parse_parser_properties(expr, ctx, temp_allocator, param))) {
-  } else if (OB_FAIL(param.reform_parser_properties(param.properties_))) {
-  } else if (OB_FAIL(param.try_load_dictionary_for_ik())) {
   }
   return ret;
 }
@@ -449,7 +464,10 @@ int ObExprTokenize::parse_parser_name(const ObExpr &expr, ObEvalCtx &ctx, Tokeni
 
   if (OB_FAIL(ret)) {
     // already logged
-  } else if (OB_FAIL(construct_ft_parser_inner_name(raw_parser_name, param))) {
+  } else {
+    // The canonical parser name is only needed when we segment; the cache
+    // key uses the raw name.
+    param.raw_parser_name_ = raw_parser_name;
   }
 
   return ret;
@@ -483,6 +501,24 @@ int ObExprTokenize::parse_parser_properties(const ObExpr &expr,
         } // for
       }
     }
+  }
+
+  if (OB_SUCC(ret)) {
+    // Remember the raw properties: the canonical form is only needed when we
+    // actually segment, and the cache key is built from the raw ones.
+    param.raw_properties_ = param.properties_;
+  }
+
+  return ret;
+}
+
+int ObExprTokenize::TokenizeParam::prepare_for_segmentation()
+{
+  int ret = OB_SUCCESS;
+
+  if (OB_FAIL(construct_ft_parser_inner_name(raw_parser_name_, *this))) {
+  } else if (OB_FAIL(reform_parser_properties(raw_properties_))) {
+  } else if (OB_FAIL(try_load_dictionary_for_ik())) {
   }
 
   return ret;

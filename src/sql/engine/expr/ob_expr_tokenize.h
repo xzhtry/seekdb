@@ -66,11 +66,19 @@ private:
     int reform_parser_properties(const ObString &properties);
     int try_load_dictionary_for_ik();
 
+    // Everything the segmentation itself needs: the canonical parser name,
+    // the canonical parser properties and the dictionary.  It is deferred to
+    // the cache miss path so that a cache hit does not pay for it.
+    int prepare_for_segmentation();
+
   public:
     // for property and tmp json string
     mutable ObArenaAllocator allocator_;
     ObString parser_name_;
     ObString properties_;
+    // Raw arguments, used as the result cache key.
+    ObString raw_parser_name_;
+    ObString raw_properties_;
     ObObjMeta meta_;
     ObString fulltext_;
     enum OUTPUT_MODE
