@@ -107,6 +107,12 @@ public:
 private:
   common::ObArenaAllocator engine_allocator_;
   ObIDASTextRetrievalEngine *engine_;
+  // COUNT(*)-only path: the match count is computed once by the retrieval
+  // engine and then emitted as synthetic rows.
+  bool count_only_;
+  bool count_done_;
+  int64_t matched_doc_cnt_;
+  int64_t remaining_cnt_;
   bool is_inited_;
   DISALLOW_COPY_AND_ASSIGN(ObDASTRMergeIter);
 };

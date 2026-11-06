@@ -121,6 +121,10 @@ ObDASTRMergeIter::ObDASTRMergeIter()
   : ObDASIter(ObDASIterType::DAS_ITER_TEXT_RETRIEVAL_MERGE),
     engine_allocator_(lib::ObMemAttr("DASRetrieval"), OB_MALLOC_NORMAL_BLOCK_SIZE),
     engine_(nullptr),
+    count_only_(false),
+    count_done_(false),
+    matched_doc_cnt_(0),
+    remaining_cnt_(0),
     is_inited_(false)
 {}
 
@@ -137,6 +141,13 @@ int ObDASTRMergeIter::inner_init(ObDASIterParam &param)
   } else if (OB_FAIL(engine_->init(
       static_cast<ObDASTRMergeIterParam &>(param)))) {
   } else {
+    const ObDASTRMergeIterParam &merge_param =
+        static_cast<ObDASTRMergeIterParam &>(param);
+    count_only_ = (nullptr != merge_param.ir_ctdef_)
+                  && merge_param.ir_ctdef_->is_count_only_;
+    count_done_ = false;
+    matched_doc_cnt_ = 0;
+    remaining_cnt_ = 0;
     is_inited_ = true;
   }
   return ret;
@@ -209,6 +220,31 @@ int ObDASTRMergeIter::inner_get_next_rows(int64_t &count, int64_t capacity)
   count = 0;
   if (IS_NOT_INIT || OB_ISNULL(engine_)) {
     ret = OB_NOT_INIT;
+  } else if (count_only_) {
+    // COUNT(*) only needs the number of matching documents.  Ask the retrieval
+    // engine for it once - the engine walks the merge without buffering ids or
+    // relevances - and then hand the aggregate synthetic rows instead of
+    // materializing every hit through the executor.
+    if (!count_done_) {
+      if (OB_FAIL(engine_->count_matches(matched_doc_cnt_))) {
+        if (OB_NOT_SUPPORTED == ret || OB_NOT_IMPLEMENT == ret) {
+          // The engine cannot count this shape; fall back to the normal path.
+          count_only_ = false;
+          ret = OB_SUCCESS;
+        }
+      } else {
+        count_done_ = true;
+        remaining_cnt_ = matched_doc_cnt_;
+      }
+    }
+    if (OB_SUCC(ret)) {
+      if (remaining_cnt_ <= 0) {
+        ret = OB_ITER_END;
+      } else {
+        count = OB_MIN(capacity, remaining_cnt_);
+        remaining_cnt_ -= count;
+      }
+    }
   } else {
     ret = engine_->get_next_rows(count, capacity);
   }

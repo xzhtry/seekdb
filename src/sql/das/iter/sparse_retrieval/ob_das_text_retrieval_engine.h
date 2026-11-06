@@ -48,6 +48,9 @@ public:
   virtual int rescan() = 0;
   virtual int get_next_row() = 0;
   virtual int get_next_rows(int64_t &count, const int64_t capacity) = 0;
+  // COUNT(*)-only: number of matching documents, computed without
+  // materializing ids or relevances.
+  virtual int count_matches(int64_t &count) = 0;
   virtual int set_lookup_keys(
       const common::ObIArray<std::pair<ObDocIdExt, int>> &virtual_rangekeys,
       const int64_t batch_size) = 0;

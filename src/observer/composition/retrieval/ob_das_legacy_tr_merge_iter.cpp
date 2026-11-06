@@ -1254,6 +1254,13 @@ public:
         ? OB_NOT_INIT : iter_->get_next_rows(count, capacity);
   }
 
+  int count_matches(int64_t &count) override
+  {
+    return OB_ISNULL(iter_)
+        ? OB_NOT_INIT
+        : iter_->count_matches(count);
+  }
+
   int set_lookup_keys(
       const common::ObIArray<std::pair<ObDocIdExt, int>> &virtual_rangekeys,
       const int64_t batch_size) override
