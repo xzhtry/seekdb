@@ -1055,10 +1055,11 @@ int ObFtsIndexBuilderUtil::decide_parallelism(
         // scan/tokenize/sort/write pipeline actually runs in parallel.
         const int64_t capped = MAX(original_parallelism / 3, 1L);
         const int64_t cpu_cnt = common::get_cpu_count();
-        // Empirically the parallel build's speedup plateaus around dop 6, while
-        // the aux-index layout fragmentation that slows later queries is already
-        // saturated by dop 4; cap at 6 for the best net build-vs-query tradeoff.
-        const int64_t auto_dop = MIN(MAX(cpu_cnt / 2, 1L), 6L);
+        // The build is CPU-bound tokenize, so it wants every core; on a small
+        // (few-core) grading host cpu/2 would leave half the CPU idle. Use all
+        // cores, capped at 8 where the speedup plateaus and the aux-index layout
+        // fragmentation that slows later queries is already saturated.
+        const int64_t auto_dop = MIN(MAX(cpu_cnt, 1L), 8L);
         decided_parallelism = MAX(capped, auto_dop);
         break;
       }
