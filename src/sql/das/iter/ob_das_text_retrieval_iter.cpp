@@ -457,10 +457,17 @@ int ObDASTextRetrievalIter::init_base_idx_scan_param(
     scan_param.pd_storage_flag_ = ctdef->pd_expr_spec_.pd_storage_flag_.pd_flag_;
     scan_param.fb_snapshot_ = rtdef->fb_snapshot_;
     scan_param.tablet_id_ = tablet_id;
-    if (!ctdef->pd_expr_spec_.pushdown_filters_.empty()) {
+    // The inv-index scan range is an exact single-token [word, docid] range,
+    // so the pushed-down word filter only re-checks what the range already
+    // guarantees; skipping it avoids per-batch token string compares.
+    const bool skip_pd_filters =
+        ctdef->ir_scan_type_ == ObTSCIRScanType::OB_IR_INV_IDX_SCAN;
+    if (!skip_pd_filters && !ctdef->pd_expr_spec_.pushdown_filters_.empty()) {
       scan_param.op_filters_ = &ctdef->pd_expr_spec_.pushdown_filters_;
     }
-    scan_param.pd_storage_filters_ = rtdef->p_pd_expr_op_->pd_storage_filters_;
+    if (!skip_pd_filters) {
+      scan_param.pd_storage_filters_ = rtdef->p_pd_expr_op_->pd_storage_filters_;
+    }
     if (OB_NOT_NULL(tx_desc)) {
       scan_param.tx_id_ = data_plane::tx_desc_id(tx_desc);
     } else {
