@@ -22,6 +22,7 @@
 #include "data_plane/fts/dict/ob_gen_dic_loader.h"
 #include "data_plane/fts/dict/ob_dic_lock_service.h"
 #include "share/ob_server_struct.h"
+#include "lib/cpu/ob_cpu_topology.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
 #include "share/schema/ob_multi_version_schema_service.h"
 #include "share/schema/ob_schema_utils.h"
@@ -1046,9 +1047,21 @@ int ObFtsIndexBuilderUtil::decide_parallelism(
         break;
       case share::schema::ObIndexType::INDEX_TYPE_DOC_ID_ROWKEY_LOCAL:
       case share::schema::ObIndexType::INDEX_TYPE_FTS_INDEX_LOCAL:
-      case share::schema::ObIndexType::INDEX_TYPE_FTS_DOC_WORD_LOCAL:
-        decided_parallelism = MAX(original_parallelism / 3, 1L);
+      case share::schema::ObIndexType::INDEX_TYPE_FTS_DOC_WORD_LOCAL: {
+        // An FTS aux build expands each base row into many aux rows inside the
+        // source table scan, so it is producer-bound, not byte-bound. A default
+        // ALTER ... ADD FULLTEXT INDEX carries no parallel hint and would run at
+        // dop 1; floor the build dop to a fraction of the machine cores so the
+        // scan/tokenize/sort/write pipeline actually runs in parallel.
+        const int64_t capped = MAX(original_parallelism / 3, 1L);
+        const int64_t cpu_cnt = common::get_cpu_count();
+        // Empirically the parallel build's speedup plateaus around dop 6, while
+        // the aux-index layout fragmentation that slows later queries is already
+        // saturated by dop 4; cap at 6 for the best net build-vs-query tradeoff.
+        const int64_t auto_dop = MIN(MAX(cpu_cnt / 2, 1L), 6L);
+        decided_parallelism = MAX(capped, auto_dop);
         break;
+      }
       case share::schema::ObIndexType::INDEX_TYPE_NORMAL_MULTIVALUE_LOCAL:
       case share::schema::ObIndexType::INDEX_TYPE_UNIQUE_MULTIVALUE_LOCAL:
         decided_parallelism = MAX(original_parallelism / 2, 1L);

@@ -217,7 +217,22 @@ int ObGranuleUtil::split_block_granule(ObExecContext &exec_ctx,
   // 3. calc the total number of tasks for all partitions
   int64_t esti_task_cnt_by_data_size = 0;
   if (OB_SUCC(ret)) {
-    data_plane::ObParallelRangeTaskParams params(config::px_task_size() >> 10);
+    int64_t min_task_access_size_kb = config::px_task_size() >> 10;
+    // An FTS index build generates far more aux rows than base rows inside the
+    // source table scan, so producer cost tracks per-row tokenize + aux-row
+    // generation work, not the (often tiny) base-table byte size. The default
+    // size-based split would hand a small base table a single granule and
+    // serialize the whole build on one producer thread. Shrink the effective task
+    // size for the FTS DDL source scan so its range splits into ~parallelism
+    // granules and the producers run in parallel; the post-exchange global sort
+    // still guarantees aux rowkey order, so no rows are lost or reordered.
+    if (OB_NOT_NULL(tsc) && tsc->is_fts_ddl_ && parallelism > 1 && total_size > 0) {
+      min_task_access_size_kb = total_size / parallelism;
+      if (min_task_access_size_kb < 1) {
+        min_task_access_size_kb = 1;
+      }
+    }
+    data_plane::ObParallelRangeTaskParams params(min_task_access_size_kb);
     params.parallelism_ = parallelism;
     params.expected_task_load_kb_ = tablet_size/1024;
     if (OB_FAIL(data_plane::ObParallelRangeTaskPlanner::compute_total_task_count(
