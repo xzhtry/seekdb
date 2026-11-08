@@ -129,7 +129,7 @@ static void sk_load_cfg(int force)
   g_cfg.graph_degree = sk_env_int("SEEKDB_CUVS_GRAPH_DEGREE", 128, 8, 512);
   g_cfg.intermediate_degree =
       sk_env_int("SEEKDB_CUVS_INTERMEDIATE_DEGREE", 256, 8, 1024);
-  g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 100, 1, 400);
+  g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 25, 1, 400);
   g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 512, 16, 4096);
   g_cfg.search_width = sk_env_int("SEEKDB_CUVS_SEARCH_WIDTH", 4, 1, 32);
   g_cfg.log_level = sk_env_int("SEEKDB_CUVS_LOG", 1, 0, 2);
