@@ -128,8 +128,7 @@ private:
       const ObIndexType index_type,
       bool &task_submitted,
       uint64_t &aux_table_id,
-      int64_t &task_id,
-      const bool wait_for_complement = true);
+      int64_t &task_id);
   int prepare_rowkey_doc_table();
   int prepare_aux_index_tables();
   int construct_create_index_arg(

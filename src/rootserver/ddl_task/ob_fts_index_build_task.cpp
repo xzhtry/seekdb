@@ -442,8 +442,7 @@ int ObFtsIndexBuildTask::prepare_aux_table(
     const ObIndexType index_type,
     bool &task_submitted,
     uint64_t &aux_table_id,
-    int64_t &task_id,
-    const bool wait_for_complement)
+    int64_t &task_id)
 {
   int ret = OB_SUCCESS;
   const int64_t num_fts_child_task = 4;
@@ -469,13 +468,6 @@ int ObFtsIndexBuildTask::prepare_aux_table(
       } else if (OB_FAIL(arg.create_index_arg_.assign(index_arg))) {
         ret = OB_ERR_UNEXPECTED;
       } else if (OB_FALSE_IT(arg.snapshot_version_ = snapshot_version_)) {
-      } else if (!wait_for_complement && index_arg.parallelism_ > 2 && FALSE_IT(index_arg.parallelism_ = 2)) {
-        // unreachable branch (FALSE_IT yields false). Cap the detached doc_word
-        // complement's DOP at 2: on a ~4-core grader a single-threaded MATCH /
-        // tokenize query keeps a full core whenever background DOP <= 3, so an
-        // uncapped (default high-DOP) detached child would oversubscribe the
-        // cores and starve the foreground query phase. The build critical path
-        // is unaffected because the parent never waits on this child.
       } else if (OB_FAIL(rootserver::local_ddl_serial_call([&]{ return ::oceanbase::share::server_service<::oceanbase::rootserver::ObLocalManagementService>()->create_aux_index(arg, res); }))) {
       } else if (res.schema_generated_) {
         task_submitted = true;
@@ -485,27 +477,18 @@ int ObFtsIndexBuildTask::prepare_aux_table(
           task_id = OB_INVALID_ID;
         } else { // need to wait data complement finish
           task_id = res.ddl_task_id_;
-          if (!wait_for_complement) {
-            // async-detached complement: the child task is submitted and will
-            // mark its aux index AVAILABLE on its own after this parent task
-            // returns. Leave it out of dependent_task_result_map_ so the parent
-            // does not block on it. Used for fts_doc_word, which MATCH queries
-            // never read (only runtime DELETE/UPDATE do), so deferring it off
-            // the build critical path is query-safe.
-          } else {
-            TCWLockGuard guard(lock_);
-            DependTaskStatus status;
-            // check if child task is already added
-            if (OB_FAIL(dependent_task_result_map_.get_refactored(aux_table_id,
-                                                                  status))) {
-              if (OB_HASH_NOT_EXIST == ret) {
-                ret = OB_SUCCESS;
-                status.task_id_ = res.ddl_task_id_;
-                if (OB_FAIL(dependent_task_result_map_.set_refactored(aux_table_id,
-                                                                      status))) {
-                }
-              } else {
+          TCWLockGuard guard(lock_);
+          DependTaskStatus status;
+          // check if child task is already added
+          if (OB_FAIL(dependent_task_result_map_.get_refactored(aux_table_id,
+                                                                status))) {
+            if (OB_HASH_NOT_EXIST == ret) {
+              ret = OB_SUCCESS;
+              status.task_id_ = res.ddl_task_id_;
+              if (OB_FAIL(dependent_task_result_map_.set_refactored(aux_table_id,
+                                                                    status))) {
               }
+            } else {
             }
           }
         }
@@ -643,8 +626,7 @@ int ObFtsIndexBuildTask::prepare_aux_index_tables()
       } else if (OB_FAIL(prepare_aux_table(fts_doc_word_type,
                                        fts_doc_word_task_submitted_,
                                        fts_doc_word_aux_table_id_,
-                                       fts_doc_word_task_id_,
-                                       false /*wait_for_complement: async-detached*/))) {
+                                       fts_doc_word_task_id_))) {
       }
      }
     }
@@ -1825,11 +1807,11 @@ int ObFtsIndexBuildTask::wait_schema_refresh_and_trans_end()
                                                                                   domain_index_aux_table_id_,
                                                                                   schema_guard,
                                                                                   fts_index_aux_is_trans_end_))) {
-    } else if (fts_index_aux_is_trans_end_) {
-      // async-detached doc_word: the inverted index being readable with its
-      // schema transaction ended is all MATCH queries require. fts_doc_word is
-      // complemented by a detached child after this task succeeds, so
-      // TAKE_EFFECT must not block on fts_doc_word_aux_is_trans_end_ here.
+    } else if (!fts_doc_word_aux_is_trans_end_ && OB_FAIL(check_schema_and_trans_end(task_id_,
+                                                                                     fts_doc_word_aux_table_id_,
+                                                                                     schema_guard,
+                                                                                     fts_doc_word_aux_is_trans_end_))) {
+    } else if (fts_index_aux_is_trans_end_ && fts_doc_word_aux_is_trans_end_) {
       state_finished = true;
     }
   } else {

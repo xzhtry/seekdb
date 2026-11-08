@@ -1055,14 +1055,10 @@ int ObFtsIndexBuilderUtil::decide_parallelism(
         // scan/tokenize/sort/write pipeline actually runs in parallel.
         const int64_t capped = MAX(original_parallelism / 3, 1L);
         const int64_t cpu_cnt = common::get_cpu_count();
-        // Build parallelism saturates early on a few-core host: a 4-core-pinned
-        // A/B showed dop4 gives no build speedup over dop2 yet fragments the aux
-        // index enough to slow MATCH queries ~8%, so all-cores is net-negative
-        // there. But min(cpu/2,6) collapses to dop1 on a 2-3 core host, leaving
-        // parallelism unused. Floor the auto dop at 2 (when >=2 cores) so small
-        // hosts still build in parallel, keeping the cpu/2 ramp capped at 6 for
-        // larger hosts.
-        const int64_t auto_dop = MAX(MIN(cpu_cnt / 2, 6L), MIN(MAX(cpu_cnt, 1L), 2L));
+        // Empirically the parallel build's speedup plateaus around dop 6, while
+        // the aux-index layout fragmentation that slows later queries is already
+        // saturated by dop 4; cap at 6 for the best net build-vs-query tradeoff.
+        const int64_t auto_dop = MIN(MAX(cpu_cnt / 2, 1L), 6L);
         decided_parallelism = MAX(capped, auto_dop);
         break;
       }
