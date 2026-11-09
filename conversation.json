@@ -136,9 +136,18 @@
       "title": "协议探测提测",
       "hypothesis": "在官方测试驱动未公开时，framed 协议（READY / RESULT / OK / ERROR / BYE）是最合理的首选；提交一次探测可换回真实反馈。",
       "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=073cba573f1cc354c49ecb46f0650fa0069e9dd2",
-      "output": "提测成功；提测记录时间 2026-11-09 15:55，任务状态：待执行；成绩：-；结果：-",
+      "output": "提测成功；提测记录时间 2026-11-09 15:55，任务状态：执行成功；成绩：-；结果：成功 0 失败 1；结果详情页无失败日志（“暂无数据”）",
       "student_role": "学生在“提交探测 / 等待题包 / 多模式”之间选择“先按 framed 协议提交一次探测，用反馈定位格式”。",
-      "conclusion": "探测已提交，平台尚未执行；协议是否符合正式驱动待反馈。"
+      "conclusion": "探测已执行但未通过；平台没有给出失败用例名或日志。随后官方题包出现，定位到公开用例使用 value 作为列名，而当时解析器把 value 当保留字，导致建表/查询失败；这是可复现的功能缺陷，已修复。"
+    },
+    {
+      "id": "e8",
+      "title": "官方公开题包 20/20 用例",
+      "hypothesis": "公开用例覆盖基础 SQL、持久化、事务、向量 TopK 和索引维护；逐条按 .test/.result 断言执行应全部通过。",
+      "command": "python3 tests/run_public_cases.py（官方 mysqltest 20 个用例、95 条 SQL；--restart 复用同一数据目录，--mode ann 切换模式）",
+      "output": "PASS sql_crud / sql_comparisons / sql_ordering / sql_empty / sql_primary_key / sql_unicode / sql_bigint / sql_unsupported / storage_restart / vector_euclidean / transaction_commit / transaction_rollback / storage_mutations / storage_multiple_tables / vector_ties_and_filter / vector_float32 / vector_index_maintenance / transaction_failed_insert / transaction_autocommit_atomic / transaction_shutdown_rollback / 20/20 cases passed",
+      "student_role": "学生没有参与这轮定位；Agent 在官方题包发布后发现并修复 value 保留字问题，并逐条跑通公开用例。",
+      "conclusion": "公开语义（含 BIGINT 精度、float32、过滤后 TopK、事务原子性、正常关闭回滚）全部通过；正式驱动协议仍未知。"
     }
   ],
   "retrospective": {
@@ -153,14 +162,14 @@
       "ann 模式目前返回精确结果，没有实现近似索引；如果正式评测对 ann 查询耗时另设门槛，需要补索引。"
     ],
     "next_steps": [
-      "等待平台执行 073cba5 探测，读取失败类别/日志，确认语句边界、结果集格式和错误码。",
-      "若探测显示协议不符，优先改协议层而不是重写存储/执行器。",
+      "用修复后的 commit 重新提测；如果仍为 0/1，优先怀疑正式驱动的 READY/结果帧格式，而不是 SQL 语义（公开 20/20 已通过）。",
+      "若驱动协议仍不明确，保留 MVDB_PROTOCOL=mysql/tsv、MVDB_DML_STATUS=0、MVDB_HEADERS=0 等开关，减少改协议层成本。",
       "继续优化 1,000 次查询的 SQL/向量解析开销；本地 10k×128 查询约 0.70 s（按随机查询字符串、含 Python 驱动开销）。"
     ]
   },
   "limitations": [
-    "未获得官方题包、公开样例或测试驱动，无法在本地复现正式 MySQL case。",
-    "已按学生选择提交一次 framed 协议探测（2026-11-09 15:55，commit 073cba5...），平台任务状态为“待执行”，结果待补。",
+    "官方公开题包只有 .test/.result 和驱动指令，不包含进程通信驱动；stdin/stdout 的 READY/结果帧格式仍只能按 framed 协议实现，并用 MVDB_PROTOCOL=mysql/tsv 兼容。",
+    "2026-11-09 15:55 的 framed 探测结果为“执行成功、成功 0 失败 1”，平台无失败日志；后定位到当时解析器把 value 当保留字，公开题包中的 value 列会失败，已修复并在本地跑通 20/20 公开用例。",
     "未实现 HNSW/IVF 等近似索引；ann 模式为精确扫描。",
     "单客户端、单显式事务；不支持 NULL/JOIN/聚合/子查询/ALTER/主键更新。"
   ],
@@ -173,6 +182,13 @@
       "result_evidence": {"pointer": "/experiments/2/output", "quote": "match True"}
     },
     {
+      "dimension": "独立验证与质疑",
+      "tier": 1.0,
+      "reason": "学生选择“先按 framed 协议提交一次探测，用反馈定位格式”，把无法确定的协议问题转成可执行的平台实验；实验实际执行并返回“成功 0 失败 1”，随后 Agent 用官方公开题包定位到 value 保留字缺陷。",
+      "student_evidence": {"pointer": "/user_prompts/2/content", "quote": "先按 framed 协议提交一次探测，用反馈定位格式（推荐）"},
+      "result_evidence": {"pointer": "/experiments/6/output", "quote": "成功 0 失败 1"}
+    },
+    {
       "dimension": "取舍与反思",
       "tier": 0.5,
       "reason": "学生在三个目标中明确选择性能优先；但没有留下自己对“为什么性能优先、代价是什么”的解释，因此只按决策证据计 0.5。",
@@ -182,7 +198,7 @@
     {
       "dimension": "问题理解与自主拆解",
       "tier": 0.5,
-      "reason": "学生识别出协议未知是当前阻塞点，并选择“先按 framed 提交一次探测，用反馈定位格式”。截至本文件写入时探测尚未执行，因此只有计划证据。",
+      "reason": "学生识别出协议未知是当前阻塞点，并选择提交探测；探测已执行，但学生没有进一步解释结果或提出下一步拆解，因此按“有具体方案、无学生自己解释”计 0.5。",
       "student_evidence": {"pointer": "/user_prompts/2/content", "quote": "先按 framed 协议提交一次探测，用反馈定位格式（推荐）"},
       "result_evidence": null
     }

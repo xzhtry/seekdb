@@ -310,7 +310,7 @@ bool Parser::is_clause_keyword(const Token &t) const {
   if (t.type != Token::Type::IDENT || t.quoted) return false;
   static const std::set<std::string> kws = {
       "from", "where", "order", "limit", "offset", "as", "and", "or", "asc", "desc",
-      "values", "value", "set", "into", "on", "using", "with", "primary", "key",
+      "values", "set", "into", "on", "using", "with", "primary", "key",
       "not", "null", "if", "exists", "by", "group", "having", "join", "inner",
       "left", "right", "outer", "union", "select", "insert", "update", "delete",
       "create", "drop", "table", "index", "vector", "begin", "commit", "rollback",

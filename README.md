@@ -292,13 +292,17 @@ u32 payload_len | u32 crc32 | payload
 
 `tests/selftest.py` 覆盖：建表/增删改查、类型与错误、事务提交/回滚、持久化重启、强制终止恢复、重复恢复、精确 TopK 与过滤 TopK、`CREATE VECTOR INDEX`、`ann` 模式。
 
+`tests/run_public_cases.py` 直接读取官方公开题包 `mysqltest/manifest.json` 与 `cases/*.test|*.result`，按 `--restart` / `--mode ann` 驱动指令逐条执行并比较 JSON 断言（`{}`、`error`、`affected_rows`、`columns`、`rows`，浮点容差 1e-5）。
+
 ```bash
 ./build.sh
 python3 tests/selftest.py
+python3 tests/run_public_cases.py
 ```
 
 已验证的记录（本机 WSL Ubuntu，g++ 15，2026-11-09）：
 
+- 官方公开题包 20/20 用例通过（95 条 SQL，包含 BIGINT 精度、float32、过滤后 TopK、事务原子性、正常关闭回滚、`--restart`、`--mode ann`）；
 - 10,000 行 × 128 维，100 行/批写入：约 0.36 s；1,000 次 TopK（一半带过滤）：约 0.70 s；
 - 100,000 行 × 128 维（数据文件约 106 MiB，含 WAL），缓存限制 1 MiB：查询约 0.11 s，进程峰值 RSS 约 65 MiB；
 - 随机 20,000 行 × 64 维，与按存储后 float32 值计算的暴力 Top10 对比：ID 全部一致，距离误差 < 1e-7；
