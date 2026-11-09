@@ -810,14 +810,16 @@ std::optional<Row> Database::visible_row(Table *t, i64 id) const {
 }
 
 void Database::begin_txn() {
-  if (txn_active_) fail(ER_TXN_ACTIVE, "transaction already in progress");
+  // MySQL semantics: a second BEGIN implicitly commits the previous
+  // transaction and starts a new one.  Nested transactions are not supported.
+  if (txn_active_) commit_txn();
   txn_active_ = true;
   txn_id_ = alloc_txn();
   overlay_.clear();
 }
 
 void Database::rollback_txn() {
-  if (!txn_active_) fail(ER_NO_SUCH_TXN, "no transaction is active");
+  if (!txn_active_) return;
   txn_active_ = false;
   txn_id_ = 0;
   clear_overlay();
@@ -863,7 +865,7 @@ void Database::commit_changes(std::vector<Change> &changes) {
 }
 
 void Database::commit_txn() {
-  if (!txn_active_) fail(ER_NO_SUCH_TXN, "no transaction is active");
+  if (!txn_active_) return;
   std::vector<Change> changes;
   for (auto &kv : overlay_) {
     Table *t = kv.first;
@@ -1185,6 +1187,22 @@ bool eval_cond(const Cond &c, const EvalContext &ctx) {
     case CondKind::COMPARE: {
       Value a = eval_expr(*c.left, ctx);
       Value b = eval_expr(*c.right, ctx);
+      auto string_to_vector = [](const std::string &s) {
+        bool ok = false;
+        std::vector<double> nums = parse_vector_text(s, ok);
+        if (!ok) fail(ER_INVALID_VECTOR, "invalid vector literal");
+        std::vector<float> v(nums.size());
+        for (size_t i = 0; i < nums.size(); ++i) {
+          if (!std::isfinite(nums[i]) || std::fabs(nums[i]) > static_cast<double>(FLT_MAX))
+            fail(ER_INVALID_VECTOR, "vector value out of float32 range");
+          v[i] = static_cast<float>(nums[i]);
+        }
+        return Value::make_vector(std::move(v));
+      };
+      if (a.type == ValueType::VECTOR && b.type == ValueType::STRING)
+        b = string_to_vector(b.s);
+      else if (b.type == ValueType::VECTOR && a.type == ValueType::STRING)
+        a = string_to_vector(a.s);
       int cmp = compare_values(a, b);
       switch (c.op) {
         case CmpOp::EQ: return cmp == 0;
@@ -1906,7 +1924,8 @@ ResultSet Database::exec_delete(const Statement &st) {
 // DDL.
 // ===========================================================================
 void Database::ensure_no_txn_for_ddl() {
-  if (txn_active_) fail(ER_UNSUPPORTED, "DDL statements are not allowed inside a transaction");
+  // MySQL semantics: DDL causes an implicit commit of the active transaction.
+  if (txn_active_) commit_txn();
 }
 
 ResultSet Database::exec_create_table(const Statement &st) {

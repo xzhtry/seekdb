@@ -143,7 +143,7 @@ ROLLBACK;
 - 未显式 BEGIN 时，成功的 DML 自动提交。
 - 语句失败不会留下部分修改；之前成功的语句仍可提交或回滚。
 - 正常关闭（EOF/SIGTERM/SIGINT）回滚未提交事务并 checkpoint。
-- DDL 在显式事务内返回错误（不支持在事务中做 DDL）。
+- DDL（CREATE/DROP）在显式事务内按 MySQL 语义隐式提交当前事务；不支持真正的嵌套事务。
 
 ### 错误码
 

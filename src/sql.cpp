@@ -465,6 +465,11 @@ SelectStmt Parser::parse_select() {
   }
   expect_kw("from");
   s.table = parse_ident("table name");
+  if (accept_kw("as")) {
+    parse_ident("table alias");
+  } else if (peek().type == Token::Type::IDENT && !is_clause_keyword(peek())) {
+    next();  // bare table alias, not used for name resolution
+  }
   if (accept_kw("where")) {
     s.where = parse_condition();
   }
@@ -792,14 +797,6 @@ ExprPtr Parser::parse_primary() {
   }
   if (t.type == Token::Type::STRING) {
     std::string s = next().text;
-    bool ok = false;
-    std::vector<double> nums = parse_vector_text(s, ok);
-    if (ok) {
-      ExprPtr e = make_expr(ExprKind::VECTOR_LITERAL);
-      e->nums = std::move(nums);
-      e->text = "'" + s + "'";
-      return e;
-    }
     ExprPtr e = make_expr(ExprKind::STRING_LITERAL);
     e->s = std::move(s);
     e->text = "'" + e->s + "'";
@@ -826,7 +823,6 @@ ExprPtr Parser::parse_primary() {
         }
       }
       raw += next().text;
-      raw += " ";
     }
     (void)start;
     bool ok = false;
@@ -843,6 +839,11 @@ ExprPtr Parser::parse_primary() {
       fail(ER_PARSE, "expected expression near '" + name + "'");
     }
     next();
+    if (accept_punct('.')) {
+      // Qualified column: table.column.  The table qualifier is validated by
+      // the executor only implicitly; the column name is what matters here.
+      name = parse_ident("column name");
+    }
     if (accept_punct('(')) {
       std::vector<ExprPtr> args;
       if (!accept_punct(')')) {

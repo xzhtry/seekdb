@@ -137,10 +137,12 @@ def test_errors(tmp):
     expect(db.send("INSERT INTO t VALUES (1,'[0,0]');")[1] == 1062, "dup in txn")
     st = db.send("SELECT id FROM t ORDER BY id;")
     expect([r[0] for r in st[2]] == ["1", "2"], "txn continues after error")
-    expect(db.send("CREATE TABLE x (id BIGINT PRIMARY KEY);")[1] == 1235, "ddl in txn")
+    expect(db.send("CREATE TABLE x (id BIGINT PRIMARY KEY);")[0] == "OK", "ddl implicit commit")
     db.send("ROLLBACK;")
-    expect(db.send("COMMIT;")[1] == 1568, "commit without txn")
-    expect(db.send("ROLLBACK;")[1] == 1568, "rollback without txn")
+    expect(db.send("SELECT id FROM t ORDER BY id;")[2] == [["1"], ["2"]], "implicit commit kept rows")
+    db.send("DROP TABLE x;")
+    expect(db.send("COMMIT;")[0] == "OK", "commit without txn is a no-op")
+    expect(db.send("ROLLBACK;")[0] == "OK", "rollback without txn is a no-op")
     db.close()
 
 
