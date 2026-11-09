@@ -155,3 +155,23 @@ Then run the GPU smoke runner and the build benchmark; see
 the `fast_snapshot` key of the bridge configuration file does the same. The
 baseline `OBCUVS02` container is still written and still read, so a snapshot
 written by one setting can be read by the other.
+
+## 6. Build constraint: the hipVS header only redirects some CUDA names
+
+The bridge compiles against `HIPVS_ROOT/include`. On AMD that pulls in
+`cuvs/cuda_runtime.h`, a shim that includes `<hip/hip_runtime.h>` and
+`#define`s the CUDA spellings of the HIP ones. **The shim is not complete**:
+it maps `cudaMemcpy`, `cudaMemcpyDefault`, `cudaMemcpyDeviceToHost` and
+`cudaSuccess`, but it does **not** map `cudaMemcpy2D` (only
+`cudaMemcpy2DAsync` is mapped).
+
+A bridge that calls `cudaMemcpy2D` therefore does not compile against the
+hipVS headers, and the build stops in the first step — before a single test
+case runs. The graph export consequently uses the one-dimensional
+`cudaMemcpy` for the padded block and drops the row padding on the host.
+
+Rule for this file: **only use CUDA spellings that the shim actually
+redirects.** Check the list in `cuvs/cuda_runtime.h` before adding a runtime
+call, and compile against the real header instead of a stub — a stub that
+declares `cudaMemcpy2D` hides exactly this class of failure.
+

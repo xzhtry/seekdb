@@ -442,12 +442,17 @@ int seekdb_cuvs_cagra_knn(const float* base, long n, long dim,
 
 /* --------------------------------------------------- fast snapshot path --- */
 
-/* Copy a device-resident, row-major matrix to host memory in one call.
+/* Copy a device-resident, row-major matrix to host memory.
  * `strides` is in elements and may be NULL for a compact layout: cuVS'
  * to_dlpack() only publishes strides for strided layouts, so a row-major
  * matrix reports NULL strides and a row stride equal to the column count.
- * A strided matrix (16-byte aligned rows) has a row stride that is larger
- * than the column count and needs a 2D copy. */
+ *
+ * Only the one-dimensional cudaMemcpy() is used on purpose. hipVS' cuvs/
+ * cuda_runtime.h maps cudaMemcpy, cudaMemcpyDefault, cudaMemcpyDeviceToHost
+ * and cudaSuccess onto their HIP counterparts, but it does not map
+ * cudaMemcpy2D, so a 2D copy would not even compile against the hipVS
+ * headers the evaluation builds against. A strided matrix is therefore
+ * copied as one linear block and the row padding is dropped on the host. */
 static int sk_copy_rows_to_host(void* src, const int64_t* strides,
                                 long rows, long cols, size_t elem_size,
                                 void* dst)
@@ -461,8 +466,24 @@ static int sk_copy_rows_to_host(void* src, const int64_t* strides,
                        cudaMemcpyDeviceToHost) == cudaSuccess ? 0 : 1;
   }
   if (row_stride < cols) return 1;
-  return cudaMemcpy2D(dst, width, src, (size_t)row_stride * elem_size, width,
-                       (size_t)rows, cudaMemcpyDeviceToHost) == cudaSuccess ? 0 : 1;
+  {
+    /* Strided layout: copy the padded block in one go, then compact it. */
+    const size_t padded = (size_t)row_stride * elem_size;
+    unsigned char* tmp = (unsigned char*)malloc(padded * (size_t)rows);
+    int rc;
+    long r;
+    if (tmp == NULL) return 1;
+    rc = cudaMemcpy(tmp, src, padded * (size_t)rows,
+                    cudaMemcpyDeviceToHost) == cudaSuccess ? 0 : 1;
+    if (rc == 0) {
+      for (r = 0; r < rows; r++) {
+        memcpy((unsigned char*)dst + (size_t)r * width,
+               tmp + (size_t)r * padded, width);
+      }
+    }
+    free(tmp);
+    return rc;
+  }
 }
 
 int seekdb_cuvs_export_graph(void* handle, unsigned int* graph_out,
