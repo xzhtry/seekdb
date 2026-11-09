@@ -34,7 +34,7 @@ snapshot container holds:
 | baseline (`OBCUVS02`) | 2 MB | 128 MB | 128 MB (inside the blob) | 256 MB | **386 MB** |
 | fast (`OBCUVS03`) | 2 MB | 128 MB | 128 MB | – | **258 MB** |
 
-`tools/hipvs_bridge/test_fast_snapshot.cpp` prints these numbers; the saving is
+`docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp` prints these numbers; the saving is
 33.2 % of the container bytes, and the temp-file staging of the blob disappears
 entirely.
 
@@ -121,7 +121,7 @@ GPU queries.
 | `tools/hipvs_bridge/seekdb_cuvs_bridge.h` | the new C ABI |
 | `src/oblib/lib/vector/ob_cuvs_snapshot.h` | the `OBCUVS03` container (no OB dependency) |
 | `src/oblib/lib/vector/ob_vsag_adaptor.cpp` | fast serialize/deserialize, stage timings |
-| `tools/hipvs_bridge/test_fast_snapshot.cpp` | standalone container unit test |
+| `docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp` | standalone container unit test |
 
 ## 4. Reproducible checks
 
@@ -131,7 +131,7 @@ GPU queries.
 # container round trip, header validation, truncation detection
 g++ -std=c++17 -O2 -Wall -Wextra \
     -I src/oblib/lib/vector \
-    tools/hipvs_bridge/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
+    docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
 /tmp/test_fast_snapshot
 ```
 

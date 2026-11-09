@@ -64,6 +64,14 @@
 #include <string.h>
 #include <time.h>
 
+/* RTLD_NOLOAD is a GNU extension: glibc only declares it when _GNU_SOURCE is
+ * defined, and the feature-test macros a compiler picks by default differ
+ * between toolchains. The value is part of the ABI (it is 4 on Linux), so
+ * define it here when the header did not. */
+#ifndef RTLD_NOLOAD
+#define RTLD_NOLOAD 4
+#endif
+
 /* ---------------------------------------------------------------- tuning -- */
 
 typedef struct {

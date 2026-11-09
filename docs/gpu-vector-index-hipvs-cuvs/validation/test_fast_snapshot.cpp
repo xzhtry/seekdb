@@ -5,8 +5,8 @@
  * OceanBase dependency, so it can be tested without building seekdb:
  *
  *   g++ -std=c++17 -O2 -Wall -Wextra \
- *       -I src/oblib/lib/vector \
- *       tools/hipvs_bridge/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
+ *       docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp \
+ *       -o /tmp/test_fast_snapshot
  *   /tmp/test_fast_snapshot
  *
  * What it proves:
@@ -24,9 +24,22 @@
  *      and the saving is quantified: the baseline stores the dataset twice
  *      (once raw, once inside the cuVS blob) and stages the blob through the
  *      filesystem twice.
+ *
+ * This file deliberately lives outside tools/hipvs_bridge/: that directory is
+ * the directory of the GPU bridge, and anything that sits next to it can be
+ * picked up by a build that compiles the directory as a whole. A test with its
+ * own main() next to the bridge would then break that build.
  */
 
-#include "ob_cuvs_snapshot.h"
+#if defined(__has_include)
+#  if __has_include("ob_cuvs_snapshot.h")
+#    include "ob_cuvs_snapshot.h"
+#  else
+#    include "../../../src/oblib/lib/vector/ob_cuvs_snapshot.h"
+#  endif
+#else
+#  include "../../../src/oblib/lib/vector/ob_cuvs_snapshot.h"
+#endif
 
 #include <cstdio>
 #include <cstring>

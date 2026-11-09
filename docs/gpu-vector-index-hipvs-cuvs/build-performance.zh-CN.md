@@ -89,7 +89,7 @@ OBCUVS03 | dim | reserved | n | graph_degree | metric | ids[n] | vectors[n*dim] 
 # ① 快照容器单元测试：往返一致性、头部校验、截断检测、真实规模体积对比
 g++ -std=c++17 -O2 -Wall -Wextra \
     -I src/oblib/lib/vector \
-    tools/hipvs_bridge/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
+    docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
 /tmp/test_fast_snapshot
 ```
 

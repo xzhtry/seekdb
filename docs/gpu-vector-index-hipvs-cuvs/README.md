@@ -110,7 +110,7 @@ standalone test:
 ```bash
 g++ -std=c++17 -O2 -Wall -Wextra \
     -I src/oblib/lib/vector \
-    tools/hipvs_bridge/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
+    docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
 /tmp/test_fast_snapshot
 ```
 

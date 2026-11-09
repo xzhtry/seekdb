@@ -111,7 +111,7 @@ change the graph construction at all. The saving comes entirely from the
 
 ## 3. What the fast path changes, in bytes
 
-**[measured]** — output of `tools/hipvs_bridge/test_fast_snapshot.cpp`, which
+**[measured]** — output of `docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp`, which
 runs offline without a GPU:
 
 ```text
@@ -131,7 +131,7 @@ Reproduce with:
 
 ```bash
 g++ -std=c++17 -O2 -Wall -Wextra -I src/oblib/lib/vector \
-    tools/hipvs_bridge/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
+    docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
 /tmp/test_fast_snapshot
 ```
 
