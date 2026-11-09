@@ -1979,7 +1979,10 @@ ResultSet Database::exec_create_index(const Statement &st) {
   if (schema.columns[ci].type != ColType::VECTOR)
     fail(ER_UNSUPPORTED, "vector index must be created on a VECTOR column");
   for (const auto &ix : schema.vector_indexes) {
-    if (iequals(ix.first, s.index)) fail(1061, "Duplicate key name '" + s.index + "'");
+    if (iequals(ix.first, s.index)) {
+      if (s.if_not_exists) return ResultSet{};
+      fail(1061, "Duplicate key name '" + s.index + "'");
+    }
   }
   schema.vector_indexes.emplace_back(s.index, schema.columns[ci].name);
   save_catalog();

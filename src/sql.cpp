@@ -649,6 +649,7 @@ CreateIndexStmt Parser::parse_create_index() {
   if (accept_kw("if")) {
     expect_kw("not");
     expect_kw("exists");
+    s.if_not_exists = true;
   }
   s.index = parse_ident("index name");
   expect_kw("on");
@@ -796,7 +797,7 @@ ExprPtr Parser::parse_primary() {
     if (ok) {
       ExprPtr e = make_expr(ExprKind::VECTOR_LITERAL);
       e->nums = std::move(nums);
-      e->text = "[" + s + "]";
+      e->text = "'" + s + "'";
       return e;
     }
     ExprPtr e = make_expr(ExprKind::STRING_LITERAL);
@@ -862,6 +863,9 @@ ExprPtr Parser::parse_primary() {
         e->text = name;
       }
       e->args = std::move(args);
+      if (e->kind == ExprKind::L2_DISTANCE) {
+        e->text = "L2_DISTANCE(" + e->args[0]->text + ", " + e->args[1]->text + ")";
+      }
       return e;
     }
     ExprPtr e = make_expr(ExprKind::COLUMN);

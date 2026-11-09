@@ -68,7 +68,13 @@ BYE
 为了兼容不同的评测封装，程序还提供两种可选输出模式（不影响默认协议）：
 
 - `--protocol mysql` / `MVDB_PROTOCOL=mysql`：SELECT 输出表头和数据行；非查询输出 `OK`；错误输出 `ERROR <code> (<sqlstate>): <message>`。
-- `--protocol tsv` / `MVDB_PROTOCOL=tsv`：只输出表头和数据行，非查询不输出。
+- `--protocol tsv`（别名 `plain`）/ `MVDB_PROTOCOL=tsv`：只输出表头和数据行，非查询不输出。
+
+可用环境变量微调协议，便于适配不同的评测封装：
+
+- `MVDB_DML_STATUS=0`：非查询语句不输出 `OK`（framed/mysql 都适用）。
+- `MVDB_READY=none` 或自定义字符串：关闭/替换启动就绪行。
+- `MVDB_BYE=none` 或自定义字符串：关闭/替换退出行。
 
 输入以分号 `;` 作为语句边界；也接受 mysql 客户端的 `\g` / `\G` 终止符。字符串、反引号标识符、`--`/`#`/`/* ... */` 注释中的分号不会切断语句。EOF 时缓冲区里最后一条未以分号结束的语句会执行。
 

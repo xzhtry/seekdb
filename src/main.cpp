@@ -104,6 +104,10 @@ bool next_statement(std::string &buf, std::string &stmt) {
       stmt = buf.substr(0, i + 1);
       buf.erase(0, i + 1);
       return true;
+    } else if (c == '\0') {
+      stmt = buf.substr(0, i);
+      buf.erase(0, i + 1);
+      return true;
     }
   }
   std::string t = lower_trim(buf);
@@ -130,18 +134,28 @@ const char *sqlstate_for(int code) {
 
 class Output {
  public:
-  explicit Output(std::string mode) : mode_(std::move(mode)) {}
+  explicit Output(std::string mode) : mode_(std::move(mode)) {
+    if (const char *e = std::getenv("MVDB_DML_STATUS")) {
+      if (std::strcmp(e, "0") == 0) dml_status_ = false;
+    }
+  }
 
   void ready() {
     if (mode_ == "framed" || mode_ == "mysql") {
-      std::fputs("READY\n", stdout);
+      const char *e = std::getenv("MVDB_READY");
+      if (e && (std::strcmp(e, "none") == 0 || e[0] == '\0')) return;
+      std::fputs(e ? e : "READY", stdout);
+      std::fputc('\n', stdout);
       std::fflush(stdout);
     }
   }
 
   void bye() {
     if (mode_ == "framed" || mode_ == "mysql") {
-      std::fputs("BYE\n", stdout);
+      const char *e = std::getenv("MVDB_BYE");
+      if (e && (std::strcmp(e, "none") == 0 || e[0] == '\0')) return;
+      std::fputs(e ? e : "BYE", stdout);
+      std::fputc('\n', stdout);
       std::fflush(stdout);
     }
   }
@@ -168,6 +182,7 @@ class Output {
   }
 
   void ok(i64 affected) {
+    if (!dml_status_) return;
     if (mode_ == "framed") {
       std::printf("OK %lld\n", static_cast<long long>(affected));
     } else if (mode_ == "mysql") {
@@ -201,6 +216,7 @@ class Output {
   }
 
   std::string mode_;
+  bool dml_status_ = true;
 };
 
 std::string g_data_dir = "/data";
@@ -232,6 +248,7 @@ int main(int argc, char **argv) {
   g_data_dir = arg_value(argc, argv, "--data-dir", "/data");
   g_protocol = arg_value(argc, argv, "--protocol", "framed");
   if (const char *p = std::getenv("MVDB_PROTOCOL")) g_protocol = p;
+  if (g_protocol == "plain") g_protocol = "tsv";
   if (g_protocol != "framed" && g_protocol != "mysql" && g_protocol != "tsv")
     g_protocol = "framed";
 

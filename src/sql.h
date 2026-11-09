@@ -138,6 +138,7 @@ struct CreateIndexStmt {
   std::string index;
   std::string table;
   std::string column;
+  bool if_not_exists = false;
 };
 
 struct DropTableStmt {
