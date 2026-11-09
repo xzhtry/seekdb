@@ -236,5 +236,65 @@ The evaluation gates that this protects:
 | --- | --- |
 | the linked cuVS does not export the three new entry points | they are resolved with `dlsym`; the bridge falls back to the baseline container |
 | the export/restore round trip is not exact on some GPU | the runtime probe fails closed and the baseline container is used |
-| the graph copy is slow on a slow interconnect | it is one D2H copy of `n * degree * 4` bytes, timed as `export_us` |
+| the graph copy is slow on a slow interconnect | it is one D2H copy of the padded graph block, followed by a host-side row compaction; the whole step is timed as `export_us` |
+| the bridge is compiled against the hipVS CUDA shim, which does not map every CUDA name | only names that `cuvs/cuda_runtime.h` actually redirects are used; see [`fast-snapshot.md`](fast-snapshot.md) §6 |
 | a regression in the build window | `SEEKDB_CUVS_FAST_SNAPSHOT=0` restores the baseline behaviour without a rebuild |
+
+## 9. Evaluation history and one root-cause post-mortem
+
+The evaluation record can be read with the (logged-in) API
+`GET https://openwebapi.oceanbase.com/api/techcamp/testplatform/taskrecord/queryTestPlatformTaskRecordList?questionId=600072`;
+the page is `https://open.oceanbase.com/train/TestRecord?questionId=600072`.
+
+| run | time | commit | status | wall clock | score / message |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 11-07 18:33 | `445b9b2` | failed | 1 s | `failMsg=4` (the repository URL had no token) |
+| 2 | 11-08 16:15 | `445b9b2` | ok | 12m04s | **5.271**, `build=1.105x, query=0.975x, gates=pass` |
+| 3 | 11-08 18:04 | `5c8cc92f` | ok | 13m48s | `gates failed: hidden250k:recall@100_baseline_delta` |
+| 4 | 11-09 10:39 | `9095ca50` | ok | 6m04s | same gate |
+| 5 | 11-09 10:50 | `9095ca50` | ok | 3m16s | same gate |
+| 6 | 11-09 20:26 | `dfc7e773` | failed | **15 s** | `failMsg=3`, `testCaseResult=[]` |
+| 7 | 11-09 20:40 | `248c5c82` | failed | **14 s** | `failMsg=3`, `testCaseResult=[]` |
+| 8 | 11-09 20:54 | `cc6c79f3` | running | — | the build failure of runs 6 and 7 is fixed |
+
+Runs 3–5 changed two defaults and nothing else:
+
+```diff
+-  g_cfg.nn_iter   = sk_env_int("SEEKDB_CUVS_NN_ITER",   100, 1, 400);
+-  g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 512, 16, 4096);
++  g_cfg.nn_iter   = sk_env_int("SEEKDB_CUVS_NN_ITER",   25, 1, 400);
++  g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 768, 16, 4096);
+```
+
+Fewer NN-descent iterations buy build time and cost recall, and the hidden
+set then drops more than 0.005 in `recall@100` against the frozen baseline of
+the same round. **That direction is closed.**
+
+Runs 6 and 7 died in **15 seconds** with an empty `testCaseResult`, while
+every run that reached the tests needed 3–14 minutes. They never got past the
+first build command, `tools/hipvs_bridge/build.sh`.
+
+The reason was a missing symbol at compile time. The evaluation compiles the
+bridge against hipVS' `cuvs/cuda_runtime.h`, the CUDA-to-HIP redirect shim.
+It redirects `cudaMemcpy`, `cudaMemcpyDefault`, `cudaMemcpyDeviceToHost` and
+`cudaSuccess`, but **not** `cudaMemcpy2D` (only `cudaMemcpy2DAsync`). The
+graph export called `cudaMemcpy2D`, so the identifier was undeclared and the
+bridge did not compile.
+
+The local check did not catch it because that check used a **stub** for
+`cuvs/cuda_runtime.h`, and the stub declared `cudaMemcpy2D` itself. The stub
+was where the bug hid. The fix (`cc6c79f3`) copies the padded graph block
+with the one-dimensional `cudaMemcpy` and compacts the rows on the host, and
+the local check now compiles against the **real** `cuvs/cuda_runtime.h` and
+the **real** `dlpack/dlpack.h`, with `-Werror=implicit-function-declaration`
+and a negative control that must reject `cudaMemcpy2D`.
+
+Three rules that came out of it:
+
+1. Before adding any `cuda*` call, check what the hipVS shim actually
+   redirects; use a name from that list.
+2. "It compiles locally" only counts when it compiles against the real
+   headers. For every stubbed header, ask whether the new code uses it.
+3. A failure in ~15 seconds never reached the main build. The difference
+   between `testStartTime` and `testEndTime` separates "the build broke" from
+   "the test failed" faster than any message does.
