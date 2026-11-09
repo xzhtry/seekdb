@@ -1,0 +1,51 @@
+name: MiniVectorDB Docker Smoke
+
+on:
+  push:
+    branches:
+      - 2026-competition-round2
+  workflow_dispatch:
+
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build --progress=plain -t minivectordb:ci .
+
+      - name: Run smoke SQL
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            "CREATE TABLE docs (id BIGINT PRIMARY KEY, value BIGINT, content VARCHAR(16));" \
+            "INSERT INTO docs VALUES (1, 10, 'a'), (2, 20, 'b');" \
+            "SELECT id, value FROM docs ORDER BY value;" \
+            "BEGIN;" \
+            "UPDATE docs SET value = 99 WHERE id = 1;" \
+            "ROLLBACK;" \
+            "SELECT id, value FROM docs ORDER BY id;" \
+            | docker run --rm -i minivectordb:ci > smoke.out
+          cat smoke.out
+          grep -q "READY" smoke.out
+          grep -q "RESULT 2 2" smoke.out
+          grep -q $'1\t10' smoke.out
+          grep -q $'2\t20' smoke.out
+
+      - name: Run restart SQL
+        run: |
+          set -euo pipefail
+          docker volume create mvdb-ci-data
+          printf '%s\n' \
+            "CREATE TABLE t (id BIGINT PRIMARY KEY, v VECTOR(2));" \
+            "INSERT INTO t VALUES (1, '[1,2]');" \
+            | docker run --rm -i -v mvdb-ci-data:/data minivectordb:ci > restart1.out
+          cat restart1.out
+          printf '%s\n' \
+            "SELECT id, L2_DISTANCE(v, '[0,0]') AS d FROM t ORDER BY d;" \
+            | docker run --rm -i -v mvdb-ci-data:/data minivectordb:ci > restart2.out
+          cat restart2.out
+          grep -q "RESULT 2 1" restart2.out
+          grep -q "2.2360679" restart2.out
