@@ -169,12 +169,18 @@ The no-GPU DDL contract remains covered by
 
 ## Performance documentation
 
-- [`fast-snapshot.md`](fast-snapshot.md): the recall-neutral fast snapshot
-  path — what it replaces, why the ANN result is unchanged, the ABI and
-  fallback behaviour, and how to reproduce it.
 - [`build-performance.md`](build-performance.md): the CPU / GPU build
   performance comparison, the cost model of the timed build window, the
   reproducible measurement method and the results table.
+- [`build-performance.zh-CN.md`](build-performance.zh-CN.md): the Chinese
+  version of the same report, including the A/B experiment plan for the
+  remaining contest submissions.
+- [`fast-snapshot.md`](fast-snapshot.md): the recall-neutral fast snapshot
+  path — what it replaces, why the ANN result is unchanged, the ABI and
+  fallback behaviour, and how to reproduce it.
+- [`build-performance.svg`](build-performance.svg): the chart embedded in the
+  report. Regenerate it with
+  `docs/gpu-vector-index-hipvs-cuvs/validation/make_build_chart.py`.
 
 ## Current limitations
 
