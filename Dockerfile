@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1
 
-# Build stage: a pinned g++ image, no network access is needed at run time.
-FROM gcc:13 AS build
+# Build and runtime use the same Ubuntu 24.04 release so the dynamic
+# libstdc++/libgcc versions match exactly.
+FROM ubuntu:24.04 AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends g++ \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY src ./src
 COPY build.sh ./build.sh
