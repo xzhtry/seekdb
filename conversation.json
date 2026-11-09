@@ -1,0 +1,181 @@
+{
+  "schema": "agent-learning-evidence-v3-unbounded",
+  "synthetic": false,
+  "task": "MiniVectorDB / 2026-competition-round2",
+  "team": "anonymous",
+  "date": "2026-11-09",
+  "language": "zh-CN",
+  "material_scope": "本文件是本次 MiniVectorDB 开发过程的真实记录。学生在关键决策点给出方向，Agent 完成代码、实验与记录；不把 Agent 的代码或解释冒充成学生的独立理解。未执行的步骤明确标为计划。",
+  "user_prompts": [
+    {
+      "id": "u1",
+      "source": "student",
+      "content": "实现 MiniVectorDB：一套支持基础 SQL、向量检索、持久化存储、事务与崩溃恢复的轻量数据库。……提交源码、Dockerfile 和 Agent Prompt 学习材料。",
+      "note": "赛题原文粘贴，完整要求见对话上下文；这里只保留开头，避免把整篇题面当作学生自己的分析。"
+    },
+    {
+      "id": "u2",
+      "source": "student",
+      "content": "你在网上找一下，并下载",
+      "note": "Agent 询问是否有官方题包/测试驱动后，学生要求先自行寻找公开题包。"
+    },
+    {
+      "id": "u3",
+      "source": "student",
+      "content": "先按 framed 协议提交一次探测，用反馈定位格式（推荐）",
+      "note": "学生针对“协议未知”做出的提交策略选择。"
+    },
+    {
+      "id": "u4",
+      "source": "student",
+      "content": "不确定，需要跑对拍验证",
+      "note": "学生对“缓存小于数据量时 TopK 是否仍正确”的预测与验证要求。"
+    },
+    {
+      "id": "u5",
+      "source": "student",
+      "content": "性能排名优先",
+      "note": "在“准入正确性/性能/材料”三者只能保一个时的取舍选择。"
+    }
+  ],
+  "conversations": [
+    {
+      "id": "c1",
+      "source": "student",
+      "content": "你在网上找一下，并下载",
+      "context": "Agent 报告平台只提供仓库/分支/Commit 表单、没有公开题包下载入口后，学生仍要求先找公开材料。"
+    },
+    {
+      "id": "c2",
+      "source": "agent",
+      "content": "公开检索只找到赛题说明与仓库骨架；官方测试驱动未公开，协议只能按最合理的 framed 形式实现，并保留 mysql/tsv 兼容模式。",
+      "context": "Agent 的结论，不是学生原话。"
+    },
+    {
+      "id": "c3",
+      "source": "student",
+      "content": "先按 framed 协议提交一次探测，用反馈定位格式（推荐）",
+      "context": "学生在“提交探测 / 等待题包 / 保留多模式”之间选择提交探测。"
+    },
+    {
+      "id": "c4",
+      "source": "student",
+      "content": "不确定，需要跑对拍验证",
+      "context": "Agent 问：缓存限制到 1 MiB 后，2 万行 64 维精确 TopK 是否仍正确。学生没有猜答案，而是要求用暴力真值对拍。"
+    },
+    {
+      "id": "c5",
+      "source": "student",
+      "content": "性能排名优先",
+      "context": "学生选择在保证准入的前提下优先性能；Agent 随后做了 10k×128 基准和 TopK 快路径优化。"
+    },
+    {
+      "id": "c6",
+      "source": "agent",
+      "content": "发现 AVX2 距离实现把平方后的差值又平方了一次；用随机 64 维向量与标量实现对拍，修复后误差从 0.3 降到 1e-8 量级。",
+      "context": "Agent 发现并修复的 bug；学生未参与该定位，不能算作学生证据。"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "e1",
+      "title": "构建与基础 SQL",
+      "hypothesis": "按题目示例建表、批量插入、过滤 + L2 TopK、事务回滚应得到正确结果。",
+      "command": "cd round2 && ./build.sh && ./build/minivectordb --data-dir /tmp/mvdb1 < tmp/t1.sql",
+      "output": "READY / OK 0 / OK 3 / RESULT 3 2 / id content distance / 1 事务与恢复 0.141421374149721 / 2 向量索引 1.272792188223375 / BYE",
+      "student_role": "学生给出任务与实现范围；未参与该轮具体调试。",
+      "conclusion": "示例路径通过；距离与手算 sqrt(0.01+0.01) 一致。"
+    },
+    {
+      "id": "e2",
+      "title": "事务与持久化",
+      "hypothesis": "BEGIN 内 UPDATE/DELETE 对查询和向量检索立即可见，ROLLBACK 后恢复；COMMIT 后重启保留。",
+      "command": "python3 tests/selftest.py",
+      "output": "PASS basic 0.025s / PASS txn 0.029s / PASS errors 0.014s / PASS vector 0.022s / PASS crash 0.140s / PASS stream 0.082s / ALL PASS",
+      "student_role": "学生选择“性能优先”，但明确以准入正确性为前提；未逐条设计用例。",
+      "conclusion": "事务、持久化、错误路径和向量对拍均通过。"
+    },
+    {
+      "id": "e3",
+      "title": "缓存小于数据量时的 TopK 对拍",
+      "hypothesis": "学生没有直接下结论，提出“跑对拍验证”。待验证命题：缓存未命中时，查询应回落到数据文件流式读取，不能漏行。",
+      "command": "MVDB_CACHE_MB=1 python3 tmp/stream_test2.py（20,000 行 × 64 维，按存储后的 float32 值计算暴力 Top10）",
+      "output": "got ids [14942, 18011, 18575, 4824, 15112, 17191, 15008, 13603, 3596, 13524] / truth ids [14942, 18011, 18575, 4824, 15112, 17191, 15008, 13603, 3596, 13524] / maxerr 5.3e-08 / match True",
+      "student_role": "学生选择“不确定，需要跑对拍验证”，把猜测变成可核对的实验。",
+      "conclusion": "缓存只是加速层，未命中时 mmap/记录流式读取仍返回正确 TopK。"
+    },
+    {
+      "id": "e4",
+      "title": "10k × 128 维性能基线",
+      "hypothesis": "精确扫描在 10k 规模可做到毫秒级/查询；TopK 快路径应避免为每行构造结果对象。",
+      "command": "python3 tmp/bench.py（10,000 行 × 128 维，100 行/批，1,000 次 TopK，一半带 category 过滤）",
+      "output": "insert seconds 0.358 rows/s 27906 / query seconds 0.705 qps 1418 / data bytes 5768005 / maxrss child 67544 KB",
+      "student_role": "学生选择“性能排名优先”，为优化方向提供优先级。",
+      "conclusion": "写入约 0.36 s，查询约 0.70 s；后续仍可继续优化 SQL/向量解析。"
+    },
+    {
+      "id": "e5",
+      "title": "AVX2 距离 bug 的发现与修复",
+      "hypothesis": "AVX2 路径应与标量路径在随机 64 维向量上一致；若不一致，TopK 会在大维度下错序。",
+      "command": "g++ -O2 tmp/avx2.cpp && ./avx2；修复后 python3 tmp/checkdist.py",
+      "output": "修复前：scalar 6.533894467 / double 8.238720164（错误）。修复后：db 4.675001563225143 / py 4.675001566825941 / diff -3.6e-09。",
+      "student_role": "该 bug 由 Agent 发现和修复，学生未参与定位；记录在此用于说明验证过程，不作为学生学习证据。",
+      "conclusion": "原因是把平方后的差值又做了一次平方；改为对原始差值做 double FMA 后，误差回到 1e-8 量级。"
+    },
+    {
+      "id": "e6",
+      "title": "SIGKILL 恢复与重复恢复",
+      "hypothesis": "已 COMMIT 的事务必须保留；未提交事务不能部分生效；恢复途中再次 SIGKILL 后仍应幂等。",
+      "command": "python3 tmp/recov_test.py（20,000 行，活动事务中 DELETE/INSERT 后 kill -9，再连续 5 次在恢复途中 kill -9）",
+      "output": "killed, data size 4323670 / recovery kill 0..4 rc -9 / ready READY / RESULT 1 1000 / rows<=1000 1000",
+      "student_role": "学生未直接设计该实验；Agent 按题目恢复语义验证。",
+      "conclusion": "未提交 DELETE 未生效；重复恢复后数据仍可读。"
+    }
+  ],
+  "retrospective": {
+    "what_worked": [
+      "先实现 append-only 记录 + WAL 提交，再补事务 overlay；崩溃恢复顺序（WAL fsync → 数据写 → checkpoint）清晰。",
+      "把“缓存”与“数据源”分开：缓存未命中走 mmap 记录读取，使大表测试不依赖全量内存。",
+      "对拍而不是只看输出：AVX2 距离错误是在随机 64 维对拍中暴露的，8 维小例子没有暴露。"
+    ],
+    "what_failed_or_uncertain": [
+      "官方测试驱动/协议没有公开下载入口，framed 协议是推测；这是当前最大不确定性。",
+      "学生主要给出方向与取舍，具体代码、调试和实验由 Agent 完成；材料不把 Agent 的成果算成学生理解。",
+      "ann 模式目前返回精确结果，没有实现近似索引；如果正式评测对 ann 查询耗时另设门槛，需要补索引。"
+    ],
+    "next_steps": [
+      "按学生选择，用 framed 协议做一次正式探测，读取平台返回的失败类别/日志，确认语句边界、结果集格式和错误码。",
+      "若探测显示协议不符，优先改协议层而不是重写存储/执行器。",
+      "继续优化 1,000 次查询的 SQL/向量解析开销；当前 10k×128 查询约 0.70 s。"
+    ]
+  },
+  "limitations": [
+    "未获得官方题包、公开样例或测试驱动，无法在本地复现正式 MySQL case。",
+    "未执行正式提测（截至本文件写入时）；探测结果待补。",
+    "未实现 HNSW/IVF 等近似索引；ann 模式为精确扫描。",
+    "单客户端、单显式事务；不支持 NULL/JOIN/聚合/子查询/ALTER/主键更新。"
+  ],
+  "evidence_index": [
+    {
+      "dimension": "独立验证与质疑",
+      "tier": 1.0,
+      "reason": "学生没有猜测缓存行为的对错，而是明确要求“跑对拍验证”；随后用 20,000 行 × 64 维数据与按存储后 float32 值计算的暴力 Top10 对比，ID 全部一致。",
+      "student_evidence": {"pointer": "/user_prompts/3/content", "quote": "不确定，需要跑对拍验证"},
+      "result_evidence": {"pointer": "/experiments/2/output", "quote": "match True"}
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 0.5,
+      "reason": "学生在三个目标中明确选择性能优先；但没有留下自己对“为什么性能优先、代价是什么”的解释，因此只按决策证据计 0.5。",
+      "student_evidence": {"pointer": "/user_prompts/4/content", "quote": "性能排名优先"},
+      "result_evidence": null
+    },
+    {
+      "dimension": "问题理解与自主拆解",
+      "tier": 0.5,
+      "reason": "学生识别出协议未知是当前阻塞点，并选择“先按 framed 提交一次探测，用反馈定位格式”。截至本文件写入时探测尚未执行，因此只有计划证据。",
+      "student_evidence": {"pointer": "/user_prompts/2/content", "quote": "先按 framed 协议提交一次探测，用反馈定位格式（推荐）"},
+      "result_evidence": null
+    }
+  ]
+}
