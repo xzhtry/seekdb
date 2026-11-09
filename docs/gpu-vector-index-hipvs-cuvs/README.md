@@ -47,6 +47,12 @@ seekdb_cuvs_build
 seekdb_cuvs_search
 seekdb_cuvs_free
 seekdb_cuvs_cagra_knn
+seekdb_cuvs_serialize
+seekdb_cuvs_deserialize
+seekdb_cuvs_export_graph
+seekdb_cuvs_restore
+seekdb_cuvs_index_metric
+seekdb_cuvs_supports_fast_snapshot
 ```
 
 Build seekdb with the resulting library:
@@ -96,6 +102,24 @@ See [`examples/batch_knn.sql`](examples/batch_knn.sql) for the table contract.
 
 ## Validation
 
+### Offline, no GPU required
+
+The snapshot container format has no OceanBase dependency and is covered by a
+standalone test:
+
+```bash
+g++ -std=c++17 -O2 -Wall -Wextra \
+    -I src/oblib/lib/vector \
+    tools/hipvs_bridge/test_fast_snapshot.cpp -o /tmp/test_fast_snapshot
+/tmp/test_fast_snapshot
+```
+
+It checks the container round trip, the rejection of invalid headers, the
+detection of a truncated stream, and prints the container size comparison for
+the contest dataset shapes.
+
+### On the AMD instance
+
 The self-contained GPU smoke runner generates deterministic vectors and ground
 truth; it does not use private `/work/datasets` or `/work/bench` assets:
 
@@ -123,8 +147,34 @@ The runner validates:
 The runner writes a machine-readable `summary.json` into its evidence directory.
 Results for a specific candidate belong in that pull request's description or a
 validation comment rather than in the source tree.
+
+### CPU / GPU build benchmark
+
+```bash
+docs/gpu-vector-index-hipvs-cuvs/validation/run_build_benchmark.sh \
+  --observer /path/to/build_release/src/observer/seekdb \
+  --bridge /work/bridge/libseekdb_cuvs_bridge.so \
+  --base-dir /tmp/seekdb-bench \
+  --port 2981 \
+  --evidence /tmp/seekdb-bench-evidence \
+  --rows 250000 --dim 128 --repeat 3 --topk 64
+```
+
+It times the `CREATE VECTOR INDEX` window for `lib=vsag` (CPU) and `lib=cuvs`
+(GPU) on two tables that hold byte-identical data, and writes
+`benchmark.json` / `benchmark.md` plus the per-stage build timings.
+
 The no-GPU DDL contract remains covered by
 [`vector_index_cuvs_ddl.test`](../../tools/deploy/mysql_test/test_suite/vector_index/t/vector_index_cuvs_ddl.test).
+
+## Performance documentation
+
+- [`fast-snapshot.md`](fast-snapshot.md): the recall-neutral fast snapshot
+  path — what it replaces, why the ANN result is unchanged, the ABI and
+  fallback behaviour, and how to reproduce it.
+- [`build-performance.md`](build-performance.md): the CPU / GPU build
+  performance comparison, the cost model of the timed build window, the
+  reproducible measurement method and the results table.
 
 ## Current limitations
 

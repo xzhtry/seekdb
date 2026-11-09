@@ -16,12 +16,15 @@
  *   SEEKDB_CUVS_ITOPK_MIN             floor for search itopk         (default 512)
  *   SEEKDB_CUVS_SEARCH_WIDTH          CAGRA search width             (default 4)
  *   SEEKDB_CUVS_LOG                   0=quiet 1=lifecycle 2=per-search (default 1)
+ *   SEEKDB_CUVS_FAST_SNAPSHOT         1=use the graph-only snapshot (default 1)
  *
  * Config-file keys: graph_degree, intermediate_degree, nn_iter, build_algo,
- * itopk_min, search_width, log.
+ * itopk_min, search_width, log, fast_snapshot.
  *
  * Log lines are emitted on stderr and are stable enough to grep:
  *   [seekdb_cuvs] build n=... dim=... gd=... igd=... niter=... algo=... ms=...
+ *   [seekdb_cuvs] export_graph n=... gd=... ms=...
+ *   [seekdb_cuvs] restore n=... dim=... gd=... metric=... ms=...
  *   [seekdb_cuvs] serialize ms=...
  *   [seekdb_cuvs] deserialize ms=...
  *   [seekdb_cuvs] search nq=... topk=... ms=...      (log level 2 only)
@@ -29,6 +32,20 @@
  * Why: the contest scores the end-to-end DDL path, and the GPU build is only one
  * of its stages. These timestamps make the scan/buffer/build/serialize/reload
  * split measurable from a single run, without rebuilding seekdb itself.
+ *
+ * Fast snapshot path
+ * ------------------
+ * The cuVS file format embeds the dataset inside the index blob. seekdb's own
+ * snapshot already stores the dataset (it must: the CPU fallback needs it), so
+ * the baseline writes and reads the dataset twice and stages the whole blob
+ * through the filesystem twice.
+ *
+ * Instead, export only the knn graph of the built index and re-create the
+ * index from (graph, dataset) with cuvsCagraIndexFromArgs(). The restored
+ * index holds the same graph and the same dataset values as the built one, so
+ * the search results -- and therefore the recall -- are identical.
+ * The new cuVS entry points are resolved with dlsym(), so a hipVS build that
+ * does not export them simply keeps the baseline file format.
  */
 #include "seekdb_cuvs_bridge.h"
 #include <cuvs/core/c_api.h>
@@ -39,6 +56,8 @@
 #else
 #include <cuda_runtime.h>
 #endif
+#include <dlfcn.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +74,7 @@ typedef struct {
   int itopk_min;
   int search_width;
   int log_level;
+  int fast_snapshot;
 } sk_cuvs_cfg;
 
 static sk_cuvs_cfg g_cfg;
@@ -115,6 +135,8 @@ static void sk_parse_cfg_file(sk_cuvs_cfg *c)
       c->search_width = sk_clamp(x, 1, 32);
     } else if (strcmp(key, "log") == 0) {
       c->log_level = sk_clamp(x, 0, 2);
+    } else if (strcmp(key, "fast_snapshot") == 0) {
+      c->fast_snapshot = (x != 0);
     }
   }
   fclose(fp);
@@ -129,10 +151,11 @@ static void sk_load_cfg(int force)
   g_cfg.graph_degree = sk_env_int("SEEKDB_CUVS_GRAPH_DEGREE", 128, 8, 512);
   g_cfg.intermediate_degree =
       sk_env_int("SEEKDB_CUVS_INTERMEDIATE_DEGREE", 256, 8, 1024);
-  g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 25, 1, 400);
-  g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 768, 16, 4096);
+  g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 100, 1, 400);
+  g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 512, 16, 4096);
   g_cfg.search_width = sk_env_int("SEEKDB_CUVS_SEARCH_WIDTH", 4, 1, 32);
   g_cfg.log_level = sk_env_int("SEEKDB_CUVS_LOG", 1, 0, 2);
+  g_cfg.fast_snapshot = sk_env_int("SEEKDB_CUVS_FAST_SNAPSHOT", 1, 0, 1);
 
   const char *algo = getenv("SEEKDB_CUVS_BUILD_ALGO");
   g_cfg.build_algo = 1; /* NN_DESCENT, the baseline default */
@@ -166,42 +189,109 @@ static double sk_now_ms(void)
   return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 
-/* --------------------------------------------------------------- handle --- */
+/* ---------------------------------------------------- optional cuVS entry -- */
+/* The fast snapshot path needs three cuVS entry points that the baseline does
+ * not use. They are resolved at runtime so that a hipVS build without them
+ * keeps working (it just falls back to the cuVS file format). */
+typedef cuvsError_t (*sk_get_graph_fn)(cuvsCagraIndex_t, DLManagedTensor *);
+typedef cuvsError_t (*sk_get_graph_degree_fn)(cuvsCagraIndex_t, int64_t *);
+typedef cuvsError_t (*sk_get_dataset_fn)(cuvsCagraIndex_t, DLManagedTensor *);
+typedef cuvsError_t (*sk_from_args_fn)(cuvsResources_t, cuvsDistanceType,
+                                       DLManagedTensor *, DLManagedTensor *,
+                                       cuvsCagraIndex_t);
+
+static void *sk_dlsym(const char *name)
+{
+  /* The cuVS C API is a dependency of this shared object, but seekdb loads
+   * the bridge with dlopen(), so the dependency ends up in a local scope:
+   * dlsym(RTLD_DEFAULT, ...) does not necessarily see it. Look the library up
+   * explicitly instead; RTLD_NOLOAD returns a handle for an already loaded
+   * object without loading a second copy, and the plain dlopen is the last
+   * resort (the .so carries an rpath to the hipVS lib directory). */
+  void *sym = dlsym(RTLD_DEFAULT, name);
+  if (sym != NULL) return sym;
+  static const char *candidates[] = {
+      "libcuvs_c.so", "libcuvs_c.so.0", "libcuvs_c.so.1", "libcuvs_c.so.2"};
+  static void *lib = NULL;
+  if (lib == NULL) {
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+      lib = dlopen(candidates[i], RTLD_LAZY | RTLD_NOLOAD);
+      if (lib != NULL) break;
+    }
+    if (lib == NULL) {
+      for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        lib = dlopen(candidates[i], RTLD_LAZY);
+        if (lib != NULL) break;
+      }
+    }
+  }
+  if (lib == NULL) return NULL;
+  return dlsym(lib, name);
+}
+
+static sk_get_graph_fn sk_fn_get_graph = NULL;
+static sk_get_graph_degree_fn sk_fn_get_graph_degree = NULL;
+static sk_get_dataset_fn sk_fn_get_dataset = NULL;
+static sk_from_args_fn sk_fn_from_args = NULL;
+static int sk_fn_resolved = 0;
+
+static void sk_resolve_fns(void)
+{
+  if (sk_fn_resolved) return;
+  sk_fn_resolved = 1;
+  sk_fn_get_graph = (sk_get_graph_fn)sk_dlsym("cuvsCagraIndexGetGraph");
+  sk_fn_get_graph_degree =
+      (sk_get_graph_degree_fn)sk_dlsym("cuvsCagraIndexGetGraphDegree");
+  sk_fn_get_dataset = (sk_get_dataset_fn)sk_dlsym("cuvsCagraIndexGetDataset");
+  sk_fn_from_args = (sk_from_args_fn)sk_dlsym("cuvsCagraIndexFromArgs");
+  sk_log(1, "fast_snapshot_api graph=%d degree=%d dataset=%d from_args=%d",
+         sk_fn_get_graph != NULL, sk_fn_get_graph_degree != NULL,
+         sk_fn_get_dataset != NULL, sk_fn_from_args != NULL);
+}
+
+/* ---------------------------------------------------------------- handle --- */
 
 typedef struct {
   cuvsResources_t        res;
   cuvsCagraIndexParams_t ip;
   cuvsCagraIndex_t       idx;
   long n, dim;
+  int metric;             /* cuvsDistanceType the index was built with */
+  void *graph_dev;        /* owned device graph (only for restored indexes) */
+  size_t graph_bytes;     /* size of graph_dev */
 } sk_cuvs_index;
 
-void* seekdb_cuvs_build(const float* base, long n, long dim)
+/* Build a CAGRA index with explicit parameters. Used by seekdb_cuvs_build (with
+ * the configured parameters) and by the fast-snapshot self test (with small
+ * parameters, so the probe stays cheap). */
+static void *sk_build_with(const float *base, long n, long dim, int gd, int igd,
+                            int niter, int algo)
 {
-  sk_load_cfg(1);
   const double t0 = sk_now_ms();
 
-  sk_cuvs_index* h = (sk_cuvs_index*)calloc(1, sizeof(*h));
+  sk_cuvs_index *h = (sk_cuvs_index *)calloc(1, sizeof(*h));
   if (!h) return NULL;
   if (cuvsResourcesCreate(&h->res) != CUVS_SUCCESS) { free(h); return NULL; }
 
   DLManagedTensor dset; long ds[2] = {n, dim};
-  dset.dl_tensor.data = (void*)base;
+  dset.dl_tensor.data = (void *)base;
   dset.dl_tensor.device.device_type = kDLCPU; dset.dl_tensor.device.device_id = 0;
   dset.dl_tensor.ndim = 2;
   dset.dl_tensor.dtype.code = kDLFloat; dset.dl_tensor.dtype.bits = 32; dset.dl_tensor.dtype.lanes = 1;
   dset.dl_tensor.shape = ds; dset.dl_tensor.strides = 0; dset.dl_tensor.byte_offset = 0;
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
-  h->ip->build_algo = (g_cfg.build_algo == 2) ? IVF_PQ : NN_DESCENT;
-  h->ip->graph_degree = g_cfg.graph_degree;
-  h->ip->intermediate_graph_degree = g_cfg.intermediate_degree;
-  h->ip->nn_descent_niter = g_cfg.nn_iter;
+  h->ip->build_algo = (algo == 2) ? IVF_PQ : NN_DESCENT;
+  h->ip->graph_degree = gd;
+  h->ip->intermediate_graph_degree = igd;
+  h->ip->nn_descent_niter = niter;
+  h->metric = (int)h->ip->metric;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
   sk_log(1, "build n=%ld dim=%ld gd=%d igd=%d niter=%d algo=%s ms=%.1f",
-         n, dim, g_cfg.graph_degree, g_cfg.intermediate_degree, g_cfg.nn_iter,
-         g_cfg.build_algo == 2 ? "ivf_pq" : "nn_descent", sk_now_ms() - t0);
+         n, dim, gd, igd, niter, algo == 2 ? "ivf_pq" : "nn_descent",
+         sk_now_ms() - t0);
   return h;
 
 fail_idx: cuvsCagraIndexDestroy(h->idx);
@@ -209,6 +299,14 @@ fail_ip:  cuvsCagraIndexParamsDestroy(h->ip);
 fail_res: cuvsResourcesDestroy(h->res); free(h);
   fprintf(stderr, "[seekdb_cuvs] build failed: %s\n", cuvsGetLastErrorText());
   return NULL;
+}
+
+void* seekdb_cuvs_build(const float* base, long n, long dim)
+{
+  sk_load_cfg(1);
+  sk_resolve_fns();
+  return sk_build_with(base, n, dim, g_cfg.graph_degree, g_cfg.intermediate_degree,
+                        g_cfg.nn_iter, g_cfg.build_algo);
 }
 
 int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
@@ -244,7 +342,7 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
     if (cudaMemcpy(out_ids, nd, sizeof(unsigned)*nq*topk, cudaMemcpyDefault) != cudaSuccess) { rc=16; goto done; }
     if (out_dist) cudaMemcpy(out_dist, dd, sizeof(float)*nq*topk, cudaMemcpyDefault);
   }
-done:
+  done:
   if (sp) cuvsCagraSearchParamsDestroy(sp);
   if (dd) cuvsRMMFree(h->res, dd, sizeof(float)*nq*topk);
   if (nd) cuvsRMMFree(h->res, nd, sizeof(unsigned)*nq*topk);
@@ -260,6 +358,12 @@ void seekdb_cuvs_free(void* handle)
   if (!h) return;
   cuvsCagraIndexDestroy(h->idx);
   cuvsCagraIndexParamsDestroy(h->ip);
+  /* A restored index keeps a view on this buffer, so it must outlive the
+   * index itself. */
+  if (h->graph_dev != NULL) {
+    cuvsRMMFree(h->res, h->graph_dev, h->graph_bytes);
+    h->graph_dev = NULL;
+  }
   cuvsResourcesDestroy(h->res);
   free(h);
 }
@@ -287,6 +391,7 @@ void* seekdb_cuvs_deserialize(const char* filename, long n, long dim)
   if (!index) return NULL;
   if (cuvsResourcesCreate(&index->res) != CUVS_SUCCESS) goto fail;
   if (cuvsCagraIndexParamsCreate(&index->ip) != CUVS_SUCCESS) goto fail_res;
+  index->metric = (int)index->ip->metric;
   if (cuvsCagraIndexCreate(&index->idx) != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraDeserialize(index->res, filename, index->idx) != CUVS_SUCCESS) goto fail_idx;
   {
@@ -325,4 +430,288 @@ int seekdb_cuvs_cagra_knn(const float* base, long n, long dim,
   int rc = seekdb_cuvs_search(h, query, nq, topk, out_ids, NULL);
   seekdb_cuvs_free(h);
   return rc;
+}
+
+/* --------------------------------------------------- fast snapshot path --- */
+
+/* Copy a device-resident, row-major matrix to host memory in one call.
+ * `strides` is in elements and may be NULL for a compact layout: cuVS'
+ * to_dlpack() only publishes strides for strided layouts, so a row-major
+ * matrix reports NULL strides and a row stride equal to the column count.
+ * A strided matrix (16-byte aligned rows) has a row stride that is larger
+ * than the column count and needs a 2D copy. */
+static int sk_copy_rows_to_host(void* src, const int64_t* strides,
+                                long rows, long cols, size_t elem_size,
+                                void* dst)
+{
+  if (src == NULL || dst == NULL || rows <= 0 || cols <= 0) return 1;
+  const long row_stride = (strides != NULL) ? (long)strides[0] : cols;
+  const size_t width = (size_t)cols * elem_size;
+  if (row_stride == cols) {
+    /* Compact layout: one linear copy. */
+    return cudaMemcpy(dst, src, width * (size_t)rows,
+                       cudaMemcpyDeviceToHost) == cudaSuccess ? 0 : 1;
+  }
+  if (row_stride < cols) return 1;
+  return cudaMemcpy2D(dst, width, src, (size_t)row_stride * elem_size, width,
+                       (size_t)rows, cudaMemcpyDeviceToHost) == cudaSuccess ? 0 : 1;
+}
+
+int seekdb_cuvs_export_graph(void* handle, unsigned int* graph_out,
+                             long n, long* graph_degree_out)
+{
+  sk_load_cfg(0);
+  sk_resolve_fns();
+  const double t0 = sk_now_ms();
+  sk_cuvs_index* h = (sk_cuvs_index*)handle;
+  if (h == NULL) return 1;
+  if (sk_fn_get_graph == NULL || sk_fn_get_graph_degree == NULL) return 2;
+
+  int64_t gd = 0;
+  if (sk_fn_get_graph_degree(h->idx, &gd) != CUVS_SUCCESS) return 3;
+  if (gd <= 0) return 3;
+  if (graph_degree_out != NULL) *graph_degree_out = (long)gd;
+
+  if (graph_out != NULL) {
+    DLManagedTensor g;
+    int rc = 0;
+    memset(&g, 0, sizeof(g));
+    if (sk_fn_get_graph(h->idx, &g) != CUVS_SUCCESS) return 7;
+    if (g.dl_tensor.ndim != 2 || g.dl_tensor.shape[0] != n ||
+        g.dl_tensor.shape[1] != gd) {
+      rc = 8;
+    } else {
+      /* The graph is a row-major device matrix, so to_dlpack leaves the
+       * strides null and the row stride equals the column count. */
+      rc = sk_copy_rows_to_host(g.dl_tensor.data, g.dl_tensor.strides, n,
+                                (long)gd, sizeof(unsigned int), graph_out);
+      if (rc != 0) rc = 9;
+    }
+    /* to_dlpack() hands out a deleter that releases the host-side shape
+     * metadata; it must run once the view is no longer used. */
+    if (g.deleter != NULL) g.deleter(&g);
+    if (rc != 0) return rc;
+  }
+  sk_log(1, "export_graph n=%ld gd=%ld ms=%.1f", n, (long)gd, sk_now_ms() - t0);
+  return 0;
+}
+
+/* The metric the index was actually built with. The snapshot stores it so
+ * that the restored index uses exactly the same distance function. */
+int seekdb_cuvs_index_metric(void* handle)
+{
+  sk_cuvs_index* h = (sk_cuvs_index*)handle;
+  return (h == NULL) ? -1 : h->metric;
+}
+
+void* seekdb_cuvs_restore(const float* dataset, long n, long dim,
+                          const unsigned int* graph, long graph_degree,
+                          int metric)
+{
+  sk_load_cfg(0);
+  sk_resolve_fns();
+  const double t0 = sk_now_ms();
+  if (dataset == NULL || graph == NULL || n <= 0 || dim <= 0 ||
+      graph_degree <= 0) {
+    return NULL;
+  }
+  if (sk_fn_from_args == NULL) return NULL;
+
+  sk_cuvs_index* h = (sk_cuvs_index*)calloc(1, sizeof(*h));
+  if (!h) return NULL;
+  h->n = n;
+  h->dim = dim;
+
+  if (cuvsResourcesCreate(&h->res) != CUVS_SUCCESS) goto fail_alloc;
+  if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
+  /* The built index uses the default metric; a restored index must use the
+   * same one or its distances would not match. */
+  h->metric = metric;
+  if (cuvsCagraIndexCreate(&h->idx) != CUVS_SUCCESS) goto fail_ip;
+
+  h->graph_bytes = (size_t)n * (size_t)graph_degree * sizeof(unsigned int);
+  if (cuvsRMMAlloc(h->res, &h->graph_dev, h->graph_bytes) != CUVS_SUCCESS) {
+    goto fail_idx;
+  }
+  if (cudaMemcpy(h->graph_dev, graph, h->graph_bytes, cudaMemcpyDefault)
+      != cudaSuccess) {
+    goto fail_graph;
+  }
+
+  {
+    long ds_shape[2] = {n, dim};
+    long g_shape[2] = {n, graph_degree};
+    DLManagedTensor dset, gt;
+    memset(&dset, 0, sizeof(dset));
+    memset(&gt, 0, sizeof(gt));
+    dset.dl_tensor.data = (void*)dataset;
+    dset.dl_tensor.device.device_type = kDLCPU;
+    dset.dl_tensor.device.device_id = 0;
+    dset.dl_tensor.ndim = 2;
+    dset.dl_tensor.dtype.code = kDLFloat;
+    dset.dl_tensor.dtype.bits = 32;
+    dset.dl_tensor.dtype.lanes = 1;
+    dset.dl_tensor.shape = ds_shape;
+    dset.dl_tensor.strides = NULL;
+    dset.dl_tensor.byte_offset = 0;
+
+    /* The graph must live on the device: cuvsCagraIndexFromArgs keeps a view
+     * on it, so the buffer allocated above is owned by this handle. */
+    gt.dl_tensor.data = h->graph_dev;
+    gt.dl_tensor.device.device_type = kDLCUDA;
+    gt.dl_tensor.device.device_id = 0;
+    gt.dl_tensor.ndim = 2;
+    gt.dl_tensor.dtype.code = kDLUInt;
+    gt.dl_tensor.dtype.bits = 32;
+    gt.dl_tensor.dtype.lanes = 1;
+    gt.dl_tensor.shape = g_shape;
+    gt.dl_tensor.strides = NULL;
+    gt.dl_tensor.byte_offset = 0;
+
+    if (sk_fn_from_args(h->res, (cuvsDistanceType)h->metric, &gt, &dset,
+                         h->idx) != CUVS_SUCCESS) {
+      goto fail_graph;
+    }
+  }
+  sk_log(1, "restore n=%ld dim=%ld gd=%ld metric=%d ms=%.1f", n, dim,
+         graph_degree, h->metric, sk_now_ms() - t0);
+  return h;
+
+fail_graph:
+fail_idx:
+  /* The index may already hold a view on graph_dev, so it has to be destroyed
+   * before the buffer is released. */
+  cuvsCagraIndexDestroy(h->idx);
+  if (h->graph_dev != NULL) {
+    cuvsRMMFree(h->res, h->graph_dev, h->graph_bytes);
+    h->graph_dev = NULL;
+  }
+fail_ip:
+  cuvsCagraIndexParamsDestroy(h->ip);
+fail_res:
+  cuvsResourcesDestroy(h->res);
+fail_alloc:
+  free(h);
+  fprintf(stderr, "[seekdb_cuvs] restore failed: %s\n", cuvsGetLastErrorText());
+  return NULL;
+}
+
+int seekdb_cuvs_metric(void)
+{
+  cuvsCagraIndexParams_t ip = NULL;
+  int metric = 0;
+  if (cuvsCagraIndexParamsCreate(&ip) == CUVS_SUCCESS && ip != NULL) {
+    metric = (int)ip->metric;
+    cuvsCagraIndexParamsDestroy(ip);
+  }
+  return metric;
+}
+
+/* Self-contained capability probe: build a tiny index, export its graph,
+ * restore it and check that the restored index returns the same neighbours as
+ * the original one. Only if this round trip is exact is the fast snapshot path
+ * enabled; otherwise seekdb keeps the cuVS file format.
+ *
+ * The probe covers the whole production contract:
+ *   build(host dataset) -> export graph -> restore(host dataset + graph)
+ *   -> search must return the same neighbour ids.
+ *
+ * Two independent conditions have to hold:
+ *   1. the restored index returns exactly the same ids and distances as the
+ *      built one (this is what the fast snapshot path relies on), and
+ *   2. those results are genuine neighbours, i.e. the ids are in range, they
+ *      are distinct and the reported distance matches the host-computed
+ *      squared-L2 distance. Without this second check two identical garbage
+ *      results would pass the probe and hide a broken export.
+ */
+static int sk_fast_snapshot_probe(void)
+{
+  enum { PN = 256, PDIM = 16, PTOPK = 5 };
+  float base[PN * PDIM];
+  float query[PDIM];
+  unsigned int ids_a[PTOPK], ids_b[PTOPK];
+  float dist_a[PTOPK], dist_b[PTOPK];
+  unsigned int* graph = NULL;
+  long gd = 0;
+  void* h = NULL;
+  void* r = NULL;
+  int ok = 0;
+
+  for (int i = 0; i < PN; ++i) {
+    for (int j = 0; j < PDIM; ++j) {
+      base[i * PDIM + j] = (float)((i * 7 + j * 13) % 31) * 0.25f;
+    }
+  }
+  for (int j = 0; j < PDIM; ++j) { query[j] = (float)(j % 5) * 0.5f; }
+
+  /* Small parameters: the probe must be cheap, and the graph degree has to be
+   * compatible with the point count. */
+  h = sk_build_with(base, PN, PDIM, 16, 32, 5, 1);
+  if (h == NULL) goto done;
+  graph = (unsigned int*)malloc((size_t)PN * 16 * sizeof(unsigned int));
+  if (graph == NULL) goto done;
+  if (seekdb_cuvs_export_graph(h, graph, PN, &gd) != 0) goto done;
+  if (gd <= 0 || gd > 16) goto done;
+  r = seekdb_cuvs_restore(base, PN, PDIM, graph, gd, seekdb_cuvs_index_metric(h));
+  if (r == NULL) goto done;
+  if (seekdb_cuvs_search(h, query, 1, PTOPK, ids_a, dist_a) != 0) goto done;
+  if (seekdb_cuvs_search(r, query, 1, PTOPK, ids_b, dist_b) != 0) goto done;
+
+  /* 1. the round trip must preserve the results exactly: the neighbour ids
+   *    are the semantic contract, the distances only have to agree. */
+  ok = 1;
+  for (int i = 0; i < PTOPK; ++i) {
+    if (ids_a[i] != ids_b[i]) { ok = 0; break; }
+    const double da = (double)dist_a[i];
+    const double db = (double)dist_b[i];
+    const double scale = (da > db) ? da : db;
+    if (scale > 0.0 && fabs(da - db) / scale > 1e-5) { ok = 0; break; }
+  }
+  if (!ok) goto done;
+
+  /* 2. the results must be genuine neighbours */
+  for (int i = 0; i < PTOPK; ++i) {
+    if (ids_a[i] >= (unsigned int)PN) { ok = 0; break; }
+    for (int j = i + 1; j < PTOPK; ++j) {
+      if (ids_a[i] == ids_a[j]) { ok = 0; break; }
+    }
+    if (!ok) break;
+    double sum = 0.0;
+    for (int j = 0; j < PDIM; ++j) {
+      const double d = (double)query[j] - (double)base[ids_a[i] * PDIM + j];
+      sum += d * d;
+    }
+    /* The metric is L2Expanded (squared L2), so the reported distance is the
+     * squared distance. Allow a small relative tolerance for the float32
+     * arithmetic done on the device. */
+    if (dist_a[i] < 0.0f) { ok = 0; break; }
+    const double rel = (sum > 0.0) ? (fabs((double)dist_a[i] - sum) / sum) : 0.0;
+    if (rel > 1e-3) { ok = 0; break; }
+  }
+
+done:
+  if (r != NULL) seekdb_cuvs_free(r);
+  if (h != NULL) seekdb_cuvs_free(h);
+  free(graph);
+  return ok;
+}
+
+int seekdb_cuvs_supports_fast_snapshot(void)
+{
+  /* 0 = unknown, 1 = supported, -1 = not supported. */
+  static int state = 0;
+  if (state == 0) {
+    sk_load_cfg(0);
+    sk_resolve_fns();
+    if (!g_cfg.fast_snapshot) {
+      state = -1;
+    } else if (sk_fn_get_graph == NULL || sk_fn_get_graph_degree == NULL ||
+               sk_fn_from_args == NULL) {
+      state = -1;
+    } else {
+      state = sk_fast_snapshot_probe() ? 1 : -1;
+    }
+    sk_log(1, "fast_snapshot_supported=%d", state == 1);
+  }
+  return state == 1;
 }
