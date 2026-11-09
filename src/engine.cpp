@@ -809,6 +809,11 @@ std::optional<Row> Database::visible_row(Table *t, i64 id) const {
   return t->load_row_by_id(id);
 }
 
+bool Database::has_visible_row(Table *t, i64 id) const {
+  if (const auto *o = overlay_row(t, id)) return o->has_value();
+  return t->has_row(id);
+}
+
 void Database::begin_txn() {
   // MySQL semantics: a second BEGIN implicitly commits the previous
   // transaction and starts a new one.  Nested transactions are not supported.
@@ -1734,7 +1739,7 @@ ResultSet Database::exec_insert(const Statement &st) {
     i64 id = row.values[pk].i;
     if (!seen_pk.insert(id).second)
       fail(ER_DUP_ENTRY, "Duplicate entry '" + std::to_string(id) + "' for key 'PRIMARY'");
-    if (visible_row(t, id))
+    if (has_visible_row(t, id))
       fail(ER_DUP_ENTRY, "Duplicate entry '" + std::to_string(id) + "' for key 'PRIMARY'");
     Change c;
     c.table = t;

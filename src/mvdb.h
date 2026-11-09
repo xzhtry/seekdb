@@ -182,7 +182,7 @@ void atomic_write_file(const std::string &path, const std::string &content);
 
 // Runtime limits.
 constexpr size_t kMaxRecordPayload = 64u * 1024u * 1024u;
-constexpr size_t kDefaultCacheBudget = 64ull * 1024ull * 1024ull;
+constexpr size_t kDefaultCacheBudget = 32ull * 1024ull * 1024ull;
 constexpr u32 kDataMagic = 0x5244564Du;   // "MVDR" little endian
 constexpr u32 kWalMagic = 0x5744564Du;    // "MVDW"
 constexpr u32 kCatalogMagic = 0x5441434Du;  // "MDAT" -> catalog tag

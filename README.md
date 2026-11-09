@@ -239,7 +239,7 @@ u32 payload_len | u32 crc32 | payload
 
 `kind=DEL` 的 payload 为空，`row_id` 表示删除。CRC32 覆盖记录头（crc 字段置零）和 payload。启动时顺序扫描、校验 CRC；尾部不完整记录会被截断。
 
-内存索引为 `row_id -> (offset, payload_len)` 的哈希表；另有一个受预算限制的行缓存（默认 64 MiB，`MVDB_CACHE_MB` 可调）。缓存足够时，查询走连续快照；数据超过缓存时，按 offset 从 mmap 流式读取，不会全量载入内存。
+内存索引为 `row_id -> (offset, payload_len)` 的哈希表；另有一个受预算限制的行缓存（默认 32 MiB，`MVDB_CACHE_MB` 可调）。缓存足够时，查询走连续快照；数据超过缓存时，按 offset 从 mmap 流式读取，不会全量载入内存。
 
 ### WAL 与提交
 
@@ -283,7 +283,7 @@ u32 payload_len | u32 crc32 | payload
 
 ### 内存与磁盘
 
-- 行缓存默认 64 MiB，可用 `MVDB_CACHE_MB` 调整。
+- 行缓存默认 32 MiB，可用 `MVDB_CACHE_MB` 调整。
 - 数据文件用 mmap 读取；大表按记录流式处理。
 - 所有数据库文件都在 `--data-dir` 下，不写其他目录。
 - 程序不启动线程、不监听端口、不访问网络。

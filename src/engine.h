@@ -226,6 +226,7 @@ class Database {
   ResultSet exec_describe(const Statement &stmt);
 
   std::optional<Row> visible_row(Table *t, i64 id) const;
+  bool has_visible_row(Table *t, i64 id) const;
   const std::optional<Row> *overlay_row(Table *t, i64 id) const;
   void set_overlay(Table *t, i64 id, std::optional<Row> row);
   void clear_overlay();

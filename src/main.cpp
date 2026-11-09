@@ -138,6 +138,9 @@ class Output {
     if (const char *e = std::getenv("MVDB_DML_STATUS")) {
       if (std::strcmp(e, "0") == 0) dml_status_ = false;
     }
+    if (const char *e = std::getenv("MVDB_HEADERS")) {
+      if (std::strcmp(e, "0") == 0) headers_ = false;
+    }
   }
 
   void ready() {
@@ -163,18 +166,18 @@ class Output {
   void result(const ResultSet &rs) {
     if (mode_ == "framed") {
       std::printf("RESULT %zu %zu\n", rs.columns.size(), rs.rows.size());
-      write_row(rs.columns);
+      if (headers_) write_row(rs.columns);
       for (const auto &r : rs.rows) write_row(r);
     } else if (mode_ == "mysql") {
       if (rs.query) {
-        write_row(rs.columns);
+        if (headers_) write_row(rs.columns);
         for (const auto &r : rs.rows) write_row(r);
       } else {
         std::fputs("OK\n", stdout);
       }
     } else if (mode_ == "tsv") {
       if (rs.query) {
-        write_row(rs.columns);
+        if (headers_) write_row(rs.columns);
         for (const auto &r : rs.rows) write_row(r);
       }
     }
@@ -217,6 +220,7 @@ class Output {
 
   std::string mode_;
   bool dml_status_ = true;
+  bool headers_ = true;
 };
 
 std::string g_data_dir = "/data";
@@ -247,7 +251,13 @@ int main(int argc, char **argv) {
   }
   g_data_dir = arg_value(argc, argv, "--data-dir", "/data");
   g_protocol = arg_value(argc, argv, "--protocol", "framed");
+  for (int i = 1; i < argc; ++i) {
+    std::string a = argv[i];
+    if (a.rfind("--data-dir=", 0) == 0) g_data_dir = a.substr(11);
+    else if (a.rfind("--protocol=", 0) == 0) g_protocol = a.substr(11);
+  }
   if (const char *p = std::getenv("MVDB_PROTOCOL")) g_protocol = p;
+  if (const char *d = std::getenv("MVDB_DATA_DIR")) g_data_dir = d;
   if (g_protocol == "plain") g_protocol = "tsv";
   if (g_protocol != "framed" && g_protocol != "mysql" && g_protocol != "tsv")
     g_protocol = "framed";
@@ -339,6 +349,10 @@ int main(int argc, char **argv) {
       if (buf.empty()) break;
     } else {
       buf.append(chunk, static_cast<size_t>(n));
+      if (buf.size() >= 3 && static_cast<unsigned char>(buf[0]) == 0xEF &&
+          static_cast<unsigned char>(buf[1]) == 0xBB &&
+          static_cast<unsigned char>(buf[2]) == 0xBF)
+        buf.erase(0, 3);
       if (buf.size() > kMaxBuffer) {
         out.error(Error{ER_PARSE, "input statement too large"});
         buf.clear();
