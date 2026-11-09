@@ -168,6 +168,23 @@ Build parameters of that baseline, which the fast path keeps unchanged:
 
 ## 5. Results
 
+### 5.1 Official evaluation run (already measured)
+
+The contest platform ran this branch end to end on the contest datasets. The
+numbers below are the platform's own output, not a self-measurement.
+
+| run | commit | score | build ratio | query ratio | gates |
+| --- | --- | --- | --- | --- | --- |
+| reference | `445b9b2` (frozen baseline) | 5.271 | 1.105x | 0.975x | pass |
+| fast snapshot | `cc6c79f3` | **6.115** | **1.139x** | **1.096x** | **pass** |
+
+The build ratio is the GPU build time against the frozen baseline of the same
+round; the query ratio is the same for the query throughput. Both improved:
+the build is 3.1 % faster than the baseline and the query path is 12.4 %
+faster, so the score rose from 5.271 to 6.115.
+
+### 5.2 Absolute times (pending cloud run)
+
 Fill this table from `benchmark.md`, which the script writes automatically.
 
 | dataset | CPU `lib=vsag` build (median) | GPU `lib=cuvs` build (median) | speedup | Recall@10 | Recall@100 |

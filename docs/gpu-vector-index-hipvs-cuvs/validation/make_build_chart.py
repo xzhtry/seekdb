@@ -150,8 +150,8 @@ def panel_score_curve(svg: Svg, y0: int) -> int:
     h = 250
     svg.text(PAD_L, y0 - 14, "构建加速比 → 总分（评分公式 14·ln(r)/ln(3.0) + 查询分）",
              size=15, weight="600")
-    svg.text(PAD_L, y0 + 2, "已知最好成绩 1.105x = 5.27 分；曲线自 1.0x 起（低于 1.0x 只会扣分）",
-             size=12, fill=MUTED)
+    svg.text(PAD_L, y0 + 2, "曲线为构建分（14·ln(r)/ln(3.0)）；两个圆点是平台真实跑出来的构建加速比，"
+             "标注为该轮的总分", size=12, fill=MUTED)
 
     x0, x1 = PAD_L, W - PAD_R
     plot_top = y0 + 26
@@ -186,13 +186,21 @@ def panel_score_curve(svg: Svg, y0: int) -> int:
         pts.append((sx_of(r), sy_of(score(r))))
     svg.path(pts, GPU_C, 2.5)
 
-    # the known best result
-    r_best = 1.105
-    xb = sx_of(r_best)
-    yb = sy_of(score(r_best))
-    svg.line(xb, plot_top, xb, axis_y, ACCENT, 1.2, dash="4 4")
-    svg.circle(xb, yb, 4.5, ACCENT)
-    svg.text(xb + 10, yb - 10, "已知最好 1.105x → 5.27 分", size=12, fill=ACCENT, weight="600")
+    # The two runs the platform actually measured. Their build ratios are only
+    # 0.034 apart, so the labels go into a legend instead of next to the dots.
+    for r_best, color in ((1.105, BLOB_C), (1.139, FAST_C)):
+        xb = sx_of(r_best)
+        svg.line(xb, plot_top, xb, axis_y, color, 1.2, dash="4 4")
+        svg.circle(xb, sy_of(score(r_best)), 4.5, color)
+
+    legend_x = x0 + (x1 - x0) * 0.58
+    for i, (r_best, total, color, label) in enumerate((
+        (1.105, "5.271", BLOB_C, "冻结基线 445b9b2：1.105x → 总分 5.271"),
+        (1.139, "6.115", FAST_C, "本方案 cc6c79f3：1.139x → 总分 6.115"),
+    )):
+        ly = plot_top + 16 + i * 24
+        svg.circle(legend_x, ly - 4, 4.5, color)
+        svg.text(legend_x + 12, ly, label, size=12, fill=INK, weight="600")
 
     svg.text((x0 + x1) / 2, axis_y + 38, "构建加速比（基线构建耗时 ÷ 本方案构建耗时）",
              size=12, fill=MUTED, anchor="middle")
@@ -371,24 +379,60 @@ def panel_stages(svg: Svg, y0: int, stages: dict) -> int:
     return h
 
 
+def panel_official_runs(svg: Svg, y0: int) -> int:
+    """The platform's own numbers for the two evaluation runs."""
+    h = 272
+    svg.text(PAD_L, y0 - 14, "官方提测实测结果（平台输出，2026-11-09）", size=15, weight="600")
+    svg.text(PAD_L, y0 + 2, "同一轮的冻结基线 445b9b2  vs  本方案 cc6c79f3；两轮门槛均为 gates=pass",
+             size=12, fill=MUTED)
+
+    # name, baseline value, our value, axis maximum, unit, reference line
+    groups = [
+        ("构建加速比 build", 1.105, 1.139, 1.25, "x", 1.0),
+        ("查询吞吐比 query", 0.975, 1.096, 1.25, "x", 1.0),
+        ("总分 score", 5.271, 6.115, 7.0, "", None),
+    ]
+
+    x0 = PAD_L + 96
+    x1 = W - PAD_R - 92
+    span = x1 - x0
+    y = y0 + 34
+    for name, base, ours, scale, unit, ref in groups:
+        svg.text(PAD_L, y + 26, name, size=12, fill=INK, weight="600")
+        for offset, value, color, tag in ((0, base, BLOB_C, "基线"), (24, ours, FAST_C, "本方案")):
+            yy = y + offset
+            svg.text(x0 - 8, yy + 13, tag, size=11, fill=MUTED, anchor="end")
+            w = span * (value / scale)
+            svg.rect(x0, yy, w, 18, color, rx=3)
+            svg.text(x0 + w + 8, yy + 13, f"{value:g}{unit}", size=12, fill=INK, weight="600")
+        if ref is not None:
+            xr = x0 + span * (ref / scale)
+            svg.line(xr, y - 2, xr, y + 46, ACCENT, 1.2, dash="3 4")
+            svg.text(xr + 5, y + 58, "1.0x = 冻结基线", size=10, fill=ACCENT)
+        y += 80
+    return h
+
+
 def build_reference_svg() -> str:
     svg = Svg()
-    svg.height = 60 + 250 + 215 + 40
+    svg.height = 60 + 250 + 215 + 272 + 60
     svg.rect(0, 0, W, svg.height, "#ffffff")
     y = PAD_T
     y += panel_score_curve(svg, y) + 34
+    y += panel_official_runs(svg, y) + 20
     y += panel_container_bytes(svg, y) + 20
     return svg.render()
 
 
 def build_benchmark_svg(bench: dict, stages: dict) -> str:
     svg = Svg()
-    svg.height = 60 + 260 + 230 + 250 + 215 + 120
+    svg.height = 60 + 260 + 230 + 250 + 272 + 215 + 140
     svg.rect(0, 0, W, svg.height, "#ffffff")
     y = PAD_T
     y += panel_cpu_gpu(svg, y, bench) + 26
     y += panel_stages(svg, y, stages) + 26
     y += panel_score_curve(svg, y) + 34
+    y += panel_official_runs(svg, y) + 20
     y += panel_container_bytes(svg, y) + 20
     return svg.render()
 
