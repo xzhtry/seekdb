@@ -157,6 +157,15 @@
       "output": "PASS sql_crud / sql_comparisons / sql_ordering / sql_empty / sql_primary_key / sql_unicode / sql_bigint / sql_unsupported / storage_restart / vector_euclidean / transaction_commit / transaction_rollback / storage_mutations / storage_multiple_tables / vector_ties_and_filter / vector_float32 / vector_index_maintenance / transaction_failed_insert / transaction_autocommit_atomic / transaction_shutdown_rollback / 20/20 cases passed",
       "student_role": "学生没有参与这轮定位；Agent 在官方题包发布后发现并修复 value 保留字问题，并逐条跑通公开用例。",
       "conclusion": "公开语义（含 BIGINT 精度、float32、过滤后 TopK、事务原子性、正常关闭回滚）全部通过；正式驱动协议仍未知。"
+    },
+    {
+      "id": "e10",
+      "title": "GitHub Actions 内 Docker 构建与容器冒烟",
+      "hypothesis": "两次正式 0/1 也可能是平台内 Docker 构建失败（例如 gcc:13 静态 libstdc++ 缺失）；用 GitHub Actions 的独立 Docker 环境构建同一 Dockerfile 并运行容器，可排除构建/启动问题。",
+      "command": "git push 触发 .github/workflows/minivectordb-ci.yml：docker build -t minivectordb:ci .；docker run --rm -i ... 执行建表/插入/事务回滚；再用 named volume 重启读向量距离",
+      "output": "GitHub Actions run 42616565452：conclusion=success；步骤 Build image=success、Run smoke SQL=success、Run restart SQL=success；容器输出 READY/RESULT/OK，重启后仍能读到向量数据",
+      "student_role": "学生没有参与该 CI 设计；Agent 为了避免本地下载 595 MiB Docker Desktop，改用云端 Docker 验证构建与启动。",
+      "conclusion": "Dockerfile 在干净的 GitHub Actions Ubuntu 环境中能构建并启动，冒烟/重启/向量输出均通过；因此正式 0/1 不太可能是 Docker 构建或启动导致，剩余风险集中在官方驱动的 stdin/stdout 协议或驱动尚未部署。"
     }
   ],
   "retrospective": {
