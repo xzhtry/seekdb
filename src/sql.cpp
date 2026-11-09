@@ -313,7 +313,7 @@ bool Parser::is_clause_keyword(const Token &t) const {
       "values", "set", "into", "on", "using", "with", "primary", "key",
       "not", "null", "if", "exists", "by", "group", "having", "join", "inner",
       "left", "right", "outer", "union", "select", "insert", "update", "delete",
-      "create", "drop", "table", "index", "vector", "begin", "commit", "rollback",
+      "create", "drop", "table", "index", "begin", "commit", "rollback",
       "show", "describe", "desc", "quit", "exit", "for", "share", "lock", "in",
       "is", "like", "between", "distinct", "all", "database", "session", "global"};
   return kws.count(to_lower(t.text)) > 0;
