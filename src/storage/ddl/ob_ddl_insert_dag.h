@@ -39,6 +39,38 @@ public:
   int64_t px_thread_count_;
 };
 
+// Parameters for building one FTS inverted-index auxiliary table straight from a
+// base-table scan instead of driving an inner `INSERT ... SELECT ... ORDER BY`.
+struct ObFtsAuxBuildParam final
+{
+public:
+  ObFtsAuxBuildParam()
+    : data_table_id_(OB_INVALID_ID), aux_table_id_(OB_INVALID_ID), schema_version_(0),
+      snapshot_version_(0), ddl_task_id_(0), execution_id_(0), parallelism_(1)
+  {}
+  bool is_valid() const
+  {
+    return OB_INVALID_ID != data_table_id_ && OB_INVALID_ID != aux_table_id_ &&
+           schema_version_ > 0 && snapshot_version_ > 0 &&
+           ddl_task_id_ > 0 && execution_id_ >= 0 && parallelism_ > 0;
+  }
+  TO_STRING_KV(K_(data_table_id), K_(aux_table_id), K_(schema_version), K_(snapshot_version),
+               K_(ddl_task_id), K_(execution_id), K_(parallelism));
+public:
+  uint64_t data_table_id_;
+  uint64_t aux_table_id_;
+  int64_t schema_version_;
+  int64_t snapshot_version_;
+  int64_t ddl_task_id_;
+  int64_t execution_id_;
+  int64_t parallelism_;
+};
+
+// Build the inverted-index aux table by scanning the base table directly.
+// Returns OB_NOT_SUPPORTED when the direct build is disabled or not applicable,
+// in which case the caller must fall back to the inner SQL path.
+int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param);
+
 class ObFtsRangeBuildTask final : public share::ObITask
 {
 public:
