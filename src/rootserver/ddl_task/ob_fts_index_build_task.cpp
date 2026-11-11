@@ -69,8 +69,7 @@ ObFtsIndexBuildTask::ObFtsIndexBuildTask()
     is_retryable_ddl_(true),
     use_doc_id_(true),
     rowkey_doc_schema_version_(0),
-    charset_type_(CHARSET_INVALID),
-    complement_poll_seq_(0)
+    charset_type_(CHARSET_INVALID)
 {
 }
 
@@ -831,7 +830,6 @@ int ObFtsIndexBuildTask::wait_aux_table_complement()
              ObDDLTaskStatus::WAIT_AUX_TABLE_COMPLEMENT != task_status_) {
     ret = OB_STATE_NOT_MATCH;
   } else {
-    ++complement_poll_seq_;
     int64_t finished_task_cnt = 0;
     for (task_iter iter = dependent_task_result_map_.begin();
         OB_SUCC(ret) && iter != dependent_task_result_map_.end(); ++iter) {
@@ -839,9 +837,7 @@ int ObFtsIndexBuildTask::wait_aux_table_complement()
       const int64_t target_object_id = -1;
       const int64_t child_task_id = iter->second.task_id_;
       if (iter->second.ret_code_ == INT64_MAX) {
-        // maybe ddl already finish when switching rs.  The in-memory map is
-        // checked on every tick; the SQL fallback is only needed occasionally.
-        if (0 == (complement_poll_seq_ % 8)) {
+        // maybe ddl already finish when switching rs
         HEAP_VAR(ObDDLErrorMessageTableOperator::ObBuildDDLErrorMessage, error_message) {
           int64_t unused_user_msg_len = 0;
           ObAddr unused_addr;
@@ -867,7 +863,6 @@ int ObFtsIndexBuildTask::wait_aux_table_complement()
               break;
             }
           }
-        }
         }
       } else {
         finished_task_cnt++;
