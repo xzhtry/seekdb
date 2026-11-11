@@ -225,6 +225,7 @@ private:
   bool use_doc_id_;
   int64_t rowkey_doc_schema_version_;
   ObCharsetType charset_type_;
+  int64_t complement_poll_seq_;
 };
 
 } // end namespace rootserver
