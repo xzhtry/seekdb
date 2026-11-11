@@ -4693,7 +4693,7 @@ int ObDDLService::generate_aux_index_schema_(ObSchemaGetterGuard &schema_guard,
     // create empty major for table 3,4
     if (OB_FAIL(ret)) {
     } else if (index_schema.is_vec_delta_buffer_type() || index_schema.is_hybrid_vec_index_log_type() || index_schema.is_vec_index_id_type()
-               || share::schema::is_fts_doc_word_aux(index_schema.get_index_type())) {  // PROTOTYPE(lazy-doc_word) -- NOT-for-submission
+               || share::schema::is_fts_doc_word_aux(index_schema.get_index_type())) {
       index_schema.set_index_status(INDEX_STATUS_AVAILABLE);
     }
     // for post-create hybrid vector index
@@ -4903,7 +4903,7 @@ int ObDDLService::create_aux_index(
       } else if (FALSE_IT(result.schema_generated_ = true)) {
       } else if (FALSE_IT(result.aux_table_id_ = index_schema.get_table_id())) {
       } else if (index_schema.is_vec_delta_buffer_type() || index_schema.is_hybrid_vec_index_log_type() || index_schema.is_vec_index_id_type()
-          || share::schema::is_fts_doc_word_aux(index_schema.get_index_type())) {  // PROTOTYPE(lazy-doc_word) -- NOT-for-submission
+          || share::schema::is_fts_doc_word_aux(index_schema.get_index_type())) {
         // no need to create ddl task
         result.ddl_task_id_ = OB_INVALID_ID;
       } else if (OB_FAIL(create_aux_index_task_(data_schema,
