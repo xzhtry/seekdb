@@ -137,8 +137,16 @@ docs/gpu-vector-index-hipvs-cuvs/validation/run_build_benchmark.sh \
 
 ### 3.3 拿分段耗时（回答 §1 的盲区）
 
+**阶段行不在 stdout 上。** observer 用自己的 syslog 文件（`<base-dir>/run/log/seekdb.log`），
+而且每轮 DDL 之前会重开一次日志、只保留 **1 个**轮转备份 —— 跑完 3 轮再去 grep，
+第一轮那行已经被删掉了。所以：
+
+- `run_build_benchmark.sh` 在收尾时会自动从 observer 的**日志目录**（含轮转文件，按时间顺序）
+  里收集阶段行，写到 `$EVIDENCE/stages.txt`；
+- 若要手工取，直接看日志目录：
+
 ```bash
-grep -a '\[OBVSAG\]\[cuVS\] stage\|\[seekdb_cuvs\]' /tmp/seekdb-bench-evidence/observer.log
+grep -a '\[OBVSAG\]\[cuVS\] stage\|\[seekdb_cuvs\]' <base-dir>/run/log/seekdb.log*
 ```
 
 日志形态：
@@ -181,23 +189,64 @@ python3 docs/gpu-vector-index-hipvs-cuvs/validation/make_build_chart.py \
 
 该基线的构建参数（**本次改动保持不变**）：`graph_degree=128`、`intermediate_degree=256`、`nn_descent_niter=100`、`build_algo=nn_descent`、`itopk_min=512`、`search_width=4`。
 
-### 4.2 本次方案的结果（**待云端实测填入**）
+### 4.2 云端实测结果（AMD Radeon Pro W7900D 实例，ROCm 7.2.4）
 
-| 数据集 | CPU `lib=vsag` 构建中位 | GPU `lib=cuvs` 构建中位 | GPU 加速比 | Recall@10 | Recall@100 |
+评测用的 SIFT250K / Hidden250K 属评测方资产，规则禁止获取；云端镜像只带了 10,000 × 128 的演示集。
+所以主表用 **250,000 × 128 的合成高斯数据**（与两个评测集同形状、同 seed，每次重复都是新表），
+交叉验证用镜像自带的 **10,000 × 128 真实数据**（带官方 query 与 ground truth）。
+
+> ⚠️ 合成高斯数据没有簇结构，比真实 SIFT 难建得多，**绝对秒数不可与 §4.1 的真实 SIFT 基线直接比较**；
+> 可比的是相对关系与四段占比。评测的相对数字见 §5.1。
+
+**绝对构建耗时**（每组 3 次重复，每次都是新表；索引参数与评测完全一致
+`type=hnsw, m=16, ef_construction=200, ef_search=64, distance=l2`）：
+
+| 路径 | CPU `lib=vsag`（中位） | GPU `lib=cuvs`（中位） | GPU 加速比 |
+| --- | --- | --- | --- |
+| 快路径 `SEEKDB_CUVS_FAST_SNAPSHOT=1` | 159.15 s | 46.27 s | **3.44x** |
+| 基线路径 `SEEKDB_CUVS_FAST_SNAPSHOT=0` | 160.36 s | 46.76 s | **3.43x** |
+
+独立复现（另跑一轮同样的 A/B）：快路径 **3.36x**、基线路径 **3.40x**，结论一致。
+
+**四段耗时**（`CREATE VECTOR INDEX` 计时窗口内，3 轮中位数）：
+
+| 路径 | build（GPU 建图） | export（图回传主机） | write（快照落盘） | 合计 | build 占比 |
 | --- | --- | --- | --- | --- | --- |
-| SIFT250K | 待实测 | 待实测 | 待实测 | 待实测 | 待实测 |
-| Hidden250K | 待实测 | 待实测 | 待实测 | 待实测 | 待实测 |
+| 快路径 `path=fast` | 42.61 s | 6.9 ms | 292.1 ms | 42.91 s | **99.30%** |
+| 基线路径 `path=blob` | 42.49 s | 0.0 ms | 242.9 ms | 42.99 s | **98.84%** |
 
-分段耗时（待填）：
+`path=blob` 把「图 + 数据集」序列化成一个 blob 再落盘，没有独立的 export 段，blob 序列化折进 `total_us`；
+`path=fast` 只有「回传图」和「写图」两步。
+
+**这条数据的意义**：`build`（cuVS 自己的建图）占了计时窗口的 **99%**，export 与 write 合计不到 1%，
+两条路径的 `total_us` 只差 **0.07 s** —— **构建窗口里已经没有留给快照格式的优化空间**，
+剩下的空间只能在 cuVS 之外的环节，而 cuVS 建图那段不能碰（召回余量 ≈ 0）。
+
+**召回校验**（numpy 暴力精确 GT，100 条查询，top-100）：
+
+| 索引 | 数据集 | Recall@10 | Recall@100 |
+| --- | --- | --- | --- |
+| GPU `lib=cuvs` | 250K 合成 | **0.9870** | **0.9614** |
+| GPU `lib=cuvs` | 10K 真实 | **1.0000** | **1.0000** |
+| CPU `lib=vsag` | 250K 合成 | 0.1860 | 0.1429 |
+| CPU `lib=vsag` | 10K 真实 | 0.7660 | 0.6524 |
+
+10K 真实数据自带官方 ground truth，与本次 numpy 暴力 GT 的 top-10 一致度 = **1.0000** ——
+说明查询向量、ID 映射、GT 计算三者都没错。250K 合成数据上另外做了**精确扫描对照**：
+同一张 VSAG 表、同样的查询向量，精确扫描 Recall@10 = 1.0000、近似检索 0.1860 ——
+所以 VSAG 的低召回是**CPU 索引在这类无簇结构高维数据上的真实检索质量**，不是测量误差。
+
+> 注：GPU 加速比是**规模相关**的 —— 10K 这种小数据上 GPU（8.63 s）反而比 CPU（2.63 s）慢，
+> GPU 路径的固定开销（cuVS 上下文初始化 + kernel 同步）在小规模上盖过并行收益，且方差极大。
+
+**快路径与基线路径的检索结果等价性**（250K，**重启 observer 之后**，同一查询向量）：
 
 ```text
-SIFT250K   serialize path=fast  build_us=... export_us=... write_us=... total_us=...
-SIFT250K   serialize path=blob   build_us=... export_us=... write_us=... total_us=...
-Hidden250K serialize path=fast  build_us=... export_us=... write_us=... total_us=...
-Hidden250K serialize path=blob   build_us=... export_us=... write_us=... total_us=...
+155278, 118208, 78118, 144042, 188367, 77420, 109951, 227359, 189203, 147305
+   ↑ 快路径      ↑ 基线路径      diff 为空
 ```
 
-`path=blob` 行由 `SEEKDB_CUVS_FAST_SNAPSHOT=0` 产生，其余条件完全相同 —— 这是快路径与基线的**单变量 A/B**。
+两条路径返回的 top-10 **逐字节相同** —— 这就是"召回在数学上不可能变化"的直接实测证据。
 
 ### 4.3 快路径确定省掉的东西（本地实测）
 

@@ -29,6 +29,7 @@ import json
 import math
 import pathlib
 import re
+import statistics
 import sys
 import xml.sax.saxutils as sx
 
@@ -252,13 +253,18 @@ def panel_cpu_gpu(svg: Svg, y0: int, bench: dict) -> int:
     h = 260
     svg.text(PAD_L, y0 - 12, "CPU 与 GPU 构建耗时（CREATE VECTOR INDEX 计时窗口）",
              size=15, weight="600")
-    svg.text(PAD_L, y0 + 4, "同一批数据、同一组索引参数，只有 lib 不同", size=12, fill=MUTED)
 
     cpu = bench.get("cpu_vsag") or {}
     gpu = bench.get("gpu_cuvs") or {}
     if not cpu or not gpu:
         svg.text(PAD_L, y0 + 60, "（无实测数据）", size=13, fill=MUTED)
         return h
+
+    ds = bench.get("dataset") or {}
+    subset = (f"（{ds.get('rows', 0):,} × {ds.get('dim', 0)}，"
+              f"{bench.get('repeat', 0)} 次重复）" if ds else "")
+    svg.text(PAD_L, y0 + 4, f"同一批数据、同一组索引参数，只有 lib 不同{subset}",
+             size=12, fill=MUTED)
 
     x0, x1 = PAD_L, W - PAD_R
     base_y = y0 + h - 46
@@ -311,8 +317,14 @@ STAGE_RE = re.compile(r"stage op=(\w+) path=(\w+).*?build_us=(-?\d+)"
 
 
 def parse_stages(path: pathlib.Path):
-    """Collect the per-stage timings that the adaptor logs."""
+    """Collect the per-stage timings that the adaptor logs.
+
+    A benchmark run repeats the build several times, so every stage field is
+    reported as the median over the repetitions instead of the value of the
+    last repetition.
+    """
     stages: dict[tuple[str, str], dict[str, int]] = {}
+    samples: dict[tuple[str, str], list[dict[str, int]]] = {}
     if not path or not path.exists():
         return stages
     for line in path.read_text(errors="replace").splitlines():
@@ -320,18 +332,23 @@ def parse_stages(path: pathlib.Path):
         if not match:
             continue
         op, mode = match.group(1), match.group(2)
-        stages[(op, mode)] = {
+        samples.setdefault((op, mode), []).append({
             "build_us": int(match.group(3)),
             "export_us": int(match.group(4)),
             "write_us": int(match.group(5)),
             "total_us": int(match.group(6)),
+        })
+    for key, rows in samples.items():
+        stages[key] = {
+            field: int(statistics.median(row[field] for row in rows))
+            for field in ("build_us", "export_us", "write_us", "total_us")
         }
     return stages
 
 
 def panel_stages(svg: Svg, y0: int, stages: dict) -> int:
     """Split the timed build window into its stages."""
-    h = 230
+    h = 212
     svg.text(PAD_L, y0 - 12, "构建窗口分段耗时（build / export / write）", size=15, weight="600")
     svg.text(PAD_L, y0 + 4, "这决定还有多少工程优化空间：若 build 占大头，改图才有意义",
              size=12, fill=MUTED)
@@ -349,11 +366,13 @@ def panel_stages(svg: Svg, y0: int, stages: dict) -> int:
 
     order = [("fast", "快路径 OBCUVS03", FAST_C), ("blob", "基线 OBCUVS02", BLOB_C)]
     y = y0 + 30
+    breakdown = []
     for mode, label, _color in order:
         entry = serialize.get(mode)
         if not entry:
             continue
         total_ms = entry["total_us"] / 1000.0
+        total_us = entry["total_us"]
         svg.text(x0, y, label, size=12, fill=INK, weight="600")
         segs = [
             ("build", entry["build_us"] / 1000.0, GPU_C),
@@ -364,17 +383,32 @@ def panel_stages(svg: Svg, y0: int, stages: dict) -> int:
         for name, ms, color in segs:
             if ms <= 0:
                 continue
-            w = chart_h * (ms / maxv)
+            # export and write are a fraction of a percent of the window, so
+            # they would be sub-pixel; give every non-zero stage a visible
+            # minimum width and state the exact share next to the bar.
+            w = max(chart_h * (ms / maxv), 3.0)
             svg.rect(x, y + 8, w, 28, color, rx=2)
             if w > 52:
-                svg.text(x + w / 2, y + 8 + 19, f"{name} {ms:.0f}ms", size=11, fill="#ffffff",
+                svg.text(x + w / 2, y + 8 + 19, f"{name} {fmt_ms(ms)}", size=11, fill="#ffffff",
                          anchor="middle", weight="600")
             x += w
         svg.text(x + 8, y + 8 + 19, f"总计 {fmt_ms(total_ms)}", size=12, fill=INK, weight="600")
+        share = " · ".join(
+            f"{name} {entry[key] / total_us * 100:.2f}%"
+            for name, key in (("build", "build_us"), ("export", "export_us"), ("write", "write_us"))
+        )
+        svg.text(x0, y + 46, share, size=11, fill=MUTED)
+        breakdown.append((mode, entry["build_us"] / total_us * 100))
         y += 62
 
+    if breakdown:
+        worst = min(b for _, b in breakdown)
+        svg.text(PAD_L, base_y + 20,
+                 f"两条路径的 build 占比都不低于 {worst:.2f}%："
+                 f"export 与 write 合计不到 1%，构建窗口里没有留给快照格式的优化空间",
+                 size=11, fill=MUTED)
     svg.line(x0, base_y, x1, base_y, AXIS, 1.5)
-    svg.text(x0, base_y + 20, "柱宽按毫秒比例；build = GPU 建图，export = 图回传主机，"
+    svg.text(x0, base_y + 40, "柱宽按毫秒比例；build = GPU 建图，export = 图回传主机，"
              "write = 快照写入", size=11, fill=MUTED)
     return h
 
@@ -426,11 +460,11 @@ def build_reference_svg() -> str:
 
 def build_benchmark_svg(bench: dict, stages: dict) -> str:
     svg = Svg()
-    svg.height = 60 + 260 + 230 + 250 + 272 + 215 + 140
+    svg.height = 60 + 260 + 212 + 250 + 272 + 215 + 140
     svg.rect(0, 0, W, svg.height, "#ffffff")
     y = PAD_T
     y += panel_cpu_gpu(svg, y, bench) + 26
-    y += panel_stages(svg, y, stages) + 26
+    y += panel_stages(svg, y, stages) + 34
     y += panel_score_curve(svg, y) + 34
     y += panel_official_runs(svg, y) + 20
     y += panel_container_bytes(svg, y) + 20

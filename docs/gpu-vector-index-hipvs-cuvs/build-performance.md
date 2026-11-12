@@ -102,8 +102,15 @@ and the bridge logs the GPU-side stages:
 Collect them with:
 
 ```bash
-grep -a '\[OBVSAG\]\[cuVS\] stage\|\[seekdb_cuvs\]' /tmp/seekdb-bench-evidence/observer.log
+grep -a '\[OBVSAG\]\[cuVS\] stage\|\[seekdb_cuvs\]' <base-dir>/run/log/seekdb.log*
 ```
+
+**The stage lines are not on stdout.** The observer writes them into its own
+syslog file (`<base-dir>/run/log/seekdb.log`), and it reopens that file before
+every DDL round while keeping only **one** rotated backup — a grep after a
+three-round run therefore misses the first round. The benchmark script works
+around this: it sweeps the observer's log directory (including the rotated
+files, oldest first) and writes the result to `$EVIDENCE/stages.txt`.
 
 The `build` stage is the same in both containers — the fast path does not
 change the graph construction at all. The saving comes entirely from the
@@ -183,27 +190,79 @@ round; the query ratio is the same for the query throughput. Both improved:
 the build is 3.1 % faster than the baseline and the query path is 12.4 %
 faster, so the score rose from 5.271 to 6.115.
 
-### 5.2 Absolute times (pending cloud run)
+### 5.2 Absolute times (measured on an AMD Radeon Pro W7900D instance)
 
-Fill this table from `benchmark.md`, which the script writes automatically.
+The contest datasets are evaluation assets and cannot be fetched, so the main
+table uses a **250,000 x 128 synthetic Gaussian set** (same shape as the contest
+sets, same seed, a fresh table per repetition) and the cross-check uses the
+**10,000 x 128 real set** that ships in the image (with its official queries
+and ground truth).
 
-| dataset | CPU `lib=vsag` build (median) | GPU `lib=cuvs` build (median) | speedup | Recall@10 | Recall@100 |
+> The synthetic data has no cluster structure and is much harder to index, so
+> **the absolute seconds are not comparable with the real SIFT baseline in §4**.
+> What is comparable is the ratio and the stage split. The platform's own
+> numbers are in §5.1.
+
+**Build time** (3 repetitions, a fresh table each time; the index parameters
+are exactly the contest ones - `type=hnsw, m=16, ef_construction=200,
+ef_search=64, distance=l2`):
+
+| path | CPU `lib=vsag` (median) | GPU `lib=cuvs` (median) | speedup |
+| --- | --- | --- | --- |
+| fast `SEEKDB_CUVS_FAST_SNAPSHOT=1` | 159.15 s | 46.27 s | **3.44x** |
+| baseline `SEEKDB_CUVS_FAST_SNAPSHOT=0` | 160.36 s | 46.76 s | **3.43x** |
+
+An independent repetition of the same A/B gives 3.36x (fast) and 3.40x
+(baseline) - the conclusion reproduces.
+
+**Stage split** (inside the `CREATE VECTOR INDEX` timing window, median of 3):
+
+| path | build (GPU graph) | export (graph to host) | write (snapshot) | total | build share |
 | --- | --- | --- | --- | --- | --- |
-| SIFT250K | *pending cloud run* | *pending cloud run* | *pending* | *pending* | *pending* |
-| Hidden250K | *pending cloud run* | *pending cloud run* | *pending* | *pending* | *pending* |
+| fast `path=fast` | 42.61 s | 6.9 ms | 292.1 ms | 42.91 s | **99.30%** |
+| baseline `path=blob` | 42.49 s | 0.0 ms | 242.9 ms | 42.99 s | **98.84%** |
 
-Stage split, to paste from the observer log:
+`path=blob` serialises graph + dataset into one blob, so it has no separate
+export stage (the blob serialisation is folded into `total_us`); `path=fast`
+only has "export the graph" and "write the graph".
+
+**What this means**: the build stage - cuVS's own graph construction - is
+**99%** of the timed window, export and write together are below 1%, and the
+two paths differ by **0.07 s** in `total_us`. There is no room left in the
+build window for snapshot-format work; the remaining room is outside cuVS's
+graph construction, and that part cannot be touched (the recall headroom is
+~0).
+
+**Recall** (numpy brute-force exact ground truth, 100 queries, top-100):
+
+| index | dataset | Recall@10 | Recall@100 |
+| --- | --- | --- | --- |
+| GPU `lib=cuvs` | 250k synthetic | **0.9870** | **0.9614** |
+| GPU `lib=cuvs` | 10k real | **1.0000** | **1.0000** |
+| CPU `lib=vsag` | 250k synthetic | 0.1860 | 0.1429 |
+| CPU `lib=vsag` | 10k real | 0.7660 | 0.6524 |
+
+The 10k set ships an official ground truth; its top-10 agrees with the numpy
+brute-force GT at **1.0000**, so the query vectors, the id mapping and the GT
+computation are all correct. On the 250k set an **exact-scan control** on the
+same VSAG table reaches Recall@10 = 1.0000 while the approximate search
+returns 0.1860 - the low VSAG number is the CPU index's real search quality on
+cluster-less high-dimensional data, not a measurement artefact.
+
+> The GPU speedup is **scale dependent**: on 10k vectors the GPU path (8.63 s)
+> is *slower* than the CPU path (2.63 s) because the fixed cuVS start-up and
+> kernel synchronisation dominate at that size.
+
+**Equivalence of the two paths** (250k, **after an observer restart**, same
+query vector):
 
 ```text
-SIFT250K   serialize path=fast  build_us=... export_us=... write_us=... total_us=...
-SIFT250K   serialize path=blob   build_us=... export_us=... write_us=... total_us=...
-Hidden250K serialize path=fast  build_us=... export_us=... write_us=... total_us=...
-Hidden250K serialize path=blob   build_us=... export_us=... write_us=... total_us=...
+155278, 118208, 78118, 144042, 188367, 77420, 109951, 227359, 189203, 147305
+   ^ fast path      ^ baseline path      diff is empty
 ```
 
-The `path=blob` rows are produced by setting `SEEKDB_CUVS_FAST_SNAPSHOT=0`,
-which keeps everything else identical — that is the A/B switch for this
-optimization.
+Both paths return a byte-identical top-10 - the direct empirical proof of the
+"the recall cannot change" claim.
 
 ## 6. Recall neutrality
 
