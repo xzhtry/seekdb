@@ -18,6 +18,7 @@
 
 #include "config_bridge.h"
 #include "ob_index_build_task.h"
+#include "storage/ddl/ob_ddl_insert_dag.h"
 #include "share/rc/ob_server_runtime.h"
 #include "rootserver/ddl_task/ob_ddl_task_util.h"
 #include "rootserver/ob_local_ddl_serial_call.h"
@@ -110,7 +111,30 @@ int ObIndexSSTableBuildTask::process()
       }
     }
 
-    if (OB_SUCC(ret)) {
+    // FTS inverted-index aux tables can be built straight from a base-table
+    // scan; the inner INSERT ... SELECT path is only used as a fallback.
+    bool fts_direct_built = false;
+    if (OB_SUCC(ret) && index_schema->is_fts_index_aux() && !index_schema->is_fts_doc_word_aux()) {
+      storage::ObFtsAuxBuildParam fts_param;
+      fts_param.data_table_id_ = data_table_id_;
+      fts_param.aux_table_id_ = dest_table_id_;
+      fts_param.schema_version_ = index_schema->get_schema_version();
+      fts_param.snapshot_version_ = snapshot_version_;
+      fts_param.ddl_task_id_ = task_id_;
+      fts_param.execution_id_ = execution_id_;
+      fts_param.parallelism_ = parallelism_;
+      const int tmp_ret = storage::build_fts_inverted_aux_by_scan(fts_param);
+      if (OB_SUCCESS == tmp_ret) {
+        fts_direct_built = true;
+        LOG_INFO("fts aux built by direct scan", K(fts_param));
+      } else if (OB_NOT_SUPPORTED == tmp_ret) {
+        LOG_INFO("fts aux direct build disabled, fall back to inner sql", K(fts_param));
+      } else {
+        ret = tmp_ret;
+        LOG_WARN("fts aux direct build failed", K(ret), K(fts_param));
+      }
+    }
+    if (OB_SUCC(ret) && !fts_direct_built) {
       if (OB_FAIL(ObDDLTaskUtil::generate_build_replica_sql(data_table_id_,
                                                             dest_table_id_,
                                                             data_schema->get_schema_version(),
