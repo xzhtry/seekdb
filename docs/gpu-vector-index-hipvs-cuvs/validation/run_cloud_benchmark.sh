@@ -130,8 +130,15 @@ log "CPU vs GPU build benchmark"
 
 # ------------------------------------------------------- 6. stages and charts --
 log "stage timings and chart"
-grep -a '\[OBVSAG\]\[cuVS\] stage\|\[seekdb_cuvs\]' "$EVIDENCE/bench/observer.log" \
-  > "$EVIDENCE/bench/stages.txt" 2>/dev/null || true
+# The observer writes its own log file under <base-dir>/run/log and rotates it;
+# the stage lines are not on stdout, so the observer log directory is searched.
+OBS_LOG_DIR=$BASE_DIR/bench/run/log
+{
+  grep -a '\[OBVSAG\]\[cuVS\] stage' "$EVIDENCE/bench/observer.log" 2>/dev/null || true
+  for f in $(ls -tr "$OBS_LOG_DIR"/seekdb.log* 2>/dev/null); do
+    grep -a '\[OBVSAG\]\[cuVS\] stage\| \[seekdb_cuvs\]' "$f" 2>/dev/null || true
+  done
+} | awk '!seen[$0]++' > "$EVIDENCE/bench/stages.txt"
 python3 "$REPO_ROOT/docs/gpu-vector-index-hipvs-cuvs/validation/make_build_chart.py" \
   --mode benchmark \
   --benchmark "$EVIDENCE/bench/benchmark.json" \

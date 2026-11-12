@@ -262,8 +262,19 @@ for rep in $(seq 1 "$REPEAT"); do
 done
 
 # ------------------------------------------------------------- stage timings ---
-grep -a '\[OBVSAG\]\[cuVS\] stage' "$LOG" > "$STAGES" 2>/dev/null || true
-grep -a '\[seekdb_cuvs\]' "$LOG" >> "$STAGES" 2>/dev/null || true
+# The observer writes its own log file under <base-dir>/run/log and rotates it
+# while the benchmark runs; the stage lines are not on stdout. Both the live
+# file and the rotated ones are searched, oldest first.
+OBS_LOG_DIR=$RUN_DIR/log
+{
+  grep -a '\[OBVSAG\]\[cuVS\] stage' "$LOG" 2>/dev/null || true
+  for f in $(ls -tr "$OBS_LOG_DIR"/seekdb.log* 2>/dev/null); do
+    grep -a '\[OBVSAG\]\[cuVS\] stage' "$f" 2>/dev/null || true
+  done
+} | awk '!seen[$0]++' > "$STAGES"
+for f in $(ls -tr "$OBS_LOG_DIR"/seekdb.log* 2>/dev/null); do
+  grep -a '\[seekdb_cuvs\]' "$f" 2>/dev/null >> "$STAGES" || true
+done
 
 # ----------------------------------------------------------------- report ---
 RESULTS_FILE=$EVIDENCE/results.tsv
