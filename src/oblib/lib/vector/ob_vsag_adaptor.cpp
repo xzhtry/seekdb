@@ -376,6 +376,32 @@ static bool ob_cuvs_snapshot_big_stack(ObCuvsSnapshotJob &job) {
   return rc == 0 && pthread_join(thread, nullptr) == 0 && job.rc_ == 0;
 }
 
+// [fast path] The restore calls cuvsCagraIndexFromArgs(), which uses more stack
+// than the small (~1.5MB) OB request-worker thread has: at 250k vectors the
+// restore died with a stack overflow before it could even log its result. The
+// blob path above already runs its restore on a 32MB pthread for the same
+// reason, so the fast path has to use one too.
+struct ObCuvsRestoreJob {
+  const float *dataset_; long n_; long dim_; const unsigned int *graph_;
+  long graph_degree_; int metric_; void *handle_; int rc_;
+};
+static void *ob_cuvs_restore_job(void *arg) {
+  ObCuvsRestoreJob *job = static_cast<ObCuvsRestoreJob *>(arg);
+  job->handle_ = seekdb_cuvs_restore(job->dataset_, job->n_, job->dim_, job->graph_,
+                                     job->graph_degree_, job->metric_);
+  job->rc_ = job->handle_ == nullptr ? -1 : 0;
+  return nullptr;
+}
+static bool ob_cuvs_restore_big_stack(ObCuvsRestoreJob &job) {
+  pthread_t thread;
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr) != 0) { return false; }
+  int rc = pthread_attr_setstacksize(&attr, 32UL * 1024 * 1024);
+  if (rc == 0) { rc = pthread_create(&thread, &attr, ob_cuvs_restore_job, &job); }
+  pthread_attr_destroy(&attr);
+  return rc == 0 && pthread_join(thread, nullptr) == 0 && job.rc_ == 0;
+}
+
 static bool ob_cuvs_write(std::ostream &out, const void *data, size_t bytes) {
   const char *p = static_cast<const char *>(data);
   const size_t CHUNK = 64UL * 1024 * 1024;
@@ -599,18 +625,20 @@ static int ob_cuvs_deserialize_fast(void *key, int expected_dim, std::istream &i
   // restored index searches exactly the same graph with the same vectors
   // as the one that was built, so the results are unchanged.
   const int64_t restore_start_us = ObTimeUtility::current_time();
-  void *handle = seekdb_cuvs_restore(ent->buf_vecs_.data(), static_cast<long>(n),
-                                     static_cast<long>(hdr.dim), graph.data(),
-                                     static_cast<long>(hdr.graph_degree),
-                                     static_cast<int>(hdr.metric));
+  ObCuvsRestoreJob job{ent->buf_vecs_.data(), static_cast<long>(n),
+                        static_cast<long>(hdr.dim), graph.data(),
+                        static_cast<long>(hdr.graph_degree),
+                        static_cast<int>(hdr.metric), nullptr, -1};
+  const bool restore_ok = ob_cuvs_restore_big_stack(job);
   const int64_t restore_us = ObTimeUtility::current_time() - restore_start_us;
-  if (handle == nullptr) {
+  if (!restore_ok) {
     delete ent;
     ret = OB_ERR_VSAG_RETURN_ERROR;
     LOG_WARN("[OBVSAG][cuVS] failed to restore the CAGRA index from the fast snapshot",
              K(ret), KP(key), K(hdr.n), K(hdr.graph_degree));
     return ret;
   }
+  void *handle = job.handle_;
   ent->bridge_ = ob_cuvs_wrap(handle);
   ent->built_n_ = n;
   ent->ids_ = ent->buf_ids_;
