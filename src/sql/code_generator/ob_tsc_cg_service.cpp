@@ -1912,6 +1912,9 @@ int ObTscCgService::generate_text_ir_ctdef(const ObLogTableScan &op,
             && 1 == aggr_funcs.count()
             && nullptr != aggr_funcs.at(0)
             && T_FUN_COUNT == aggr_funcs.at(0)->get_expr_type()
+            // COUNT(col) needs the row materialised; only COUNT(*) / COUNT(const)
+            // can be answered from the match count alone.
+            && !aggr_funcs.at(0)->has_flag(CNT_COLUMN)
             && nullptr == tr_info.topk_limit_expr_
             && !tr_info.need_sort()) {
           ir_scan_ctdef->is_count_only_ = true;
