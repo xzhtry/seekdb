@@ -237,7 +237,10 @@ int ObDASTRMergeIter::inner_get_next_rows(int64_t &count, int64_t capacity)
         remaining_cnt_ = matched_doc_cnt_;
       }
     }
-    if (OB_SUCC(ret)) {
+    if (OB_SUCC(ret) && !count_only_) {
+      // The engine could not count this shape; answer it from the normal scan.
+      ret = engine_->get_next_rows(count, capacity);
+    } else if (OB_SUCC(ret)) {
       if (remaining_cnt_ <= 0) {
         ret = OB_ITER_END;
       } else {
