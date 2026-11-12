@@ -264,6 +264,33 @@ query vector):
 Both paths return a byte-identical top-10 - the direct empirical proof of the
 "the recall cannot change" claim.
 
+### 5.3 Restore-path regression (found by the cloud run)
+
+The same cloud run exposed a bug that the 10k smoke test could not see: at
+250k vectors the fast snapshot's restore crashed the observer.
+
+The fast path restores the GPU index with `cuvsCagraIndexFromArgs()`, which
+needs more stack than the small (~1.5MB) OB request-worker thread has. The
+blob path already ran its restore on a 32MB pthread for exactly that reason;
+the fast path did not, so at the contest size it died with a SIGSEGV before it
+could even log `restored fast snapshot` - an index that had been persisted and
+reloaded could not be queried at all.
+
+| scenario | before | after |
+| --- | --- | --- |
+| 250k fast path, restart, query | SIGSEGV | 10 rows returned |
+| 250k blob path, restart, query | 10 rows returned | 10 rows returned |
+| 10k fast path, restart, query | 10 rows returned | 10 rows returned |
+
+The fix runs the fast restore on the same 32MB pthread as the blob path. It
+only changes the thread stack of the restore action - the graph construction,
+the search parameters and the data are untouched, so the recall cannot change.
+
+`validation/run_restore_stress.sh` is the regression check: it builds a GPU
+index, restarts the observer and queries the restored index. It has to run at
+250k - at 10k the overflow does not happen and the check passes even with the
+bug.
+
 ## 6. Recall neutrality
 
 The fast path does not touch anything that influences the search:
