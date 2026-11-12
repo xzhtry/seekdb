@@ -286,6 +286,13 @@ The fix runs the fast restore on the same 32MB pthread as the blob path. It
 only changes the thread stack of the restore action - the graph construction,
 the search parameters and the data are untouched, so the recall cannot change.
 
+The check was validated with a negative control: rebuilt from the adaptor
+without the fix (observer 1,379,126,480 bytes) the check **fails** with exit
+code 1 - the observer crashes inside the restore; rebuilt with the fix
+(observer 1,379,129,096 bytes) it **passes** with exit code 0 and 10 distinct
+ids. Same machine, same 250,000 x 128 data, the thread stack is the only
+variable.
+
 `validation/run_restore_stress.sh` is the regression check: it builds a GPU
 index, restarts the observer and queries the restored index. It has to run at
 250k - at 10k the overflow does not happen and the check passes even with the
