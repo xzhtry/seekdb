@@ -380,6 +380,13 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
     {
       size_t required_itopk = (size_t)topk * 4;
       if (required_itopk < (size_t)g_cfg.itopk_min) required_itopk = (size_t)g_cfg.itopk_min;
+      /* cuVS cannot keep more intermediate results than the index has points.
+       * Asking for more leaves the tail of the candidate list unfilled, so a
+       * small index comes back with garbage neighbours -- and the fast-snapshot
+       * self test builds a 256-point index, which would then disable the whole
+       * fast-snapshot path for every real index as well. For a production
+       * sized index (250k points) this clamp never fires. */
+      if (h->n > 0 && required_itopk > (size_t)h->n) required_itopk = (size_t)h->n;
       if (sp->itopk_size < required_itopk) sp->itopk_size = required_itopk;
       /* __typeof__ keeps this correct whatever the field's declared type is. */
       sp->search_width = (__typeof__(sp->search_width))g_cfg.search_width;
@@ -709,6 +716,7 @@ static int sk_fast_snapshot_probe(void)
   void* h = NULL;
   void* r = NULL;
   int ok = 0;
+  const char* why = "";
 
   for (int i = 0; i < PN; ++i) {
     for (int j = 0; j < PDIM; ++j) {
@@ -720,33 +728,33 @@ static int sk_fast_snapshot_probe(void)
   /* Small parameters: the probe must be cheap, and the graph degree has to be
    * compatible with the point count. */
   h = sk_build_with(base, PN, PDIM, 16, 32, 5, 1);
-  if (h == NULL) goto done;
+  if (h == NULL) { why = "build"; goto done; }
   graph = (unsigned int*)malloc((size_t)PN * 16 * sizeof(unsigned int));
-  if (graph == NULL) goto done;
-  if (seekdb_cuvs_export_graph(h, graph, PN, &gd) != 0) goto done;
-  if (gd <= 0 || gd > 16) goto done;
+  if (graph == NULL) { why = "malloc"; goto done; }
+  if (seekdb_cuvs_export_graph(h, graph, PN, &gd) != 0) { why = "export_graph"; goto done; }
+  if (gd <= 0 || gd > 16) { why = "graph_degree"; goto done; }
   r = seekdb_cuvs_restore(base, PN, PDIM, graph, gd, seekdb_cuvs_index_metric(h));
-  if (r == NULL) goto done;
-  if (seekdb_cuvs_search(h, query, 1, PTOPK, ids_a, dist_a) != 0) goto done;
-  if (seekdb_cuvs_search(r, query, 1, PTOPK, ids_b, dist_b) != 0) goto done;
+  if (r == NULL) { why = "restore"; goto done; }
+  if (seekdb_cuvs_search(h, query, 1, PTOPK, ids_a, dist_a) != 0) { why = "search"; goto done; }
+  if (seekdb_cuvs_search(r, query, 1, PTOPK, ids_b, dist_b) != 0) { why = "search_restored"; goto done; }
 
   /* 1. the round trip must preserve the results exactly: the neighbour ids
    *    are the semantic contract, the distances only have to agree. */
   ok = 1;
   for (int i = 0; i < PTOPK; ++i) {
-    if (ids_a[i] != ids_b[i]) { ok = 0; break; }
+    if (ids_a[i] != ids_b[i]) { ok = 0; why = "roundtrip_id"; break; }
     const double da = (double)dist_a[i];
     const double db = (double)dist_b[i];
     const double scale = (da > db) ? da : db;
-    if (scale > 0.0 && fabs(da - db) / scale > 1e-5) { ok = 0; break; }
+    if (scale > 0.0 && fabs(da - db) / scale > 1e-5) { ok = 0; why = "roundtrip_distance"; break; }
   }
   if (!ok) goto done;
 
   /* 2. the results must be genuine neighbours */
   for (int i = 0; i < PTOPK; ++i) {
-    if (ids_a[i] >= (unsigned int)PN) { ok = 0; break; }
+    if (ids_a[i] >= (unsigned int)PN) { ok = 0; why = "id_out_of_range"; break; }
     for (int j = i + 1; j < PTOPK; ++j) {
-      if (ids_a[i] == ids_a[j]) { ok = 0; break; }
+      if (ids_a[i] == ids_a[j]) { ok = 0; why = "duplicate_id"; break; }
     }
     if (!ok) break;
     double sum = 0.0;
@@ -757,12 +765,15 @@ static int sk_fast_snapshot_probe(void)
     /* The metric is L2Expanded (squared L2), so the reported distance is the
      * squared distance. Allow a small relative tolerance for the float32
      * arithmetic done on the device. */
-    if (dist_a[i] < 0.0f) { ok = 0; break; }
+    if (dist_a[i] < 0.0f) { ok = 0; why = "negative_distance"; break; }
     const double rel = (sum > 0.0) ? (fabs((double)dist_a[i] - sum) / sum) : 0.0;
-    if (rel > 1e-3) { ok = 0; break; }
+    if (rel > 1e-3) { ok = 0; why = "distance_mismatch"; break; }
   }
 
 done:
+  /* The probe decides whether the fast snapshot is used at all, so a silent
+   * failure here costs the DDL a full cuVS blob write. Say why it failed. */
+  if (!ok) sk_log(1, "fast_snapshot_probe failed: %s", why);
   if (r != NULL) seekdb_cuvs_free(r);
   if (h != NULL) seekdb_cuvs_free(h);
   free(graph);
