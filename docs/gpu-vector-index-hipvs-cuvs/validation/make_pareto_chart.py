@@ -321,13 +321,16 @@ def main() -> int:
         (2.114, "15.539", "第 13 轮 5800e6b4", PROD_C),
         (2.188, "15.977", "第 14 轮 e4a56362", BEST_C),
         (2.180, "15.937", "第 15 轮 c60fd055", MUTED),
+        (2.099, "15.375", "第 16 轮 1d89dcea", MUTED),
     ]
     for r, sc, _lab, col in official:
         x, y = XS(r), YS(float(sc))
         svg.circle(x, y, 6, col, "#ffffff", 2)
 
     # Rounds 11/13/14/15 land within 15 px of each other, so they share one
-    # callout instead of four overlapping labels.
+    # callout instead of four overlapping labels. Round 16 sits a bit lower
+    # and gets its own short label.
+    svg.text(XS(2.099) + 10, YS(15.375) + 4, "第 16 轮", 10, MUTED, weight="600")
     svg.text(XS(2.188) - 12, YS(15.977) - 7,
              "第 11~15 轮：2.11~2.19x ⇒ 15.54~15.98 分（第 14 轮最好）",
              10, BEST_C, weight="600", anchor="end")

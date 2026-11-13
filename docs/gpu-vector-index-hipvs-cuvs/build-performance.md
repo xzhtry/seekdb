@@ -186,6 +186,14 @@ numbers below are the platform's own output, not a self-measurement.
 | reference | `445b9b2` (frozen baseline) | 5.271 | 1.105x | 0.975x | pass |
 | fast snapshot | `cc6c79f3` | **6.115** | **1.139x** | **1.096x** | **pass** |
 | fast snapshot + restore fix | `3794da35` | 5.324 | 1.081x | 1.069x | pass |
+| 10 | `e568a8b1` | `igd` 256->128 + `nn_iter` 100->50 + `itopk` 512->1024 + AUTO | 12.369, `build=1.648x, query=1.506x, gates=pass` |
+| 11 | `11f2e9f5` | `itopk` clamped to the point count => the fast snapshot takes effect | 15.575, `build=2.120x, query=1.599x, gates=pass` |
+| 12 | `5800e6b4` | GPU runtime warm-up | **0.000**, `gates failed: relative_vram_limit` |
+| 13 | `5800e6b4` | same commit again (noise vs. systematic) | 15.539, `build=2.114x, query=1.601x, gates=pass` |
+| **14** | `e4a56362` | drop the warm-up + `nn_iter` 50->20 | **15.977, `build=2.188x, query=1.583x, gates=pass` (best score)** |
+| 15 | `c60fd055` | LOB pieces 256 KB -> 1 MB | 15.937, `build=2.181x, query=1.550x, gates=pass` |
+| 16 | `1d89dcea` | lossless snapshot compression 258 MB -> 130 MB | 15.375, `build=2.099x, query=1.478x, gates=pass` (a regression) |
+| **17** | `5619d5c4` | `igd` 128->64 + `gd` 64 + `itopk` 1024->2048 | *pending* |
 
 The build ratio is the GPU build time against the frozen baseline of the same
 round; the query ratio is the same for the query throughput. Both improved:
@@ -390,6 +398,15 @@ the page is `https://open.oceanbase.com/train/TestRecord?questionId=600072`.
 | 6 | 11-09 20:26 | `dfc7e773` | failed | **15 s** | `failMsg=3`, `testCaseResult=[]` |
 | 7 | 11-09 20:40 | `248c5c82` | failed | **14 s** | `failMsg=3`, `testCaseResult=[]` |
 | 8 | 11-09 20:54 | `cc6c79f3` | running | — | the build failure of runs 6 and 7 is fixed |
+| 9 | 11-09 21:24 | `3794da35` | ok | 6m46s | 5.324, `build=1.081x, query=1.069x, gates=pass` |
+| 10 | 11-10 | `e568a8b1` | ok | 12m | 12.369, `build=1.648x, query=1.506x, gates=pass` |
+| 11 | 11-10 | `11f2e9f5` | ok | 12m | 15.575, `build=2.120x, query=1.599x, gates=pass` |
+| 12 | 11-11 | `5800e6b4` | failed | 11m | `gates failed: relative_vram_limit` |
+| 13 | 11-13 | `5800e6b4` | ok | 17m | 15.539, `build=2.114x, query=1.601x, gates=pass` |
+| **14** | 11-13 | `e4a56362` | ok | 10m | **15.977, `build=2.188x, query=1.583x, gates=pass` (best)** |
+| 15 | 11-13 | `c60fd055` | ok | 11m | 15.937, `build=2.181x, query=1.550x, gates=pass` |
+| 16 | 11-13 | `1d89dcea` | ok | 15m | 15.375, `build=2.099x, query=1.478x, gates=pass` (a regression) |
+| **17** | 11-14 | `5619d5c4` | pending | - | `igd` 128->64 + `gd` 64 + `itopk` 1024->2048 |
 
 Runs 3–5 changed two defaults and nothing else:
 

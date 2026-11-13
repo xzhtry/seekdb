@@ -617,6 +617,8 @@
 <circle cx="567.76" cy="686.76" r="6.00" fill="#f59e0b" stroke="#ffffff" stroke-width="2"/>
 <circle cx="584.27" cy="678.44" r="6.00" fill="#16a34a" stroke="#ffffff" stroke-width="2"/>
 <circle cx="582.48" cy="679.20" r="6.00" fill="#64748b" stroke="#ffffff" stroke-width="2"/>
+<circle cx="564.41" cy="689.88" r="6.00" fill="#64748b" stroke="#ffffff" stroke-width="2"/>
+<text x="574.41" y="693.88" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">第 16 轮</text>
 <text x="572.27" y="671.44" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#16a34a" text-anchor="end" font-weight="600">第 11~15 轮：2.11~2.19x ⇒ 15.54~15.98 分（第 14 轮最好）</text>
 <text x="352.59" y="877.85" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">冻结基线</text>
 <text x="360.18" y="859.82" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">第 8 轮</text>
