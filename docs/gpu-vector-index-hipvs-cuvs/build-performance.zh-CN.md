@@ -244,6 +244,17 @@ python3 docs/gpu-vector-index-hipvs-cuvs/validation/make_build_chart.py \
 两条路径的 `total_us` 只差 **0.07 s** —— **构建窗口里已经没有留给快照格式的优化空间**，
 剩下的空间只能在 cuVS 之外的环节，而 cuVS 建图那段不能碰（召回余量 ≈ 0）。
 
+**同一批 10K 真实数据上的四段占比**（3 次重复取中位；原始行
+`work/evidence/stages-10k-fast-3rep.txt` / `stages-10k-blob-3rep.txt`）：
+
+| 路径 | build | export | write | 合计 | build 占比 |
+| --- | --- | --- | --- | --- | --- |
+| 快路径 `path=fast` | 7.764 s | 3.2 ms | 90.0 ms | 7.857 s | **98.81%** |
+| 基线路径 `path=blob` | 6.194 s | 0.0 ms | 9.6 ms | 6.301 s | **98.30%** |
+
+数据量小 25 倍，**build 仍然占计时窗口的 98.3%–98.8%**（250K 上是 98.84%–99.30%）
+⇒ **"build 主导"不是大数据量造成的假象**，两个规模结论一致。
+
 **召回校验**（numpy 暴力精确 GT，100 条查询，top-100）：
 
 | 索引 | 数据集 | Recall@10 | Recall@100 |
