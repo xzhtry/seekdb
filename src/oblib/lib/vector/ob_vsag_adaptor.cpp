@@ -64,7 +64,6 @@ extern "C" void *seekdb_cuvs_restore(const float *dataset, long n, long dim,
 extern "C" int seekdb_cuvs_supports_fast_snapshot(void);
 extern "C" int seekdb_cuvs_index_metric(void *handle);
 extern "C" int seekdb_cuvs_metric(void);
-extern "C" long seekdb_cuvs_warmup(void);
 #else
 // GPU backend not compiled in (OB_BUILD_CUVS=OFF): inert stubs so oblib links
 // without libseekdb_cuvs_bridge.so. ob_cuvs_enabled() is false, so these are
@@ -80,7 +79,6 @@ static void *seekdb_cuvs_restore(const float *, long, long, const unsigned int *
 static int seekdb_cuvs_supports_fast_snapshot(void) { return 0; }
 static int seekdb_cuvs_index_metric(void *) { return -1; }
 static int seekdb_cuvs_metric(void) { return 0; }
-static long seekdb_cuvs_warmup(void) { return -1; }
 #endif
 
 namespace oceanbase {
@@ -2373,28 +2371,6 @@ void unmark_cuvs_index(void *key) {
   g_ob_cuvs_marked.erase(key);
 #else
   (void)key;
-#endif
-}
-
-// [hipVS/cuVS] Bring the GPU backend up before the server starts listening.
-//
-// The first GPU index of a process pays for the HIP runtime initialisation
-// and for the JIT compilation of the CAGRA kernels, and that index is created
-// inside a CREATE VECTOR INDEX statement. Doing the setup here keeps it out
-// of the timed DDL. The warm-up builds a throw-away index on random vectors
-// and throws it away again: the index the DDL creates is still built from
-// scratch, from the real vectors, inside the DDL.
-void warmup_gpu_backend() {
-#ifdef OB_BUILD_CUVS
-  // The log macros take the error code from a variable called "ret", so one has
-  // to be in scope even when the call itself cannot fail.
-  int ret = OB_SUCCESS;
-  const long ms = seekdb_cuvs_warmup();
-  if (ms >= 0) {
-    LOG_INFO("[OBVSAG][cuVS] GPU backend warmed up", K(ms));
-  } else {
-    LOG_WARN("[OBVSAG][cuVS] GPU backend warm-up skipped or failed", K(ms));
-  }
 #endif
 }
 

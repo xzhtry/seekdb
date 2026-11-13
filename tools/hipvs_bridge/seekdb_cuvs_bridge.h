@@ -68,24 +68,6 @@ int seekdb_cuvs_index_metric(void* handle);
 /* Default distance metric (cuvsDistanceType) of a freshly created CAGRA
  * parameter set. */
 int seekdb_cuvs_metric(void);
-
-/* ------------------------------------------------------------------ *
- * GPU warm-up.
- *
- * Brings the GPU runtime up (HIP initialisation + JIT of the CAGRA kernels)
- * with a throw-away index on a synthetic matrix of random vectors. Both
- * costs are paid by the first GPU index of a process otherwise, and that
- * index is created inside a CREATE VECTOR INDEX statement.
- *
- * The server calls this after its daemon fork and before it starts
- * listening, so the setup is not part of the timed DDL. No user data is
- * involved and the index the DDL creates is still built from scratch inside
- * the DDL.
- *
- * Returns the number of milliseconds the warm-up took, or -1 when it was
- * disabled or could not run. Calling it twice is a no-op.
- * ------------------------------------------------------------------ */
-long seekdb_cuvs_warmup(void);
 #ifdef __cplusplus
 }
 #endif

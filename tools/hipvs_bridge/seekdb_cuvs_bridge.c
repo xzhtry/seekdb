@@ -18,13 +18,9 @@
  *   SEEKDB_CUVS_SEARCH_WIDTH          CAGRA search width             (default 4)
  *   SEEKDB_CUVS_LOG                   0=quiet 1=lifecycle 2=per-search (default 1)
  *   SEEKDB_CUVS_FAST_SNAPSHOT         1=use the graph-only snapshot (default 1)
- *   SEEKDB_CUVS_WARMUP                1=warm the GPU up while the server
- *                                                     starts (default 1)
- *   SEEKDB_CUVS_WARMUP_DIM            dimension used for that warm-up
- *                                                      (default 128)
  *
  * Config-file keys: graph_degree, intermediate_degree, nn_iter, build_algo,
- * itopk_min, search_width, log, fast_snapshot, warmup, warmup_dim.
+ * itopk_min, search_width, log, fast_snapshot.
  *
  * The search algorithm is not configurable on purpose: it has to be AUTO.
  * cuvsCagraSearchParamsCreate() defaults to SINGLE_CTA, and that kernel
@@ -57,34 +53,6 @@
  * the search results -- and therefore the recall -- are identical.
  * The new cuVS entry points are resolved with dlsym(), so a hipVS build that
  * does not export them simply keeps the baseline file format.
- *
- * GPU warm-up
- * -----------
- * A fresh process pays two one-off GPU costs before it can answer the first
- * vector query: the HIP runtime initialisation (device context, memory pool)
- * and the JIT compilation of the CAGRA kernels for the dimension that is being
- * indexed. Neither of them depends on the data, but when the first GPU index
- * is created inside a CREATE VECTOR INDEX statement, both are paid inside
- * that statement.
- *
- * The bridge is linked into the observer binary (src/oblib/lib/CMakeLists.txt),
- * so the server can call seekdb_cuvs_warmup() while it starts up, long before
- * the first DDL can arrive. That call brings the GPU runtime up with a
- * throw-away index: a synthetic matrix of random vectors that is built,
- * searched and dropped again. No user data is touched, and the index that the
- * DDL creates is still built from scratch, from the real vectors, inside the
- * DDL.
- *
- * The warm-up is not done from a library constructor: the observer daemonises
- * itself by default, and a HIP context must not be inherited by a forked
- * child. The server therefore calls it after the daemon fork, before it
- * starts listening.
- *
- * The dimension is a configuration value because the dimension of a future
- * index is not known when the process starts. The default (128) is the
- * dimension of the SIFT-style vectors this backend is deployed with; set
- * SEEKDB_CUVS_WARMUP_DIM to the dimension of the deployment, or
- * SEEKDB_CUVS_WARMUP=0 to switch the warm-up off.
  */
 #include "seekdb_cuvs_bridge.h"
 #include <cuvs/core/c_api.h>
@@ -128,8 +96,6 @@ typedef struct {
   int search_width;
   int log_level;
   int fast_snapshot;
-  int warmup;     /* warm the GPU runtime up while the server starts */
-  int warmup_dim; /* dimension used for that warm-up */
 } sk_cuvs_cfg;
 
 static sk_cuvs_cfg g_cfg;
@@ -192,10 +158,6 @@ static void sk_parse_cfg_file(sk_cuvs_cfg *c)
       c->log_level = sk_clamp(x, 0, 2);
     } else if (strcmp(key, "fast_snapshot") == 0) {
       c->fast_snapshot = (x != 0);
-    } else if (strcmp(key, "warmup") == 0) {
-      c->warmup = (x != 0);
-    } else if (strcmp(key, "warmup_dim") == 0) {
-      c->warmup_dim = sk_clamp(x, 1, 8192);
     }
   }
   fclose(fp);
@@ -241,8 +203,6 @@ static void sk_load_cfg(int force)
   g_cfg.search_width = sk_env_int("SEEKDB_CUVS_SEARCH_WIDTH", 4, 1, 32);
   g_cfg.log_level = sk_env_int("SEEKDB_CUVS_LOG", 1, 0, 2);
   g_cfg.fast_snapshot = sk_env_int("SEEKDB_CUVS_FAST_SNAPSHOT", 1, 0, 1);
-  g_cfg.warmup = sk_env_int("SEEKDB_CUVS_WARMUP", 1, 0, 1);
-  g_cfg.warmup_dim = sk_env_int("SEEKDB_CUVS_WARMUP_DIM", 128, 1, 4096);
 
   const char *algo = getenv("SEEKDB_CUVS_BUILD_ALGO");
   g_cfg.build_algo = 1; /* NN_DESCENT, the baseline default */
@@ -349,12 +309,10 @@ typedef struct {
 } sk_cuvs_index;
 
 /* Build a CAGRA index with explicit parameters. Used by seekdb_cuvs_build (with
- * the configured parameters), by the fast-snapshot self test (with small
- * parameters, so the probe stays cheap) and by the start-up warm-up (with the
- * configured parameters on a throw-away matrix). `stage` only labels the log
- * line, so that a warm-up build is never mistaken for a real one. */
+ * the configured parameters) and by the fast-snapshot self test (with small
+ * parameters, so the probe stays cheap). */
 static void *sk_build_with(const float *base, long n, long dim, int gd, int igd,
-                            int niter, int algo, const char *stage)
+                            int niter, int algo)
 {
   const double t0 = sk_now_ms();
 
@@ -378,9 +336,9 @@ static void *sk_build_with(const float *base, long n, long dim, int gd, int igd,
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
-  sk_log(1, "build n=%ld dim=%ld gd=%d igd=%d niter=%d algo=%s ms=%.1f stage=%s",
+  sk_log(1, "build n=%ld dim=%ld gd=%d igd=%d niter=%d algo=%s ms=%.1f",
          n, dim, gd, igd, niter, algo == 2 ? "ivf_pq" : "nn_descent",
-         sk_now_ms() - t0, stage);
+         sk_now_ms() - t0);
   return h;
 
 fail_idx: cuvsCagraIndexDestroy(h->idx);
@@ -395,7 +353,7 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
   sk_load_cfg(1);
   sk_resolve_fns();
   return sk_build_with(base, n, dim, g_cfg.graph_degree, g_cfg.intermediate_degree,
-                        g_cfg.nn_iter, g_cfg.build_algo, "ddl");
+                        g_cfg.nn_iter, g_cfg.build_algo);
 }
 
 int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
@@ -769,7 +727,7 @@ static int sk_fast_snapshot_probe(void)
 
   /* Small parameters: the probe must be cheap, and the graph degree has to be
    * compatible with the point count. */
-  h = sk_build_with(base, PN, PDIM, 16, 32, 5, 1, "probe");
+  h = sk_build_with(base, PN, PDIM, 16, 32, 5, 1);
   if (h == NULL) { why = "build"; goto done; }
   graph = (unsigned int*)malloc((size_t)PN * 16 * sizeof(unsigned int));
   if (graph == NULL) { why = "malloc"; goto done; }
@@ -822,130 +780,22 @@ done:
   return ok;
 }
 
-/* The fast-snapshot capability, cached for the lifetime of the process:
- * 0 = not evaluated yet, 1 = supported, -1 = not supported. */
-static int g_fast_snapshot_state = 0;
-
-static int sk_eval_fast_snapshot(void)
-{
-  sk_load_cfg(0);
-  sk_resolve_fns();
-  if (!g_cfg.fast_snapshot) return -1;
-  if (sk_fn_get_graph == NULL || sk_fn_get_graph_degree == NULL ||
-      sk_fn_from_args == NULL) {
-    return -1;
-  }
-  return sk_fast_snapshot_probe() ? 1 : -1;
-}
-
 int seekdb_cuvs_supports_fast_snapshot(void)
 {
-  if (g_fast_snapshot_state == 0) {
-    g_fast_snapshot_state = sk_eval_fast_snapshot();
-    sk_log(1, "fast_snapshot_supported=%d", g_fast_snapshot_state == 1);
-  }
-  return g_fast_snapshot_state == 1;
-}
-
-/* ------------------------------------------------------------ warm-up ---- */
-
-/* Bring the GPU runtime up with a throw-away index.
- *
- * The HIP initialisation and the JIT compilation of the CAGRA kernels are
- * paid by the first GPU index of a process. When that index is created by a
- * CREATE VECTOR INDEX statement, both end up inside the statement, even
- * though neither depends on the data. This function moves them out of the
- * statement: it is called by the server while it starts up, before it starts
- * listening.
- *
- * The warm-up uses the production graph parameters on a synthetic matrix of
- * random vectors, so that it compiles exactly the kernels the first real
- * build needs. The index is destroyed again right away: no user data is
- * involved and nothing it produced is ever used. */
-static int sk_gpu_warmup(int dim)
-{
-  const double t0 = sk_now_ms();
-  int gd = g_cfg.graph_degree;
-  int igd = g_cfg.intermediate_degree;
-  int niter = g_cfg.nn_iter;
-  long n = 2048;
-  float *base = NULL;
-  void *h = NULL;
-  int rc = 1;
-
-  if (gd < 8) gd = 8;
-  if (igd < gd) igd = gd;
-  /* The graph degree has to stay below the number of points. */
-  if ((long)gd * 4 > n) n = (long)gd * 4;
-
-  base = (float *)malloc(sizeof(float) * (size_t)n * (size_t)dim);
-  if (base == NULL) return 1;
-  for (long i = 0; i < n * (long)dim; ++i) {
-    base[i] = (float)((i * 37) % 251) * 0.01f;
-  }
-
-  h = sk_build_with(base, n, dim, gd, igd, niter, g_cfg.build_algo, "warmup");
-  if (h == NULL) goto done;
-
-  /* The search kernels are compiled by the first search of a process, so warm
-   * them up as well. CAGRA picks its search kernel from the number of
-   * queries, so a single query and a batch are both used. */
-  {
-    enum { WNQ = 64, WTOPK = 16 };
-    float *q = (float *)malloc(sizeof(float) * (size_t)WNQ * (size_t)dim);
-    unsigned int *ids =
-        (unsigned int *)malloc(sizeof(unsigned int) * (size_t)WNQ * WTOPK);
-    float *dist = (float *)malloc(sizeof(float) * (size_t)WNQ * WTOPK);
-    if (q != NULL && ids != NULL && dist != NULL) {
-      for (long i = 0; i < WNQ * (long)dim; ++i) {
-        q[i] = (float)((i * 17) % 97) * 0.02f;
-      }
-      seekdb_cuvs_search(h, q, 1, WTOPK, ids, dist);
-      seekdb_cuvs_search(h, q, WNQ, WTOPK, ids, dist);
+  /* 0 = unknown, 1 = supported, -1 = not supported. */
+  static int state = 0;
+  if (state == 0) {
+    sk_load_cfg(0);
+    sk_resolve_fns();
+    if (!g_cfg.fast_snapshot) {
+      state = -1;
+    } else if (sk_fn_get_graph == NULL || sk_fn_get_graph_degree == NULL ||
+               sk_fn_from_args == NULL) {
+      state = -1;
+    } else {
+      state = sk_fast_snapshot_probe() ? 1 : -1;
     }
-    free(q);
-    free(ids);
-    free(dist);
+    sk_log(1, "fast_snapshot_supported=%d", state == 1);
   }
-  rc = 0;
-
-done:
-  if (h != NULL) seekdb_cuvs_free(h);
-  free(base);
-  sk_log(1, "warmup dim=%d n=%ld gd=%d igd=%d niter=%d rc=%d ms=%.1f", dim, n, gd,
-         igd, niter, rc, sk_now_ms() - t0);
-  return rc;
-}
-
-/* The bridge is a link-time dependency of the observer binary, so this
- * function can be called by the server as soon as the process has settled.
- *
- * The observer daemonises itself by default, and a HIP context must not be
- * inherited by a forked child, so the warm-up is not done from a library
- * constructor: the server calls this after the daemon fork, before it starts
- * listening. Everything here is optional. A machine without a GPU, a cuVS
- * build without the fast-snapshot entry points or a failing warm-up only
- * means that the first DDL pays the setup costs itself, exactly as before. */
-long seekdb_cuvs_warmup(void)
-{
-  static int done = 0;
-  const double t0 = sk_now_ms();
-  if (done) return (long)(sk_now_ms() - t0);
-  done = 1;
-
-  sk_load_cfg(0);
-  if (!g_cfg.warmup) return -1;
-
-  /* The fast-snapshot probe is a capability check of the linked cuVS build.
-   * Running it here also compiles its kernels, and it caches the answer for
-   * the first DDL. */
-  (void)seekdb_cuvs_supports_fast_snapshot();
-  if (g_fast_snapshot_state != 1) {
-    /* The probe did not succeed. Do not cache that verdict: the first DDL
-     * evaluates it again, exactly as it did before. */
-    g_fast_snapshot_state = 0;
-  }
-
-  sk_gpu_warmup(g_cfg.warmup_dim);
-  return (long)(sk_now_ms() - t0);
+  return state == 1;
 }
