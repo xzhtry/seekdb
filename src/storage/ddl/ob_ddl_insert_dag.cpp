@@ -1351,7 +1351,14 @@ int write_fts_aux_rows(storage::ObDDLIndependentDag *dag,
                        common::ObIAllocator &alloc)
 {
   int ret = OB_SUCCESS;
-  const int64_t slice_cnt = 6;
+  int64_t slice_cnt = 6;
+  const char *wslice_env = getenv("FTS_AUX_WSLICES");
+  if (nullptr != wslice_env && '\0' != wslice_env[0]) {
+    slice_cnt = atoll(wslice_env);
+  }
+  if (slice_cnt < 1) {
+    slice_cnt = 1;
+  }
   UNUSED(alloc);
   if (OB_ISNULL(dag) || rows.empty()) {
     ret = OB_INVALID_ARGUMENT;
