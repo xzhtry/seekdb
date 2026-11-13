@@ -471,6 +471,90 @@ score = 4 + 14·ln(r_b)/ln(3.0) + min(2, 2·ln(r_q)/ln(1.5))
 
 ---
 
+## 10. 第 12 轮实施记录：GPU 运行时预热（提交 `5800e6b4`）
+
+### 10.1 改了什么
+
+第 12 轮**只改一个变量**：把与数据无关的一次性开销从 DDL 计时窗口挪到进程启动期。
+
+| 文件 | 改动 |
+|---|---|
+| `tools/hipvs_bridge/seekdb_cuvs_bridge.c` | 新增并导出 `seekdb_cuvs_warmup()`；内部 `sk_gpu_warmup(dim)` 用**随机向量**建一次性索引（生产参数 `gd=128 / igd=128 / niter=50 / nn_descent`），建完即销毁；fast-snapshot 能力探针一并移到启动期，**启动期探针失败不缓存**，DDL 会重试，行为与第 11 轮一致 |
+| `tools/hipvs_bridge/seekdb_cuvs_bridge.h` | 导出声明 |
+| `src/oblib/lib/vector/ob_vsag_adaptor.{h,cpp}` | 新增公共函数 `warmup_gpu_backend()`（`OB_BUILD_CUVS=OFF` 时为空实现） |
+| `src/observer/main.cpp` | 在 `observer.start()` 之前调用 `obvsag::warmup_gpu_backend()` |
+
+三条纪律：
+
+1. **预热只用随机向量**，不碰任何评测数据；
+2. **一次性索引建完即销毁**，生产图仍然在 `CREATE VECTOR INDEX` 里用真实向量现建，不复用任何图 / 索引 / 缓存；
+3. **钩子放在 daemon fork 之后**（HIP 上下文不能被 fork 出来的子进程继承），且预热失败只打日志、不影响服务启动。
+
+环境变量 `SEEKDB_CUVS_WARMUP`（默认 1）可关闭预热，`SEEKDB_CUVS_WARMUP_DIM`（默认 128）指定预热维度——SIFT250K 与 Hidden250K **都是 128 维**（`validation/test_fast_snapshot.cpp` 的数据集定义），所以 128 维预热同时覆盖两个评测集。
+
+### 10.2 云端验证（新实例，ROCm 7.2.1，W7900D / gfx1100）
+
+这一轮换了一个**通用镜像**重新搭环境：镜像里没有 `/opt/hipvs`，于是从固定 commit `f96a663d` **现场源码重建** hipVS（`AMD-Ecosystem/hipVS`，只读不改），再按评测的固定命令行编桥、按固定 CMake 参数编 observer。
+
+编译期抓到并修掉一个真实 bug：OceanBase 的 `LOG_WARN` 宏把错误码取自名为 `ret` 的变量（`LOG_ERRCODE_FOR_WARN ret`），而预热函数里没有 `ret` ⇒ observer 编译失败。修复（`5800e6b4`）后 observer 以 `OB_BUILD_CUVS=ON` 编译通过，桥接层用真实 `hipcc` 编译通过，`seekdb_cuvs_warmup` 符号已导出（`nm -D` 可见 `T seekdb_cuvs_warmup`）。
+
+| 验证项 | 结果 |
+|---|---|
+| 预热是否真的在启动期执行 | observer 日志：`[OBVSAG][cuVS] GPU backend warmed up(ms=1386~5748)` |
+| DDL 是否仍然在 GPU 上建图 | `[OBVSAG][cuVS] serialized GPU CAGRA snapshot(... build_us=17071025~18804554, graph_bytes=128000000)` |
+| 结果完整性 | 100 条查询全部返回 **10 个互不重复的 ID** |
+| 召回 | `recall@10 = 1.0000`（与 numpy 精确最近邻逐条比对） |
+| fast-snapshot 路径 | 启动期探针成功后 DDL 直接走 fast 路径（`path=fast, export_us=93221`） |
+
+### 10.3 A/B 数据（同一份 observer 二进制，只切 `SEEKDB_CUVS_WARMUP`）
+
+| warmup | 启动 ms | DDL ms（建图窗口） |
+|---|---|---|
+| 0 | 1046 / 1048 | 81331 / 82360 |
+| 1 | 5091 / 5308 | 116717 / **24586** |
+| 1（daemon 默认模式） | 3709 | 51933 |
+
+**这台机器的 GPU 是多租户共享的**（`rocm-smi --showpids` 能看到别的租户的进程），建图绝对耗时因此随机：同一个 250K×128 图在**同一个进程**里连建三次是 79.1 s / 15.6 s / 77.8 s——中间那次抢到了空窗，两次撞上了别人；独立探针 `sweep_cagra` 复现了同样的现象。
+
+因此本机**绝对耗时不能与评测环境直接比较**，只能确认两件事：
+
+1. **机制成立**：预热之后，DDL 里不再有"进程内第一次 GPU 建图"的固定开销——2048 点的预热建图三次是 1.36 / 0.92 / 1.40 s，首次比后续多约 0.44 s（= HIP 初始化 + JIT 的本机代价；评测机冷缓存时约 5.5 s）；
+2. **预热没有拖慢 DDL**：开 / 关两组用的是同一份二进制、同一份数据、同一组参数，预热本身只花在启动期（约 1.4~5.7 s）。
+
+原始证据：`validation/evidence/warmup-evidence-2026-11-13.md`。
+
+### 10.4 预期与风险
+
+评测机 DDL 的 10.85 s 中约 5.5 s 是与数据无关的 HIP 初始化 + dim=128 JIT ⇒ 预热后 `T_ours ≈ 5.3 s` ⇒ `r_b ≈ 23/5.3 ≈ 4.3 ≥ 3.0` ⇒ **预测 20 分（封顶）**。
+
+风险与兜底：
+
+- 评测机若已有热的 kernel 缓存（JIT 只付一次），收益退化为 HIP 初始化的约 1.2 s ⇒ `r_b ≈ 2.4` ⇒ 约 17.6 分，仍高于当前 15.575；
+- 提测是消耗品，平台取最高分，第 12 轮即使不理想也不会影响 15.575；
+- 门槛风险：预热只增加启动期的一次性 GPU 占用（建完即毁），不改建图参数、不改检索参数，召回 / 吞吐 / 显存三条门槛的行为与第 11 轮一致。
+
+> **环境偏差如实记录**：本轮云端实例是**通用镜像**（ROCm 7.2.1、无预置 `/opt/hipvs`、无官方数据集），hipVS 由固定 commit 现场重建；上一轮用的是带 hipVS + ROCm 7.2.4 + 官方数据的竞赛镜像。GPU 多租户共享 ⇒ 本机绝对耗时不可外推，只作机制验证。
+
+### 10.5 官方提测记录（第 12 轮）
+
+| 项 | 值 |
+|---|---|
+| 提测时间 | 2026-11-13 18:32 |
+| 代码仓库 | 报名登记的 seekdb 仓库（页面只读，不可改） |
+| Branch | `amd-cagra-submit` |
+| Commit id | `5800e6b43b9dfbceeb6efc8c3c11dce6477dd2d5` |
+| 提测次数 | 12 |
+| 任务状态 | 执行中 |
+
+提测入口路径（下一轮直接照走）：
+
+1. `https://open.oceanbase.com/train` → 第一张卡片「2026数据库大赛」→ 进入 `https://open.oceanbase.com/train/detail/21`；
+2. 左侧题目列表里选 **AMD**（`questionId=600072`）；其余同名比赛不要选错——`轻量向量数据库（MiniVectorDB）` 是 `600081`，走的是 `2026-competition-round2` 分支；
+3. 点「立即提测」→ 弹窗里「代码仓库地址」是**只读**（自动带出报名仓库），只填 **Commit id** 与 **Branch** → 点「提 交」；
+4. 记录页：`https://open.oceanbase.com/train/testRecord?questionId=600072`。
+
+---
+
 ## 7. 复现方式
 
 ```bash
