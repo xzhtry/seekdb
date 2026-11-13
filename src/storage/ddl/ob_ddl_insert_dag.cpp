@@ -676,7 +676,8 @@ public:
   int build_tablet_parallel(const int64_t slice_cnt,
                             common::ObIArray<ObFtsAuxRowRec> &rows,
                             int64_t &doc_cnt,
-                            int64_t &token_cnt);
+                            int64_t &token_cnt,
+                            void *slice_out);
   ObCollationType get_word_collation() const { return word_collation_; }
   ObCollationType get_text_collation() const { return text_collation_; }
   const common::ObIArray<uint64_t> &get_text_col_ids() const { return text_col_ids_; }
@@ -951,8 +952,11 @@ int ObFtsAuxProducer::read_key_bounds(int64_t &min_key, int64_t &max_key)
 int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
                                             common::ObIArray<ObFtsAuxRowRec> &rows,
                                             int64_t &doc_cnt,
-                                            int64_t &token_cnt)
+                                            int64_t &token_cnt,
+                                            void *slice_out)
 {
+  std::vector<ObFtsAuxSliceCtx> *slice_vec =
+      static_cast<std::vector<ObFtsAuxSliceCtx> *>(slice_out);
   int ret = OB_SUCCESS;
   int64_t min_key = 0;
   int64_t max_key = 0;
@@ -1144,9 +1148,18 @@ int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
         }
       }
     }
+    if (OB_SUCC(ret) && nullptr != slice_vec) {
+      // Keep the runs; the range writer merges and writes them in parallel.
+      for (int64_t i = 0; i < slice_cnt; ++i) {
+        doc_cnt += slices[static_cast<size_t>(i)].doc_cnt_;
+        token_cnt += slices[static_cast<size_t>(i)].token_cnt_;
+        slice_allocs_.push_back(slices[static_cast<size_t>(i)].alloc_);
+      }
+      *slice_vec = std::move(slices);
+    }
     // k-way merge of the per-slice sorted runs.
     const int64_t merge_t0 = common::ObTimeUtility::current_time();
-    if (OB_SUCC(ret)) {
+    if (OB_SUCC(ret) && nullptr == slice_vec) {
       // The heap holds (slice, row) indices only: a merge step costs one record
       // copy into the output and ~log2(k) collation compares, with no
       // std::function indirection.
@@ -1211,7 +1224,7 @@ int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
       for (int64_t i = 0; i < slice_cnt; ++i) {
         slice_allocs_.push_back(slices[static_cast<size_t>(i)].alloc_);
       }
-    } else {
+    } else if (OB_FAIL(ret)) {
       for (int64_t i = 0; i < slice_cnt; ++i) {
         if (nullptr != slices[static_cast<size_t>(i)].alloc_) {
           OB_DELETE(ObArenaAllocator, ObMemAttr("FtsAuxSlice"), slices[static_cast<size_t>(i)].alloc_);
@@ -1380,6 +1393,231 @@ namespace
 {
 // Rows are pushed straight into the DAG writer in batches; the write macro block
 // operator appends them to the aux tablet's sstables.
+int write_fts_aux_rows_ranges(storage::ObDDLIndependentDag *dag,
+                              const common::ObTabletID &tablet_id,
+                              const std::vector<ObFtsAuxSliceCtx> &runs,
+                              const ObCollationType cs,
+                              common::ObIAllocator &alloc)
+{
+  int ret = OB_SUCCESS;
+  const int64_t run_cnt = static_cast<int64_t>(runs.size());
+  UNUSED(alloc);
+  if (OB_ISNULL(dag) || run_cnt <= 0) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    // Word boundaries must be distinct so every range owns at least one word.
+    std::vector<std::pair<const char *, int32_t> > samples;
+    const int64_t WANT_PER_RUN = 512;
+    for (int64_t s = 0; s < run_cnt; ++s) {
+      const common::ObSEArray<ObFtsAuxRowRec, 1024> &rows = runs[static_cast<size_t>(s)].rows_;
+      const int64_t n = rows.count();
+      if (n <= 0) {
+        continue;
+      }
+      const int64_t step = MAX(static_cast<int64_t>(1), n / WANT_PER_RUN);
+      for (int64_t i = 0; i < n; i += step) {
+        samples.push_back(std::make_pair(rows.at(i).word_, rows.at(i).word_len_));
+      }
+    }
+    std::sort(samples.begin(), samples.end(),
+              [cs](const std::pair<const char *, int32_t> &l,
+                   const std::pair<const char *, int32_t> &r) {
+      return ObCharset::strcmpsp(cs, l.first, l.second, r.first, r.second, true) < 0;
+    });
+    std::vector<std::pair<const char *, int32_t> > bounds;
+    if (!samples.empty()) {
+      bounds.push_back(samples.front());
+      const int64_t want_ranges = MIN(static_cast<int64_t>(run_cnt),
+                                      static_cast<int64_t>(samples.size()));
+      for (int64_t i = 1; i < want_ranges; ++i) {
+        const std::pair<const char *, int32_t> &cand =
+            samples[static_cast<size_t>(i * static_cast<int64_t>(samples.size()) / want_ranges)];
+        const std::pair<const char *, int32_t> &last = bounds.back();
+        if (0 != ObCharset::strcmpsp(cs, cand.first, cand.second, last.first, last.second, true)) {
+          bounds.push_back(cand);
+        }
+      }
+    }
+    if (bounds.empty()) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("fts aux range merge without boundaries", K(ret), K(run_cnt));
+    } else {
+      const int64_t range_cnt = static_cast<int64_t>(bounds.size());
+      ObDDLTabletContext *tablet_context = nullptr;
+      if (OB_FAIL(dag->get_tablet_context(tablet_id, tablet_context))) {
+      } else if (OB_ISNULL(tablet_context)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (FALSE_IT(tablet_context->slice_count_ = range_cnt)) {
+      } else {
+        struct RangeArg
+        {
+          storage::ObDDLIndependentDag *dag_;
+          common::ObTabletID tablet_id_;
+          const std::vector<ObFtsAuxSliceCtx> *runs_;
+          int64_t range_idx_;
+          int64_t range_cnt_;
+          const char *lo_;
+          int32_t lo_len_;
+          const char *hi_;  // nullptr means +inf
+          int32_t hi_len_;
+          ObCollationType cs_;
+          int64_t written_;
+          int ret_;
+        };
+        std::vector<RangeArg> args(static_cast<size_t>(range_cnt));
+        std::vector<std::thread> workers;
+        workers.reserve(static_cast<size_t>(range_cnt));
+        const auto lower_word = [](const common::ObSEArray<ObFtsAuxRowRec, 1024> &rows,
+                                   const ObCollationType cs,
+                                   const char *w, const int32_t len) {
+          int64_t lo = 0;
+          int64_t hi = rows.count();
+          while (lo < hi) {
+            const int64_t mid = (lo + hi) / 2;
+            const ObFtsAuxRowRec &row = rows.at(mid);
+            if (ObCharset::strcmpsp(cs, row.word_, row.word_len_, w, len, true) < 0) {
+              lo = mid + 1;
+            } else {
+              hi = mid;
+            }
+          }
+          return lo;
+        };
+        for (int64_t r = 0; r < range_cnt; ++r) {
+          RangeArg &arg = args[static_cast<size_t>(r)];
+          arg.dag_ = dag;
+          arg.tablet_id_ = tablet_id;
+          arg.runs_ = &runs;
+          arg.range_idx_ = r;
+          arg.range_cnt_ = range_cnt;
+          arg.lo_ = bounds[static_cast<size_t>(r)].first;
+          arg.lo_len_ = bounds[static_cast<size_t>(r)].second;
+          arg.hi_ = (r + 1 < range_cnt) ? bounds[static_cast<size_t>(r + 1)].first : nullptr;
+          arg.hi_len_ = (r + 1 < range_cnt) ? bounds[static_cast<size_t>(r + 1)].second : 0;
+          arg.cs_ = cs;
+          arg.written_ = 0;
+          arg.ret_ = OB_SUCCESS;
+          workers.emplace_back([&arg, lower_word]() {
+            storage::ObWriteMacroParam param;
+            storage::ObRsSliceWriter *writer = nullptr;
+            common::ObArenaAllocator thread_alloc(lib::ObMemAttr("FtsAuxRangeW"));
+            blocksstable::ObStorageDatum datums[4];
+            common::ObSEArray<ObDatum *, 4> datum_ptrs;
+            const ObFtsAuxRowLess less(arg.cs_);
+            int &ret = arg.ret_;
+            const int64_t run_cnt = static_cast<int64_t>(arg.runs_->size());
+            std::vector<std::pair<int64_t, int64_t> > heap;  // <run, pos>
+            std::vector<int64_t> run_lo(static_cast<size_t>(run_cnt), 0);
+            std::vector<int64_t> run_hi(static_cast<size_t>(run_cnt), 0);
+            const auto row_at = [&arg](const std::pair<int64_t, int64_t> &slot)
+                -> const ObFtsAuxRowRec & {
+              return (*arg.runs_)[static_cast<size_t>(slot.first)].rows_.at(slot.second);
+            };
+            if (OB_FAIL(storage::ObDDLStorageUtil::fill_writer_param(
+                    arg.tablet_id_, arg.range_idx_, arg.dag_, 0 /* max_batch_size */, param))) {
+              LOG_WARN("failed to fill range writer param", K(ret), K(arg.range_idx_));
+            } else if (OB_ISNULL(writer = OB_NEWx(storage::ObRsSliceWriter, &thread_alloc))) {
+              ret = OB_ALLOCATE_MEMORY_FAILED;
+            } else {
+              param.slice_count_ = arg.range_cnt_;
+              if (OB_FAIL(writer->init(param))) {
+                LOG_WARN("failed to init range writer", K(ret), K(arg.range_idx_));
+              } else {
+                for (int64_t s = 0; s < run_cnt; ++s) {
+                  const common::ObSEArray<ObFtsAuxRowRec, 1024> &rows =
+                      (*arg.runs_)[static_cast<size_t>(s)].rows_;
+                  run_lo[static_cast<size_t>(s)] = lower_word(rows, arg.cs_, arg.lo_, arg.lo_len_);
+                  run_hi[static_cast<size_t>(s)] =
+                      (nullptr == arg.hi_) ? rows.count()
+                                           : lower_word(rows, arg.cs_, arg.hi_, arg.hi_len_);
+                  if (run_lo[static_cast<size_t>(s)] < run_hi[static_cast<size_t>(s)]) {
+                    heap.push_back(std::make_pair(s, run_lo[static_cast<size_t>(s)]));
+                  }
+                }
+                const auto heap_less = [&less, &row_at](
+                    const std::pair<int64_t, int64_t> &a,
+                    const std::pair<int64_t, int64_t> &b) {
+                  return less(row_at(a), row_at(b));
+                };
+                const auto sift_down = [&heap, &heap_less](int64_t pos) {
+                  const int64_t n = static_cast<int64_t>(heap.size());
+                  while (true) {
+                    int64_t smallest = pos;
+                    const int64_t l = 2 * pos + 1;
+                    const int64_t r = l + 1;
+                    if (l < n && heap_less(heap[static_cast<size_t>(l)],
+                                           heap[static_cast<size_t>(smallest)])) {
+                      smallest = l;
+                    }
+                    if (r < n && heap_less(heap[static_cast<size_t>(r)],
+                                           heap[static_cast<size_t>(smallest)])) {
+                      smallest = r;
+                    }
+                    if (smallest == pos) {
+                      break;
+                    }
+                    std::swap(heap[static_cast<size_t>(pos)], heap[static_cast<size_t>(smallest)]);
+                    pos = smallest;
+                  }
+                };
+                for (int64_t i = static_cast<int64_t>(heap.size()) / 2 - 1; i >= 0; --i) {
+                  sift_down(i);
+                }
+                while (OB_SUCC(ret) && !heap.empty()) {
+                  const std::pair<int64_t, int64_t> top = heap[0];
+                  const ObFtsAuxRowRec &row = row_at(top);
+                  datums[0].set_string(row.word_, row.word_len_);
+                  datums[1].set_string(row.doc_id_str_, OB_DOC_ID_COLUMN_BYTE_LENGTH);
+                  datums[2].set_int(row.word_count_);
+                  datums[3].set_int(row.doc_length_);
+                  datum_ptrs.reuse();
+                  for (int64_t c = 0; OB_SUCC(ret) && c < 4; ++c) {
+                    if (OB_FAIL(datum_ptrs.push_back(&datums[c]))) {
+                    }
+                  }
+                  if (OB_SUCC(ret) && OB_FAIL(writer->append_current_row(datum_ptrs))) {
+                    LOG_WARN("failed to append range row", K(ret), K(arg.range_idx_));
+                  } else if (OB_SUCC(ret)) {
+                    ++arg.written_;
+                    const int64_t run = top.first;
+                    if (top.second + 1 < run_hi[static_cast<size_t>(run)]) {
+                      heap[0].second = top.second + 1;
+                      sift_down(0);
+                    } else {
+                      heap[0] = heap.back();
+                      heap.pop_back();
+                      if (!heap.empty()) {
+                        sift_down(0);
+                      }
+                    }
+                  }
+                }
+                if (OB_SUCC(ret) && OB_FAIL(writer->close())) {
+                  LOG_WARN("failed to close range writer", K(ret), K(arg.range_idx_));
+                }
+              }
+            }
+          });
+        }
+        for (size_t i = 0; i < workers.size(); ++i) {
+          if (workers[i].joinable()) {
+            workers[i].join();
+          }
+        }
+        int64_t total = 0;
+        for (int64_t r = 0; r < range_cnt; ++r) {
+          total += args[static_cast<size_t>(r)].written_;
+          if (OB_SUCCESS != args[static_cast<size_t>(r)].ret_) {
+            ret = args[static_cast<size_t>(r)].ret_;
+          }
+        }
+        LOG_INFO("fts aux range merge write done", K(ret), K(range_cnt), K(total));
+      }
+    }
+  }
+  return ret;
+}
+
 int write_fts_aux_rows(storage::ObDDLIndependentDag *dag,
                        const common::ObTabletID &tablet_id,
                        const common::ObIArray<ObFtsAuxRowRec> &rows,
@@ -1574,7 +1812,7 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
         if (nullptr != slice_env && '\0' != slice_env[0]) {
           slice_cnt = atoll(slice_env);
         }
-        int build_ret = producer.build_tablet_parallel(slice_cnt, rows, doc_cnt, token_cnt);
+        int build_ret = producer.build_tablet_parallel(slice_cnt, rows, doc_cnt, token_cnt, nullptr);
         if (OB_NOT_SUPPORTED == build_ret) {
           build_ret = producer.build_tablet(tablet_ids.at(i), rows, doc_cnt, token_cnt);
         }
@@ -1609,10 +1847,16 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
     common::ObSEArray<ObFtsAuxRowRec, 1024> rows;
     int64_t doc_cnt = 0;
     int64_t token_cnt = 0;
+    // On by default; FTS_AUX_RANGEMERGE=0 falls back to the merged write path.
+    const char *rm_env = getenv("FTS_AUX_RANGEMERGE");
+    const bool range_merge = nullptr == rm_env || '\0' == rm_env[0] || '0' != rm_env[0];
+    std::vector<ObFtsAuxSliceCtx> slice_ctxs;
+    void *slice_out = range_merge ? static_cast<void *>(&slice_ctxs) : nullptr;
     producer.set_data_table_name(common::ObString(qualified_len, qualified_name));
     if (OB_FAIL(producer.init(*data_schema, *aux_schema, param.snapshot_version_))) {
       LOG_WARN("fts aux direct producer init failed", K(ret));
-    } else if (OB_FAIL(producer.build_tablet_parallel(slice_cnt, rows, doc_cnt, token_cnt))) {
+    } else if (OB_FAIL(producer.build_tablet_parallel(slice_cnt, rows, doc_cnt, token_cnt,
+                                                      slice_out))) {
     } else {
       share::ObDDLTaskDataInfo task_data_info;
       storage::ObDDLInsertDagInitParam dag_param;
@@ -1646,8 +1890,14 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
         int tmp_ret = OB_SUCCESS;
         for (int64_t i = 0; OB_SUCC(ret) && i < tablet_ids.count(); ++i) {
           direct_wrote = true;
-          if (OB_FAIL(write_fts_aux_rows(dag, tablet_ids.at(i), rows, batch_alloc))) {
-            LOG_WARN("fts aux direct write failed", K(ret), "tablet_id", tablet_ids.at(i));
+          const int write_ret = range_merge
+              ? write_fts_aux_rows_ranges(dag, tablet_ids.at(i), slice_ctxs,
+                                          producer.get_word_collation(), batch_alloc)
+              : write_fts_aux_rows(dag, tablet_ids.at(i), rows, batch_alloc);
+          if (OB_FAIL(write_ret)) {
+            LOG_WARN("fts aux direct write failed", K(write_ret), "tablet_id", tablet_ids.at(i),
+                     K(range_merge));
+            ret = write_ret;
           }
         }
         if (OB_SUCC(ret)) {
