@@ -56,6 +56,7 @@ static void seekdb_cov_init_profile_file(int argc, char **argv)
 #include "lib/oblog/ob_warning_buffer.h"
 #include "lib/signal/ob_signal_struct.h"
 #include "lib/utility/ob_defer.h"
+#include "lib/vector/ob_vsag_adaptor.h"
 #include "observer/ob_command_line_parser.h"
 #include "observer/ob_server.h"
 #include "share/ob_encryption_util.h"
@@ -806,6 +807,15 @@ int inner_main(int argc, char *argv[])
                  "backend", ob_malloc_backend_name(malloc_backend));
       }
       OB_DELETE(ObServerOptions, mem_attr, opts);
+      if (OB_SUCC(ret)) {
+        // [hipVS/cuVS] Bring the GPU vector backend up before the server
+        // starts listening. The HIP initialisation and the JIT of the CAGRA
+        // kernels are paid by the first GPU index of the process otherwise,
+        // and that index is created inside a CREATE VECTOR INDEX statement.
+        // This runs after the daemon fork above, because a HIP context must
+        // not be inherited by a forked child.
+        obvsag::warmup_gpu_backend();
+      }
       if (OB_FAIL(ret)) {
       } else if (OB_FAIL(observer.start())) {
         LOG_ERROR("seekdb start fail", K(ret));

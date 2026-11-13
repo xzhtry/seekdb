@@ -87,6 +87,12 @@ extern std::string version();
  *   */
 extern bool is_init();
 
+/* [hipVS/cuVS] Bring the GPU vector backend up (HIP initialisation + JIT of
+ * the CAGRA kernels) before the server starts listening, so that the first
+ * CREATE VECTOR INDEX does not pay for that one-off setup. Does nothing when
+ * the GPU backend is not compiled in. */
+void warmup_gpu_backend();
+
 /*
  * *trace = 0
  * *debug = 1
