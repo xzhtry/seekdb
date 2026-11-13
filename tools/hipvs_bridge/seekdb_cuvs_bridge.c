@@ -12,7 +12,7 @@
  *
  *   SEEKDB_CUVS_GRAPH_DEGREE          CAGRA graph degree             (default 128)
  *   SEEKDB_CUVS_INTERMEDIATE_DEGREE   CAGRA intermediate degree      (default 128)
- *   SEEKDB_CUVS_NN_ITER               NN-descent iterations          (default 50)
+ *   SEEKDB_CUVS_NN_ITER               NN-descent iterations          (default 20)
  *   SEEKDB_CUVS_BUILD_ALGO            nn_descent | ivf_pq            (default nn_descent)
  *   SEEKDB_CUVS_ITOPK_MIN             floor for search itopk         (default 1024)
  *   SEEKDB_CUVS_SEARCH_WIDTH          CAGRA search width             (default 4)
@@ -198,7 +198,7 @@ static void sk_load_cfg(int force)
   g_cfg.graph_degree = sk_env_int("SEEKDB_CUVS_GRAPH_DEGREE", 128, 8, 512);
   g_cfg.intermediate_degree =
       sk_env_int("SEEKDB_CUVS_INTERMEDIATE_DEGREE", 128, 8, 1024);
-  g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 50, 1, 400);
+  g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 20, 1, 400);
   g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 1024, 16, 4096);
   g_cfg.search_width = sk_env_int("SEEKDB_CUVS_SEARCH_WIDTH", 4, 1, 32);
   g_cfg.log_level = sk_env_int("SEEKDB_CUVS_LOG", 1, 0, 2);
