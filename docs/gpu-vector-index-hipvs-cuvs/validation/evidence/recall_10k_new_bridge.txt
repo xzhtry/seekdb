@@ -1,0 +1,33 @@
+=== prepare the 10k dataset + exact top-100 ground truth ===
+[recall] exact-GT vs official gt_100x10.i32 agreement: min=10 mean=10.00/10
+[recall] prepared 10000 rows, 100 queries
+=== start observer with the NEW bridge ===
+=== load + create the cuvs index ===
+rows=10000
+CREATE VECTOR INDEX wall = 6.641 s
+=== 100 queries, topk=100, approximate (GPU path) ===
+queries done: 100
+=== GPU path check ===
+search failures (must be 0): 0
+--- CAGRA build line ---
+[seekdb_cuvs] build n=10000 dim=128 gd=128 igd=128 niter=50 algo=nn_descent ms=5009.9
+[seekdb_cuvs] build n=256 dim=16 gd=16 igd=32 niter=5 algo=nn_descent ms=596.8
+--- adaptor cuVS stage lines ---
+[2026-11-13 03:38:23.508517] INFO  [LIB] is_init (ob_vsag_adaptor.cpp:1263) [164700][seekdb][Y0-0000000000000001-0-0] [lt=2] [OBVSAG] Init VsagLib]:
+[2026-11-13 03:38:23.508519] INFO  [LIB] is_init (ob_vsag_adaptor.cpp:1265) [164700][seekdb][Y0-0000000000000001-0-0] [lt=1] [OBVSAG] Init VsagLib success
+[2026-11-13 03:38:25.611732] INFO  [LIB] validate_create_index (ob_vsag_adaptor.cpp:1648) [164829][T1_ReqWorker][YB427F000001-000660202991C0BD-0-0] [lt=10] [OBVSAG] allocator is null , use default_allocator(param.index_type_=0, lbt()="0x649af45 0x64db7c8 0x64daf8a 0x229396e 0x227304a 0x226e44e 0x2268803 0x2867024 0x2853d99 0x33a6484 0x33a747d 0x28bb411 0x28b9d51 0x38d989b 0x38e0f8e 0x38ddeef 0x64b2cc0 0x38cef12 0x252d73a 0x252b618 0x66d71fb 0x1d07d40 0x1d06fc3 0x1d06268 0x1d058b2 0x1d0666d 0x64ba125 0x64b9b8f 0x72c44696eaa4 0x72c4469fba64")
+[2026-11-13 03:38:26.127170] INFO  [LIB] create_index (ob_vsag_adaptor.cpp:1600) [164864][T1_DDL_243][Y100B427F000001-000660202991C0BD-0-0] [lt=6] [OBVSAG] use caller allocator (index_type=0, lbt()="0x649af45 0x64da59a 0x64da23d 0x21f5c60 0x21fc846 0x4a21803 0x4a21ab2 0x4a21d8d 0x4ad701a 0x4ad7502 0x4a1c44a 0x4c1a328 0x4c3c9bd 0x4c3bafd 0x4c3ad81 0x4a1113f 0x64b446c 0x64ba125 0x64b9b8f 0x72c44696eaa4 0x72c4469fba64")
+[2026-11-13 03:38:31.988810] INFO  [LIB] ob_cuvs_serialize (ob_vsag_adaptor.cpp:587) [164857][T1_PX_G0][Y100B427F000001-000660202991C0BD-0-0] [lt=15] [OBVSAG][cuVS] serialized GPU CAGRA snapshot(key=0x72c14e4ad000, n=10000, dim32=128, built=true, build_us=5015353, graph_bytes=10241713)
+[2026-11-13 03:38:31.988819] INFO  [LIB] ob_cuvs_serialize (ob_vsag_adaptor.cpp:590) [164857][T1_PX_G0][Y100B427F000001-000660202991C0BD-0-0] [lt=5] [OBVSAG][cuVS] stage op=serialize path=blob(key=0x72c14e4ad000, n=10000, dim32=128, build_us=5015353, export_us=0, write_us=9997, total_us=5856134, graph_bytes=10241713)
+--- restore / snapshot ---
+[seekdb_cuvs] fast_snapshot_api graph=1 degree=1 dataset=1 from_args=1
+[seekdb_cuvs] export_graph n=256 gd=16 ms=9.2
+[seekdb_cuvs] restore n=256 dim=16 gd=16 metric=0 ms=5.8
+[seekdb_cuvs] fast_snapshot_supported=0
+[seekdb_cuvs] serialize ms=24.2
+=== compute recall ===
+RECALL@10  = 1.0000
+RECALL@100 = 1.0000
+duplicate-id queries = 0
+queries with != 100 ids = 0
+=== DONE ===

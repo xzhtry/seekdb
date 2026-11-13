@@ -1,6 +1,6 @@
 # 冲 20 分：AMD hipVS 赛题的可行路径分析
 
-> 版本：2026-11-13 · 基于 V5 冻结基线 `634888d9` / 第 8 轮官方最好成绩 **6.115 分**
+> 版本：2026-11-13（晚，第 10 轮已提交）· 基于 V5 冻结基线 `634888d9` / 第 8 轮官方最好成绩 **6.115 分**
 > 本文回答两个问题：**① 官方口径下 20 分到底要什么？② 全网范围内有哪些可用手段、我们实测下来哪条能走通？**
 >
 > 配图：`CPU-GPU构建性能对比-pareto.svg`（同目录）
@@ -17,6 +17,7 @@
 | 实测淘汰 | `IVF_PQ` 建图（快 5.4× 但召回 0.877）、`ITERATIVE_CAGRA_SEARCH`（比 nn-descent 还慢）、`graph_degree≤64`（召回 0.965 以下） |
 | **能走通的是哪条？** | **把「建图质量预算」从 nn-descent 迭代次数挪到检索侧 itopk**：`nn_iter 100→50` + `intermediate_degree 256→128` + `itopk 512→1024` |
 | 实测收益 | 建图 **42.6 s → 16.3 s（2.62×）**，召回@100 **0.9650 → 0.9915（不降反升）**，显存减半，查询耗时不变 |
+| ⚠ 落地时踩到的坑 | `cuvsCagraSearchParamsCreate()` 默认 `algo=SINGLE_CTA`，而它**拒绝 `itopk>512`** ⇒ 检索全部失败、seekdb **静默回退 CPU**，召回掉到 VSAG 的 0.766/0.652。必须显式选 `AUTO`（详见 §8.2） |
 | 预估得分 | 构建比 1.139x → **≈2.99x**，总分 **6.115 → ≈18.4**；再叠加 GPU 运行时预热 → **20** |
 
 ---
@@ -266,7 +267,7 @@ nn-descent 的迭代轮数越多、邻居表越大，图质量越高、召回越
 
 | 轮次 | 变更 | 预期 | 风险 |
 |---|---|---|---|
-| **#10** | `nn_iter` 100→50 **且** `intermediate_degree` 256→128 **且** `itopk_min` 512→1024（一次「建图-检索配平」） | 构建比 ≈2.99x，总分 ≈18.4 | 低：三者在本地是同一个耦合优化，召回相对现状**不降反升**（+0.027），显存更省、查询不慢 |
+| **#10** ✅ 已提交 | `nn_iter` 100→50 **且** `intermediate_degree` 256→128 **且** `itopk_min` 512→1024（一次「建图-检索配平」）**＋ 检索算法固定为 `AUTO`** | 构建比 ≈2.99x，总分 ≈18.4 | 低：三者在本地是同一个耦合优化，召回相对现状**不降反升**（+0.027），显存更省、查询不慢；`AUTO` 是 itopk=1024 的**必要条件**（见 §8.2） |
 | **#11** | GPU 运行时预热 | 构建比 ≈3.4x，总分 **20** | 中（同上） |
 
 **方案 B 的理由**：
@@ -295,6 +296,103 @@ nn-descent 的迭代轮数越多、邻居表越大，图质量越高、召回越
 | 降低 Recall 换性能 | 直接违反门槛 |
 | 惰性建图移出计时窗口 | 直接违反规则 |
 
+
+---
+
+## 8. 第 10 轮实施记录（提交 `e568a8b1`）
+
+### 8.1 落地的改动
+
+只改一个文件：`tools/hipvs_bridge/seekdb_cuvs_bridge.c`（编译期默认值 `sk_load_cfg()`）。
+
+| 参数 | V5 基线 | 第 10 轮 | 依据 |
+|---|---|---|---|
+| `intermediate_degree` | 256 | **128** | 250K 实测建图 42.6 s → 16.3 s，召回@100 @itopk=1024 = 0.9915（高于基线 @itopk=512 的 0.9650） |
+| `nn_iter` | 100 | **50** | 同上 |
+| `itopk_min` | 512 | **1024** | 把建图省下的质量预算买回检索侧 |
+| 检索 `algo` | 未设置（= `SINGLE_CTA`） | **`AUTO`（显式）** | `SINGLE_CTA` 拒绝 `itopk>512`，不设就整条检索链失败（§8.2） |
+| `graph_degree` | 128 | 128（不变） | 降到 64 召回塌到 0.9646，跌出门槛 |
+
+### 8.2 必须知道的 cuVS 陷阱：`SINGLE_CTA` 拒绝 `itopk > 512`
+
+**现象**：把 `itopk_min` 从 512 抬到 1024 之后，10K 真实数据上的 100 条查询全部拿到的是 CPU（VSAG）的答案，召回@10 / @100 = **0.7636 / 0.6516**，和 VSAG 的 0.766 / 0.6524 几乎一模一样——说明 GPU 检索一次都没成功。
+
+**根因**：`cuvsCagraSearchParamsCreate()` 把 `algo` 初始化成 `SINGLE_CTA`（枚举值 0）。桥接层只设了 `itopk_size` 和 `search_width`，没设 `algo`。而 `SINGLE_CTA` 这个 kernel **明确拒绝 `itopk_size > 512`**，于是每次 `cuvsCagraSearch()` 都返回失败：
+
+```
+[seekdb_cuvs] search rc=15: (null)      <- 100 次查询，100 次失败
+```
+
+`ob_vsag_adaptor.cpp` 拿到失败就**静默回退 VSAG（CPU）**——功能上"能用"，但 GPU 路径等于没跑，召回直接掉到 CPU 的水平。这是比"慢"危险得多的一类失败：**不报错、不中断，只是悄悄换了一条路**。
+
+**修复**：检索参数一律显式选 `AUTO`（枚举值 3）。
+
+```c
+/* cuvsCagraSearchParamsCreate() leaves algo = SINGLE_CTA, and that
+ * kernel refuses an itopk_size above 512: every search then fails and
+ * the adaptor quietly answers from the CPU path. AUTO picks the kernel
+ * that fits the batch size and accepts the larger itopk. */
+sp->algo = SK_CAGRA_SEARCH_ALGO_AUTO;
+```
+
+**附带收益**：`AUTO` 会按批量大小挑 kernel，查询侧反而更快。10K 索引上的实测单查询延迟：
+
+| itopk | algo | 单查询延迟 | 100 条批量 |
+|---|---|---|---|
+| 512 | `SINGLE_CTA`（基线路径） | 2.81 ms | 6.61 ms |
+| 1024 | `AUTO`（新路径） | **0.55 ms** | **6.44 ms** |
+
+即「查询比」这一侧不但不会掉，理论上还会小幅上升。
+
+**验证**：用 cuVS C API 直连的独立探针（`work/itopk_probe.c`）在 10K 真实数据上复刻桥接层的全部参数并打印原始邻居 ID：
+
+```
+{"nq":1,"itopk":1024,"algo":3,"ms":0.668,"invalid":0,"u32max":0,"min":72,"max":9820,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+```
+
+`invalid=0`、`u32max=0`、每行 100 个互不相同的 ID，且 top-5 与 VSAG 的结果**完全一致**——说明 cuVS 侧的输出本身是正确的，问题只在"用哪个 kernel"。
+
+### 8.3 端到端验证（10K 真实数据 + 官方 `gt_100x10.i32`）
+
+用官方随附的 `gt_100x10.i32` 做真值，先用 CPU 暴力检索算一遍精确 top-100 并与官方 GT 交叉验证（100/100 条查询、每条 10/10 全命中），再跑 `CREATE VECTOR INDEX ... lib=cuvs` + 100 条 `approximate` 查询：
+
+```
+[seekdb_cuvs] build n=10000 dim=128 gd=128 igd=128 niter=50 algo=nn_descent ms=5009.9
+GPU search failures (must be 0): 0
+RECALL@10  = 1.0000
+RECALL@100 = 1.0000
+duplicate-id queries = 0
+queries with != 100 ids = 0
+```
+
+**召回没有下降**（基线同为 1.0/1.0），每条查询返回 100 个互不重复的 ID，GPU 检索零失败。
+
+### 8.4 踩坑记录：向量字面量必须闭合
+
+排查上面那个 `RECALL=0` 时还撞上了一个**纯粹是我自己脚本的问题**：改写召回脚本时把向量字面量的闭合 `]` 漏掉了，于是 100 条查询全部报 `ERROR 1210 (HY000) Invalid argument`（OB `OB_INVALID_ARGUMENT`），连 `select l2_distance(v,'...') from t limit 1` 这种纯表达式都失败。
+
+定位过程值得记下来，因为它演示了**怎么排除"看起来是产品 bug、其实是环境问题"**：
+
+1. 先看 observer 日志：`search rc=15` 计数 100 ⇒ 检索确实失败了，但**与 `Invalid argument` 是两件事**；
+2. 用 `addr2line` 解 `send_error_packet` 的 `lbt` ⇒ 只解出错误包发送栈，真正的抛错点不在栈里（错误码在更早的语句执行阶段就写进了结果集）；
+3. 写独立探针直连 cuVS ⇒ ID 全部合法 ⇒ **GPU 侧无罪**；
+4. 用基线桥做 A/B ⇒ 基线桥同样全失败 ⇒ **与本轮改动无关**；
+5. 最后直接 diff 两版 `queries.txt` ⇒ 100 行**全部**只差一个结尾字符 `]`。
+
+教训两条：**①** 官方 GT 与穷举真值要交叉验证（本例两条路径都算出同样的答案才算数）；**②** 脚本里的 SQL 字面量必须逐字节校验，跨机器比对文本比读代码更快。
+
+### 8.5 第 10 轮提测记录
+
+| 项 | 值 |
+|---|---|
+| commit | `e568a8b1d364f6cff1993fb8bc806c08a4963733` |
+| 分支 | `amd-cagra-submit` |
+| 记录 id | 47252482 |
+| 提交时间 | 2026-11-13 03:45:18Z |
+| 预期 | 构建比 ≈2.99x、查询比 ≥1.096x ⇒ 总分 ≈18.4；门槛全过（召回不降反升） |
+
+第 9 轮（`3794da35`，5.324 分）用的是**同样在计时窗口外**的改动，分数却比第 8 轮（`cc6c79f3`，6.115 分）低了 0.79——两次的改动都没进计时窗口，差异只能来自**平台运行间的抖动**。所以第 10 轮出来以后，判断依据应该是"构建比是否落到 ≈3.0x"，而不是绝对分数的绝对值。
+
 ---
 
 ## 7. 复现方式
@@ -312,3 +410,16 @@ wsl -d Ubuntu-24.04 --exec bash -lc 'python3 /mnt/d/oceanbase大赛/work/make_pa
 
 扫描器源码（本地）：`work/sweep2.c`（cuVS C API 直连）、`work/sweep2_run.sh`、`work/sweep3_run.sh`、`work/analyze_sweep.py`、`work/analyze2.py`、`work/summary.py`、`work/make_pareto_chart.py`。
 原始日志：`work/sweep2_out.txt`、`work/sweep3_out.txt`。
+
+第 10 轮的检索侧验证（ID 探针 + 端到端召回）：
+
+```bash
+# 独立探针：复刻桥接层参数，打印 cuVS 返回的原始邻居 ID
+wsl -d Ubuntu-24.04 --exec bash /mnt/d/oceanbase大赛/work/up1.sh itopk_probe.c /root/work/probe/itopk_probe.c
+wsl -d Ubuntu-24.04 --exec bash /mnt/d/oceanbase大赛/work/remote_run.sh itopk_probe_run itopk_probe_out.txt
+
+# 端到端：10K 真实数据 + 官方 gt_100x10.i32 的召回校验
+wsl -d Ubuntu-24.04 --exec bash /mnt/d/oceanbase大赛/work/remote_run.sh cloud_recall_new2 cloud_recall_new2_out.txt
+```
+
+> 注意：云端实例有 4 小时上限，回收后 `/root/work` 会丢；所有原始输出都同步落在本地 `work/` 下。

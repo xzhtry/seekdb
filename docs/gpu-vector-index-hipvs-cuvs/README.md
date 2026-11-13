@@ -205,6 +205,26 @@ python3 docs/gpu-vector-index-hipvs-cuvs/validation/analyze_cagra_sweep.py
 
 The raw logs of the recorded run are kept in `validation/evidence/`.
 
+### Recall check against the shipped ground truth
+
+`validation/itopk_probe.c` reproduces exactly what the bridge asks cuVS for and
+prints the raw neighbour ids, so a wrong search kernel can be told apart from a
+wrong index. `validation/run_recall_check.sh` is the end-to-end counterpart: it
+computes the exact top-100 on the CPU, cross-checks it against the shipped
+`gt_100x10.i32`, creates the index with `lib=cuvs`, runs the 100 approximate
+queries and reports recall@10 / recall@100.
+
+```bash
+docs/gpu-vector-index-hipvs-cuvs/validation/run_recall_check.sh \
+  /root/work/bridge/libseekdb_cuvs_bridge.so /root/work/recall 2988
+```
+
+The script also asserts that no GPU search failed. That assertion matters:
+`cuvsCagraSearchParamsCreate()` defaults `algo` to `SINGLE_CTA`, that kernel
+refuses an `itopk_size` above 512, and a failed search makes seekdb answer from
+the CPU path without reporting an error, so the recall number would silently
+measure VSAG instead of cuVS.
+
 ## Current limitations
 
 - Phase 1 supports dense float32 L2 indexes only.

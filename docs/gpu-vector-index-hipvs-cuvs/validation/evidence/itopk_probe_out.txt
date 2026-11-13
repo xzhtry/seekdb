@@ -1,0 +1,17 @@
+compiled ok
+=== 10k real dataset, gd=128 igd=128 niter=50, topk=100 ===
+{"build_ms":2494.4,"err":1}
+{"nq":1,"itopk":512,"algo":3,"ms":82.234,"invalid":0,"u32max":0,"min":72,"max":9820,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":1,"itopk":512,"algo":1,"ms":0.632,"invalid":0,"u32max":0,"min":72,"max":9820,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":1,"itopk":512,"algo":0,"ms":16.368,"invalid":0,"u32max":0,"min":72,"max":9820,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":1,"itopk":1024,"algo":3,"ms":0.668,"invalid":0,"u32max":0,"min":72,"max":9820,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":1,"itopk":1024,"algo":1,"ms":0.608,"invalid":0,"u32max":0,"min":72,"max":9820,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":1,"itopk":1024,"algo":0,"err":0}
+{"nq":100,"itopk":512,"algo":3,"ms":7.326,"invalid":0,"u32max":0,"min":0,"max":9998,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":100,"itopk":512,"algo":1,"ms":2.978,"invalid":0,"u32max":0,"min":0,"max":9998,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":100,"itopk":512,"algo":0,"ms":4.351,"invalid":0,"u32max":0,"min":0,"max":9998,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":100,"itopk":1024,"algo":3,"ms":5.304,"invalid":0,"u32max":0,"min":0,"max":9998,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":100,"itopk":1024,"algo":1,"ms":5.249,"invalid":0,"u32max":0,"min":0,"max":9998,"distinct_row0":100,"head":[72,1812,7880,7640,2782]}
+{"nq":100,"itopk":1024,"algo":0,"err":0}
+{"done":1}
+=== DONE ===
