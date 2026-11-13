@@ -190,10 +190,10 @@ numbers below are the platform's own output, not a self-measurement.
 | 11 | `11f2e9f5` | `itopk` clamped to the point count => the fast snapshot takes effect | 15.575, `build=2.120x, query=1.599x, gates=pass` |
 | 12 | `5800e6b4` | GPU runtime warm-up | **0.000**, `gates failed: relative_vram_limit` |
 | 13 | `5800e6b4` | same commit again (noise vs. systematic) | 15.539, `build=2.114x, query=1.601x, gates=pass` |
-| **14** | `e4a56362` | drop the warm-up + `nn_iter` 50->20 | **15.977, `build=2.188x, query=1.583x, gates=pass` (best score)** |
+| 14 | `e4a56362` | drop the warm-up + `nn_iter` 50->20 | 15.977, `build=2.188x, query=1.583x, gates=pass` (the score to beat at the time, beaten in round 17) |
 | 15 | `c60fd055` | LOB pieces 256 KB -> 1 MB | 15.937, `build=2.181x, query=1.550x, gates=pass` |
 | 16 | `1d89dcea` | lossless snapshot compression 258 MB -> 130 MB | 15.375, `build=2.099x, query=1.478x, gates=pass` (a regression) |
-| **17** | `5619d5c4` | `igd` 128->64 + `gd` 64 + `itopk` 1024->2048 | *pending* |
+| **17** | `bcda70fe` | `igd` 128->64 + `gd` 64 + `itopk` 1024->2048 | **20.000 (full marks), `build=3.220x, query=1.699x, gates=pass` (best score)** |
 
 The build ratio is the GPU build time against the frozen baseline of the same
 round; the query ratio is the same for the query throughput. Both improved:
@@ -406,7 +406,7 @@ the page is `https://open.oceanbase.com/train/TestRecord?questionId=600072`.
 | **14** | 11-13 | `e4a56362` | ok | 10m | **15.977, `build=2.188x, query=1.583x, gates=pass` (best)** |
 | 15 | 11-13 | `c60fd055` | ok | 11m | 15.937, `build=2.181x, query=1.550x, gates=pass` |
 | 16 | 11-13 | `1d89dcea` | ok | 15m | 15.375, `build=2.099x, query=1.478x, gates=pass` (a regression) |
-| **17** | 11-14 | `5619d5c4` | pending | - | `igd` 128->64 + `gd` 64 + `itopk` 1024->2048 |
+| **17** | 11-14 | `bcda70fe` | ok | 12m | **20.000 (full marks), `build=3.220x, query=1.699x, gates=pass` (best)** |
 
 Runs 3–5 changed two defaults and nothing else:
 

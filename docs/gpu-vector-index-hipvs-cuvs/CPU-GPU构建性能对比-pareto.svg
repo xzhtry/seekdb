@@ -606,9 +606,9 @@
 <line x1="930.61" y1="602.00" x2="935.07" y2="602.00" stroke="#2f6df0" stroke-width="2.2"/>
 <line x1="935.07" y1="602.00" x2="939.54" y2="602.00" stroke="#2f6df0" stroke-width="2.2"/>
 <line x1="939.54" y1="602.00" x2="944.00" y2="602.00" stroke="#2f6df0" stroke-width="2.2"/>
-<text x="948.00" y="606.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="end" font-weight="400">满分 20 分</text>
+<text x="948.00" y="594.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="end" font-weight="400">满分 20 分</text>
 <line x1="765.47" y1="602.00" x2="765.47" y2="982.00" stroke="#16a34a" stroke-width="1.4" stroke-dasharray="5 4"/>
-<text x="771.47" y="618.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#16a34a" text-anchor="start" font-weight="600">20 分需要构建比 3.0x</text>
+<text x="759.47" y="618.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#16a34a" text-anchor="end" font-weight="600">20 分需要构建比 3.0x</text>
 <circle cx="342.59" cy="881.85" r="6.00" fill="#64748b" stroke="#ffffff" stroke-width="2"/>
 <circle cx="337.23" cy="880.84" r="6.00" fill="#64748b" stroke="#ffffff" stroke-width="2"/>
 <circle cx="350.18" cy="865.82" r="6.00" fill="#64748b" stroke="#ffffff" stroke-width="2"/>
@@ -618,28 +618,34 @@
 <circle cx="584.27" cy="678.44" r="6.00" fill="#16a34a" stroke="#ffffff" stroke-width="2"/>
 <circle cx="582.48" cy="679.20" r="6.00" fill="#64748b" stroke="#ffffff" stroke-width="2"/>
 <circle cx="564.41" cy="689.88" r="6.00" fill="#64748b" stroke="#ffffff" stroke-width="2"/>
-<text x="574.41" y="693.88" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">第 16 轮</text>
-<text x="572.27" y="671.44" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#16a34a" text-anchor="end" font-weight="600">第 11~15 轮：2.11~2.19x ⇒ 15.54~15.98 分（第 14 轮最好）</text>
+<circle cx="814.57" cy="602.00" r="6.00" fill="#16a34a" stroke="#ffffff" stroke-width="2"/>
+<text x="570.41" y="705.88" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">第 16 轮</text>
+<text x="572.27" y="671.44" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#16a34a" text-anchor="end" font-weight="600">第 11~16 轮：2.10~2.19x ⇒ 15.38~15.98 分（第 14 轮最好）</text>
+<text x="826.57" y="618.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#16a34a" text-anchor="start" font-weight="600">第 17 轮 20.000 分</text>
 <text x="352.59" y="877.85" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">冻结基线</text>
 <text x="360.18" y="859.82" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">第 8 轮</text>
 <text x="327.23" y="894.84" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="end" font-weight="600">第 9 轮</text>
 <text x="473.76" y="741.99" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#2f6df0" text-anchor="start" font-weight="600">第 10 轮 e568a8b1</text>
-<text x="105.00" y="920.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">官方提测记录（平台自己回显的构建比 / 总分）</text>
-<text x="105.00" y="938.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">冻结基线 445b9b2</text>
-<text x="204.00" y="938.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">1.105x / 5.271</text>
-<text x="312.00" y="938.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 11 轮 11f2e9f5</text>
-<text x="426.00" y="938.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.120x / 15.575</text>
-<text x="105.00" y="954.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 8 轮 cc6c79f3</text>
-<text x="204.00" y="954.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">1.139x / 6.115</text>
-<text x="312.00" y="954.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 13 轮 5800e6b4</text>
-<text x="426.00" y="954.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.114x / 15.539</text>
-<text x="105.00" y="970.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 9 轮 3794da35</text>
-<text x="204.00" y="970.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">1.081x / 5.324</text>
-<text x="312.00" y="970.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 14 轮 e4a56362</text>
-<text x="426.00" y="970.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.188x / 15.977</text>
-<text x="105.00" y="986.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 10 轮 e568a8b1</text>
-<text x="204.00" y="986.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">1.648x / 12.369</text>
-<text x="312.00" y="986.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 15 轮 c60fd055</text>
-<text x="426.00" y="986.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.180x / 15.937</text>
-<text x="96.00" y="1040.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="400">评分式（由九轮官方成绩反推并验证）：总分 = 4 + 14·ln(构建比)/ln(3.0) + min(2, 2·ln(查询比)/ln(1.5))</text>
+<text x="105.00" y="907.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="600">官方提测记录（平台自己回显的构建比 / 总分）</text>
+<text x="105.00" y="922.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">冻结基线 445b9b2</text>
+<text x="204.00" y="922.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">1.105x / 5.271</text>
+<text x="312.00" y="922.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 11 轮 11f2e9f5</text>
+<text x="426.00" y="922.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.120x / 15.575</text>
+<text x="105.00" y="936.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 8 轮 cc6c79f3</text>
+<text x="204.00" y="936.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">1.139x / 6.115</text>
+<text x="312.00" y="936.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 13 轮 5800e6b4</text>
+<text x="426.00" y="936.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.114x / 15.539</text>
+<text x="105.00" y="950.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 9 轮 3794da35</text>
+<text x="204.00" y="950.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">1.081x / 5.324</text>
+<text x="312.00" y="950.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 14 轮 e4a56362</text>
+<text x="426.00" y="950.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.188x / 15.977</text>
+<text x="105.00" y="964.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 10 轮 e568a8b1</text>
+<text x="204.00" y="964.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">1.648x / 12.369</text>
+<text x="312.00" y="964.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 15 轮 c60fd055</text>
+<text x="426.00" y="964.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.180x / 15.937</text>
+<text x="105.00" y="978.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 16 轮 1d89dcea</text>
+<text x="204.00" y="978.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">2.099x / 15.375</text>
+<text x="312.00" y="978.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#64748b" text-anchor="start" font-weight="400">第 17 轮 bcda70fe</text>
+<text x="426.00" y="978.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#0f172a" text-anchor="start" font-weight="600">3.220x / 20.000</text>
+<text x="96.00" y="1040.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="400">评分式（由十七轮官方成绩反推并验证）：总分 = 4 + 14·ln(构建比)/ln(3.0) + min(2, 2·ln(查询比)/ln(1.5))</text>
 </svg>

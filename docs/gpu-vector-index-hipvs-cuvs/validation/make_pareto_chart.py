@@ -303,12 +303,12 @@ def main() -> int:
     pts = [(XS(r), YS(min(score_of(r), 20.0))) for r in [1.0 + i * 0.02 for i in range(int((rmax - 1.0) / 0.02) + 1)]]
     for i in range(len(pts) - 1):
         svg.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], ACC_C, 2.2)
-    svg.text(pts[-1][0] + 4, pts[-1][1] + 4, "满分 20 分", 10, MUTED, anchor="end")
+    svg.text(pts[-1][0] + 4, pts[-1][1] - 8, "满分 20 分", 10, MUTED, anchor="end")
 
     # 20-point requirement marker
     x20 = XS(3.0)
     svg.line(x20, qy0, x20, qy1, BEST_C, 1.4, dash="5 4")
-    svg.text(x20 + 6, qy0 + 16, "20 分需要构建比 3.0x", 10, BEST_C, weight="600")
+    svg.text(x20 - 6, qy0 + 16, "20 分需要构建比 3.0x", 10, BEST_C, weight="600", anchor="end")
 
     # The official runs, in the order they happened. The build ratio and the
     # score are the platform's own numbers, not an extrapolation.
@@ -322,6 +322,7 @@ def main() -> int:
         (2.188, "15.977", "第 14 轮 e4a56362", BEST_C),
         (2.180, "15.937", "第 15 轮 c60fd055", MUTED),
         (2.099, "15.375", "第 16 轮 1d89dcea", MUTED),
+        (3.220, "20.000", "第 17 轮 bcda70fe", BEST_C),
     ]
     for r, sc, _lab, col in official:
         x, y = XS(r), YS(float(sc))
@@ -329,11 +330,15 @@ def main() -> int:
 
     # Rounds 11/13/14/15 land within 15 px of each other, so they share one
     # callout instead of four overlapping labels. Round 16 sits a bit lower
-    # and gets its own short label.
-    svg.text(XS(2.099) + 10, YS(15.375) + 4, "第 16 轮", 10, MUTED, weight="600")
+    # and gets its own short label. Round 17 is the winner and sits on the
+    # flat top of the curve, far to the right.
+    svg.text(XS(2.099) + 6, YS(15.375) + 16, "第 16 轮", 10, MUTED, weight="600")
     svg.text(XS(2.188) - 12, YS(15.977) - 7,
-             "第 11~15 轮：2.11~2.19x ⇒ 15.54~15.98 分（第 14 轮最好）",
+             "第 11~16 轮：2.10~2.19x ⇒ 15.38~15.98 分（第 14 轮最好）",
              10, BEST_C, weight="600", anchor="end")
+    svg.text(XS(3.220) + 12, YS(20.000) + 16,
+             "第 17 轮 20.000 分",
+             10, BEST_C, weight="600")
 
     # Short labels where they cannot collide with each other.
     svg.text(XS(1.105) + 10, YS(5.271) - 4, "冻结基线", 10, MUTED, weight="600")
@@ -343,22 +348,23 @@ def main() -> int:
 
     # The full ledger of official runs, two columns, in the free area under
     # the curve.
-    svg.text(qx0 + 9, qy1 - 62, "官方提测记录（平台自己回显的构建比 / 总分）", 10, MUTED, weight="600")
+    svg.text(qx0 + 9, qy1 - 75, "官方提测记录（平台自己回显的构建比 / 总分）", 10, MUTED, weight="600")
     ledger = [
         ("冻结基线 445b9b2", "1.105x / 5.271", "第 11 轮 11f2e9f5", "2.120x / 15.575"),
         ("第 8 轮 cc6c79f3", "1.139x / 6.115", "第 13 轮 5800e6b4", "2.114x / 15.539"),
         ("第 9 轮 3794da35", "1.081x / 5.324", "第 14 轮 e4a56362", "2.188x / 15.977"),
         ("第 10 轮 e568a8b1", "1.648x / 12.369", "第 15 轮 c60fd055", "2.180x / 15.937"),
+        ("第 16 轮 1d89dcea", "2.099x / 15.375", "第 17 轮 bcda70fe", "3.220x / 20.000"),
     ]
     for i, (la, va, lb, vb) in enumerate(ledger):
-        yy = qy1 - 44 + i * 16
+        yy = qy1 - 60 + i * 14
         svg.text(qx0 + 9, yy, la, 10, MUTED)
         svg.text(qx0 + 108, yy, va, 10, INK, weight="600")
         svg.text(qx0 + 216, yy, lb, 10, MUTED)
         svg.text(qx0 + 330, yy, vb, 10, INK, weight="600")
 
     svg.text(qx0, qy1 + 58,
-             "评分式（由九轮官方成绩反推并验证）：总分 = 4 + 14·ln(构建比)/ln(3.0) + min(2, 2·ln(查询比)/ln(1.5))",
+             "评分式（由十七轮官方成绩反推并验证）：总分 = 4 + 14·ln(构建比)/ln(3.0) + min(2, 2·ln(查询比)/ln(1.5))",
              11, MUTED)
 
     svg.add("</svg>")
