@@ -1147,25 +1147,60 @@ int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
     // k-way merge of the per-slice sorted runs.
     const int64_t merge_t0 = common::ObTimeUtility::current_time();
     if (OB_SUCC(ret)) {
-      typedef std::pair<ObFtsAuxRowRec, int64_t> MergeItem;
+      // The heap holds (slice, row) indices only: a merge step costs one record
+      // copy into the output and ~log2(k) collation compares, with no
+      // std::function indirection.
       ObFtsAuxRowLess less(word_collation_);
-      std::priority_queue<MergeItem, std::vector<MergeItem>,
-                          std::function<bool(const MergeItem &, const MergeItem &)> > heap(
-          [&less](const MergeItem &l, const MergeItem &r) { return less(r.first, l.first); });
-      std::vector<int64_t> cursor(static_cast<size_t>(slice_cnt), 0);
+      typedef std::pair<int64_t, int64_t> HeapSlot;  // <slice, row index>
+      std::vector<HeapSlot> heap;
+      heap.reserve(static_cast<size_t>(slice_cnt));
+      const auto slot_row = [&slices](const HeapSlot &slot) -> const ObFtsAuxRowRec & {
+        return slices[static_cast<size_t>(slot.first)].rows_.at(slot.second);
+      };
+      const auto heap_less = [&less, &slot_row](const HeapSlot &a, const HeapSlot &b) {
+        return less(slot_row(a), slot_row(b));
+      };
       for (int64_t i = 0; i < slice_cnt; ++i) {
         if (slices[static_cast<size_t>(i)].rows_.count() > 0) {
-          heap.push(MergeItem(slices[static_cast<size_t>(i)].rows_.at(0), i));
+          heap.push_back(HeapSlot(i, 0));
         }
       }
+      const auto sift_down = [&heap, &heap_less](int64_t pos) {
+        const int64_t n = static_cast<int64_t>(heap.size());
+        while (true) {
+          int64_t smallest = pos;
+          const int64_t l = 2 * pos + 1;
+          const int64_t r = l + 1;
+          if (l < n && heap_less(heap[static_cast<size_t>(l)], heap[static_cast<size_t>(smallest)])) {
+            smallest = l;
+          }
+          if (r < n && heap_less(heap[static_cast<size_t>(r)], heap[static_cast<size_t>(smallest)])) {
+            smallest = r;
+          }
+          if (smallest == pos) {
+            break;
+          }
+          std::swap(heap[static_cast<size_t>(pos)], heap[static_cast<size_t>(smallest)]);
+          pos = smallest;
+        }
+      };
+      for (int64_t i = static_cast<int64_t>(heap.size()) / 2 - 1; i >= 0; --i) {
+        sift_down(i);
+      }
       while (OB_SUCC(ret) && !heap.empty()) {
-        MergeItem item = heap.top();
-        heap.pop();
-        if (OB_FAIL(rows.push_back(item.first))) {
+        const HeapSlot top = heap[0];
+        if (OB_FAIL(rows.push_back(slot_row(top)))) {
+          break;
+        }
+        const int64_t slice = top.first;
+        if (top.second + 1 < slices[static_cast<size_t>(slice)].rows_.count()) {
+          heap[0].second = top.second + 1;
+          sift_down(0);
         } else {
-          const size_t slice = static_cast<size_t>(item.second);
-          if (++cursor[slice] < slices[slice].rows_.count()) {
-            heap.push(MergeItem(slices[slice].rows_.at(cursor[slice]), item.second));
+          heap[0] = heap.back();
+          heap.pop_back();
+          if (!heap.empty()) {
+            sift_down(0);
           }
         }
       }
