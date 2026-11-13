@@ -42,7 +42,7 @@ public:
   static const uint64_t PIECE_ID_COL_ID = 4;
   static const uint64_t LOB_DATA_COL_ID = 5;
   static const uint64_t LOB_META_INLINE_PIECE_ID = UINT64_MAX - 1;
-  static const uint64_t LOB_OPER_PIECE_DATA_SIZE = 256 * 1024; // 256K
+  static const uint64_t LOB_OPER_PIECE_DATA_SIZE = 1024 * 1024; // 1M
   static const uint64_t SKIP_INVALID_COLUMN = 2;
 public:
   static int transform_from_info_to_row(ObLobMetaInfo &info, blocksstable::ObDatumRow *row, bool with_extra_rowkey);
