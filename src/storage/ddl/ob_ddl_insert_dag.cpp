@@ -20,6 +20,8 @@
 #include "storage/ddl/ob_tablet_slice_row_iterator.h"
 #include "storage/ddl/ob_ddl_macro_block_write_task.h"
 #include "storage/ddl/ob_ddl_direct_load_utils.h"
+#include "storage/ddl/ob_ddl_storage_util.h"
+#include "storage/ddl/ob_tablet_slice_writer.h"
 #include "storage/tx_storage/ob_ls_service.h"
 #include "storage/ddl/ob_ddl_merge_task_v2.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
@@ -31,6 +33,7 @@
 #include "share/schema/ob_multi_version_schema_service.h"
 
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <queue>
 #include <thread>
@@ -622,9 +625,10 @@ namespace
 
 bool fts_aux_direct_enabled()
 {
+  // On by default; FTS_AUX_DIRECT=0 is the kill switch.
   static const bool enabled = []() {
     const char *v = getenv("FTS_AUX_DIRECT");
-    return nullptr != v && '\0' != v[0] && '0' != v[0];
+    return nullptr == v || '\0' == v[0] || '0' != v[0];
   }();
   return enabled;
 }
@@ -642,6 +646,7 @@ struct ObFtsAuxRowRec
 {
   const char *word_;
   int32_t word_len_;
+  const char *doc_id_str_;  // 16-byte ObDocId, read from the data table
   int64_t doc_id_;
   uint64_t word_count_;
   uint64_t doc_length_;
@@ -657,7 +662,8 @@ public:
       aux_schema_(nullptr),
       word_collation_(CS_TYPE_INVALID),
       text_collation_(CS_TYPE_INVALID),
-      snapshot_version_(0)
+      snapshot_version_(0),
+      doc_id_col_id_(OB_INVALID_ID)
   {}
   ~ObFtsAuxProducer() = default;
   int init(const share::schema::ObTableSchema &data_schema,
@@ -705,6 +711,7 @@ private:
   ObCollationType word_collation_;
   ObCollationType text_collation_;
   int64_t snapshot_version_;
+  uint64_t doc_id_col_id_;
   storage::ObFTParseHelper helper_;
   common::ObSEArray<common::ObArenaAllocator *, 8> slice_allocs_;
 };
@@ -789,8 +796,19 @@ int ObFtsAuxProducer::resolve_columns()
         }
       }
     }
+    if (OB_SUCC(ret)) {
+      // The document id must be the exact value the stock build stores, so read
+      // it from the data table's hidden doc-id column.
+      if (OB_SUCCESS != data_schema_->get_docid_col_id(doc_id_col_id_)
+          || OB_INVALID_ID == doc_id_col_id_) {
+        doc_id_col_id_ = OB_INVALID_ID;
+        ret = OB_NOT_SUPPORTED;
+        LOG_INFO("fts direct build needs a table-sequence document id", KPC(data_schema_));
+      }
+    }
     LOG_INFO("fts aux build columns resolved", K(ret), K(word_col_id), K(word_collation_),
-             K(text_col_ids_), K(text_col_pos_), K(aux_schema_->get_parser_name_str()));
+             K(text_col_ids_), K(text_col_pos_), K(doc_id_col_id_),
+             K(aux_schema_->get_parser_name_str()));
   }
   return ret;
 }
@@ -837,6 +855,16 @@ int ObFtsAuxProducer::append_select_columns(common::ObSqlString &sql) const
                                       col->get_column_name_str().ptr()))) {
     }
   }
+  if (OB_SUCC(ret)) {
+    const share::schema::ObColumnSchemaV2 *doc_col =
+        data_schema_->get_column_schema(doc_id_col_id_);
+    if (OB_ISNULL(doc_col)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(sql.append_fmt(", `%.*s`",
+                                      doc_col->get_column_name_str().length(),
+                                      doc_col->get_column_name_str().ptr()))) {
+    }
+  }
   return ret;
 }
 
@@ -870,7 +898,10 @@ struct ObFtsAuxRowLess
   bool operator()(const ObFtsAuxRowRec &l, const ObFtsAuxRowRec &r) const
   {
     const int cmp = ObCharset::strcmpsp(cs_, l.word_, l.word_len_, r.word_, r.word_len_, true);
-    return cmp < 0 ? true : (cmp > 0 ? false : l.doc_id_ < r.doc_id_);
+    if (0 != cmp) {
+      return cmp < 0;
+    }
+    return memcmp(l.doc_id_str_, r.doc_id_str_, OB_DOC_ID_COLUMN_BYTE_LENGTH) < 0;
   }
   ObCollationType cs_;
 };
@@ -1018,6 +1049,20 @@ int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
                     total_len += part.length() + 1;
                   }
                 }
+                ObString doc_id_str;
+                char *doc_id_buf = nullptr;
+                const int64_t doc_id_pos =
+                    text_col_ids_.count() + data_schema_->get_rowkey_info().get_size();
+                if (OB_FAIL(ret)) {
+                } else if (OB_FAIL(result->get_varchar(doc_id_pos, doc_id_str))) {
+                  LOG_WARN("fts aux slice read doc id failed", K(ret));
+                } else if (OB_UNLIKELY(doc_id_str.length() < OB_DOC_ID_COLUMN_BYTE_LENGTH)) {
+                  ret = OB_ERR_UNEXPECTED;
+                } else if (OB_ISNULL(doc_id_buf = static_cast<char *>(ctx->alloc_->alloc(OB_DOC_ID_COLUMN_BYTE_LENGTH)))) {
+                  ret = OB_ALLOCATE_MEMORY_FAILED;
+                } else {
+                  MEMCPY(doc_id_buf, doc_id_str.ptr(), OB_DOC_ID_COLUMN_BYTE_LENGTH);
+                }
                 char *text_buf = nullptr;
                 int64_t pos = 0;
                 if (OB_FAIL(ret)) {
@@ -1051,6 +1096,7 @@ int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
                         ObFtsAuxRowRec rec;
                         rec.word_ = word_buf;
                         rec.word_len_ = word.length();
+                        rec.doc_id_str_ = doc_id_buf;
                         rec.doc_id_ = ctx->offset_ + local_idx;
                         rec.word_count_ = iter->second;
                         rec.doc_length_ = doc_length;
@@ -1211,6 +1257,20 @@ int ObFtsAuxProducer::build_tablet(const common::ObTabletID &tablet_id,
             total_len += part.length() + 1;
           }
         }
+        ObString doc_id_str;
+        char *doc_id_buf = nullptr;
+        const int64_t doc_id_pos =
+            text_col_ids_.count() + data_schema_->get_rowkey_info().get_size();
+        if (OB_FAIL(ret)) {
+        } else if (OB_FAIL(result->get_varchar(doc_id_pos, doc_id_str))) {
+          LOG_WARN("fts aux read doc id failed", K(ret));
+        } else if (OB_UNLIKELY(doc_id_str.length() < OB_DOC_ID_COLUMN_BYTE_LENGTH)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_ISNULL(doc_id_buf = static_cast<char *>(alloc_.alloc(OB_DOC_ID_COLUMN_BYTE_LENGTH)))) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else {
+          MEMCPY(doc_id_buf, doc_id_str.ptr(), OB_DOC_ID_COLUMN_BYTE_LENGTH);
+        }
         char *text_buf = nullptr;
         int64_t pos = 0;
         if (OB_FAIL(ret)) {
@@ -1242,6 +1302,7 @@ int ObFtsAuxProducer::build_tablet(const common::ObTabletID &tablet_id,
                 ObFtsAuxRowRec rec;
                 rec.word_ = word_buf;
                 rec.word_len_ = word.length();
+                rec.doc_id_str_ = doc_id_buf;
                 rec.doc_id_ = row_idx;
                 rec.word_count_ = iter->second;
                 rec.doc_length_ = doc_length;
@@ -1278,6 +1339,122 @@ namespace oceanbase
 {
 namespace storage
 {
+
+
+namespace
+{
+// Rows are pushed straight into the DAG writer in batches; the write macro block
+// operator appends them to the aux tablet's sstables.
+int write_fts_aux_rows(storage::ObDDLIndependentDag *dag,
+                       const common::ObTabletID &tablet_id,
+                       const common::ObIArray<ObFtsAuxRowRec> &rows,
+                       common::ObIAllocator &alloc)
+{
+  int ret = OB_SUCCESS;
+  const int64_t slice_cnt = 6;
+  UNUSED(alloc);
+  if (OB_ISNULL(dag) || rows.empty()) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    ObDDLTabletContext *tablet_context = nullptr;
+    if (OB_FAIL(dag->get_tablet_context(tablet_id, tablet_context))) {
+    } else if (OB_ISNULL(tablet_context)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (FALSE_IT(tablet_context->slice_count_ = slice_cnt)) {
+    } else {
+      struct SliceArg
+      {
+        storage::ObDDLIndependentDag *dag_;
+        common::ObTabletID tablet_id_;
+        const common::ObIArray<ObFtsAuxRowRec> *rows_;
+        int64_t begin_;
+        int64_t end_;
+        int64_t slice_idx_;
+        int64_t slice_cnt_;
+        int64_t written_;
+        int ret_;
+      };
+      std::vector<SliceArg> args(static_cast<size_t>(slice_cnt));
+      std::vector<std::thread> workers;
+      workers.reserve(static_cast<size_t>(slice_cnt));
+      const int64_t per_slice = (rows.count() + slice_cnt - 1) / slice_cnt;
+      for (int64_t s = 0; s < slice_cnt; ++s) {
+        SliceArg &arg = args[static_cast<size_t>(s)];
+        arg.dag_ = dag;
+        arg.tablet_id_ = tablet_id;
+        arg.rows_ = &rows;
+        arg.begin_ = MIN(s * per_slice, rows.count());
+        arg.end_ = MIN((s + 1) * per_slice, rows.count());
+        arg.slice_idx_ = s;
+        arg.slice_cnt_ = slice_cnt;
+        arg.written_ = 0;
+        arg.ret_ = OB_SUCCESS;
+        const int64_t t0 = common::ObTimeUtility::current_time();
+        workers.emplace_back([&arg, t0]() {
+          storage::ObWriteMacroParam param;
+          storage::ObRsSliceWriter *writer = nullptr;
+          common::ObArenaAllocator thread_alloc(lib::ObMemAttr("FtsAuxSliceW"));
+          blocksstable::ObStorageDatum datums[4];
+          common::ObSEArray<ObDatum *, 4> datum_ptrs;
+          int &ret = arg.ret_;
+          if (arg.begin_ >= arg.end_) {
+            // nothing to write for this slice
+          } else if (OB_FAIL(storage::ObDDLStorageUtil::fill_writer_param(
+                       arg.tablet_id_, arg.slice_idx_, arg.dag_, 0 /* max_batch_size */, param))) {
+            LOG_WARN("failed to fill aux slice writer param", K(ret), K(arg.slice_idx_));
+          } else if (OB_ISNULL(writer = OB_NEWx(storage::ObRsSliceWriter, &thread_alloc))) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
+          } else {
+            param.slice_count_ = arg.slice_cnt_;
+            if (OB_FAIL(writer->init(param))) {
+              LOG_WARN("failed to init aux slice writer", K(ret), K(arg.slice_idx_));
+            } else {
+              for (int64_t i = arg.begin_; OB_SUCC(ret) && i < arg.end_; ++i) {
+                const ObFtsAuxRowRec &row = arg.rows_->at(i);
+                datums[0].set_string(row.word_, row.word_len_);
+                datums[1].set_string(row.doc_id_str_, OB_DOC_ID_COLUMN_BYTE_LENGTH);
+                datums[2].set_int(row.word_count_);
+                datums[3].set_int(row.doc_length_);
+                datum_ptrs.reuse();
+                for (int64_t c = 0; OB_SUCC(ret) && c < 4; ++c) {
+                  if (OB_FAIL(datum_ptrs.push_back(&datums[c]))) {
+                  }
+                }
+                if (OB_SUCC(ret) && OB_FAIL(writer->append_current_row(datum_ptrs))) {
+                  LOG_WARN("failed to append aux row", K(ret), K(i), K(arg.slice_idx_));
+                }
+              }
+              if (OB_SUCC(ret)) {
+                arg.written_ = arg.end_ - arg.begin_;
+                if (OB_FAIL(writer->close())) {
+                  LOG_WARN("failed to close aux slice writer", K(ret), K(arg.slice_idx_));
+                }
+              }
+            }
+          }
+          LOG_INFO("fts aux direct step", "step", "slice_writer_done", K(arg.slice_idx_),
+                   "written", arg.written_, "ret", ret,
+                   "cost_us", common::ObTimeUtility::current_time() - t0);
+        });
+      }
+      for (size_t i = 0; i < workers.size(); ++i) {
+        if (workers[i].joinable()) {
+          workers[i].join();
+        }
+      }
+      for (int64_t s = 0; s < slice_cnt; ++s) {
+        if (OB_SUCCESS != args[static_cast<size_t>(s)].ret_) {
+          ret = args[static_cast<size_t>(s)].ret_;
+        }
+      }
+      LOG_INFO("fts aux direct step", "step", "writers_joined", K(ret), K(slice_cnt),
+               "rows", rows.count());
+    }
+  }
+  return ret;
+}
+
+} // namespace
 
 int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
 {
@@ -1377,6 +1554,85 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
         }
       }
     }
+  }
+  bool direct_wrote = false;
+  if (OB_SUCC(ret) && fts_aux_direct_enabled()) {
+    // Build the inverted rows directly and write them through the DDL insert DAG.
+    int64_t slice_cnt = 6;
+    const char *slice_env = getenv("FTS_AUX_SLICES");
+    if (nullptr != slice_env && '\0' != slice_env[0]) {
+      slice_cnt = atoll(slice_env);
+    }
+    ObFtsAuxProducer producer;
+    common::ObSEArray<ObFtsAuxRowRec, 1024> rows;
+    int64_t doc_cnt = 0;
+    int64_t token_cnt = 0;
+    producer.set_data_table_name(common::ObString(qualified_len, qualified_name));
+    if (OB_FAIL(producer.init(*data_schema, *aux_schema, param.snapshot_version_))) {
+      LOG_WARN("fts aux direct producer init failed", K(ret));
+    } else if (OB_FAIL(producer.build_tablet_parallel(slice_cnt, rows, doc_cnt, token_cnt))) {
+    } else {
+      share::ObDDLTaskDataInfo task_data_info;
+      storage::ObDDLInsertDagInitParam dag_param;
+      ObArenaAllocator dag_alloc(lib::ObMemAttr("FtsAuxDag"));
+      ObArenaAllocator batch_alloc(lib::ObMemAttr("FtsAuxBatch"));
+      storage::ObDDLInsertDag *dag = nullptr;
+      if (OB_FAIL(share::ObDDLUtil::get_data_information(*GCTX.sql_proxy_, param.ddl_task_id_,
+                                                         task_data_info))) {
+        LOG_WARN("fts aux direct get data information failed", K(ret));
+      } else {
+        dag_param.direct_load_type_ = storage::ObDDLDirectLoadUtil::ddl_get_direct_load_type();
+        dag_param.ddl_thread_count_ = slice_cnt;
+        dag_param.px_thread_count_ = 1;
+        dag_param.ddl_task_param_.ddl_task_id_ = param.ddl_task_id_;
+        dag_param.ddl_task_param_.execution_id_ = param.execution_id_;
+        dag_param.ddl_task_param_.data_format_version_ = task_data_info.data_format_version_;
+        dag_param.ddl_task_param_.snapshot_version_ = task_data_info.snapshot_version_;
+        dag_param.ddl_task_param_.target_table_id_ = param.aux_table_id_;
+        dag_param.ddl_task_param_.schema_version_ = task_data_info.schema_version_;
+        dag_param.ddl_task_param_.is_offline_index_rebuild_ =
+            task_data_info.is_offline_index_rebuild_;
+      }
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(dag_param.tablet_ids_.assign(tablet_ids))) {
+      } else if (OB_FAIL(share::ObDagScheduler::alloc_dag(dag_alloc, false, dag))) {
+      } else if (OB_ISNULL(dag)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(dag->init(&dag_param, nullptr, true /* add trace id */))) {
+      } else {
+        const int64_t t0 = common::ObTimeUtility::current_time();
+        int tmp_ret = OB_SUCCESS;
+        for (int64_t i = 0; OB_SUCC(ret) && i < tablet_ids.count(); ++i) {
+          direct_wrote = true;
+          if (OB_FAIL(write_fts_aux_rows(dag, tablet_ids.at(i), rows, batch_alloc))) {
+            LOG_WARN("fts aux direct write failed", K(ret), "tablet_id", tablet_ids.at(i));
+          }
+        }
+        if (OB_SUCC(ret)) {
+          dag->set_px_finished();
+          // Drive the remaining merge/checksum tasks of the insert DAG.
+          tmp_ret = dag->process();
+          if (OB_SUCCESS != tmp_ret && OB_ITER_END != tmp_ret) {
+            ret = tmp_ret;
+            LOG_WARN("fts aux direct dag process failed", K(ret));
+          }
+        }
+        if (OB_SUCC(ret)) {
+          ret = dag->get_dag_ret();
+          if (OB_SUCC(ret)) {
+            LOG_INFO("fts aux direct build done", K(param), K(doc_cnt), K(token_cnt),
+                     K(rows.count()), "cost_us", common::ObTimeUtility::current_time() - t0);
+          } else {
+            LOG_WARN("fts aux direct dag failed", K(ret), K(param));
+          }
+        }
+      }
+    }
+  }
+  if (OB_FAIL(ret) && fts_aux_direct_enabled() && !direct_wrote) {
+    // Nothing has been written yet: let the caller use the stock inner SQL.
+    LOG_INFO("fts aux direct build unavailable, falling back", K(ret), K(param));
+    ret = OB_NOT_SUPPORTED;
   }
   if (OB_SUCC(ret)) {
     LOG_INFO("fts aux scan build finished", K(param),
