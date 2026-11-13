@@ -181,6 +181,29 @@ The no-GPU DDL contract remains covered by
 - [`build-performance.svg`](build-performance.svg): the chart embedded in the
   report. Regenerate it with
   `docs/gpu-vector-index-hipvs-cuvs/validation/make_build_chart.py`.
+- [`path-to-20-points.zh-CN.md`](path-to-20-points.zh-CN.md): the scoring
+  analysis that turns the contest score into a required build speedup, the
+  measured CAGRA build-cost / recall frontier at 250k, and the ranked plan for
+  the remaining build-window optimizations.
+- [`path-to-20-points.svg`](path-to-20-points.svg): the build-time / recall
+  Pareto chart and the score map from that analysis. Regenerate it with
+  `docs/gpu-vector-index-hipvs-cuvs/validation/make_pareto_chart.py`.
+
+### CAGRA build-parameter sweep
+
+`validation/sweep_cagra.c` talks to the cuVS C API directly, so every CAGRA
+build and search parameter can be varied independently of the database. It
+measures the build cost and the exact top-100 recall for a grid of
+`(itopk_size, search_width, algo)` combinations, with the ground truth computed
+on the CPU and cross-checked against the official `gt_100x10.i32`.
+
+```bash
+docs/gpu-vector-index-hipvs-cuvs/validation/run_cagra_sweep.sh
+docs/gpu-vector-index-hipvs-cuvs/validation/run_cagra_sweep_repeat.sh
+python3 docs/gpu-vector-index-hipvs-cuvs/validation/analyze_cagra_sweep.py
+```
+
+The raw logs of the recorded run are kept in `validation/evidence/`.
 
 ## Current limitations
 
