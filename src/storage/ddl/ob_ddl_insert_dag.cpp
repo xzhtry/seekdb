@@ -665,6 +665,14 @@ public:
                    int64_t &doc_cnt,
                    int64_t &token_cnt);
   ObCollationType get_word_collation() const { return word_collation_; }
+  void set_data_table_name(const common::ObString &name)
+  {
+    MEMSET(table_name_buf_, 0, sizeof(table_name_buf_));
+    if (!name.empty() && name.length() < static_cast<int32_t>(sizeof(table_name_buf_))) {
+      MEMCPY(table_name_buf_, name.ptr(), name.length());
+      data_table_name_.assign_ptr(table_name_buf_, name.length());
+    }
+  }
 
 private:
   int resolve_columns();
@@ -676,6 +684,8 @@ private:
   const share::schema::ObTableSchema *data_schema_;
   const share::schema::ObTableSchema *aux_schema_;
   common::ObSEArray<uint64_t, 4> text_col_ids_;
+  char table_name_buf_[OB_MAX_USER_TABLE_NAME_LENGTH_MYSQL + 1];
+  common::ObString data_table_name_;
   common::ObSEArray<int64_t, 4> text_col_pos_; // position of each indexed column in the scan output
   ObCollationType word_collation_;
   ObCollationType text_collation_;
@@ -792,134 +802,123 @@ int ObFtsAuxProducer::build_tablet(const common::ObTabletID &tablet_id,
                                    int64_t &token_cnt)
 {
   int ret = OB_SUCCESS;
-  LOG_INFO("fts aux producer build tablet enter", K(tablet_id));
   doc_cnt = 0;
   token_cnt = 0;
-  common::ObSEArray<share::schema::ObColDesc, 16> col_ids;
-  common::ObSEArray<int32_t, 16> projector;
-  storage::ObLocalScan local_scan;
+  common::ObSqlString sql;
   storage::ObFTWordMap word_map;
-  char *text_buf = nullptr;
-  int64_t text_buf_cap = 0;
-  const char *step = "begin";
+  ObArenaAllocator text_alloc(lib::ObMemAttr("FtsAuxText"));
   if (OB_UNLIKELY(!is_inited_)) {
     ret = OB_NOT_INIT;
-  } else if (FALSE_IT(step = "word_map")) {
   } else if (OB_FAIL(word_map.create(256, common::ObMemAttr("FtsAuxWordMap")))) {
-  } else if (FALSE_IT(step = "get_column_ids")) {
-  } else if (OB_FAIL(data_schema_->get_column_ids(col_ids))) {
-  } else {
-    for (int64_t i = 0; OB_SUCC(ret) && i < col_ids.count(); ++i) {
-      if (OB_FAIL(projector.push_back(static_cast<int32_t>(i)))) {
-      }
-    }
-    if (OB_FAIL(ret)) {
-    } else if (FALSE_IT(step = "local_scan_init")) {
-    } else if (OB_FAIL(local_scan.init(col_ids, col_ids, projector, *data_schema_,
-                                       snapshot_version_, *aux_schema_, false /*unique_index_checking*/))) {
-    } else if (FALSE_IT(step = "get_read_tables")) {
-    } else {
-      storage::ObLS *ls = nullptr;
-      ObTabletTableIterator table_iter;
-      const bool allow_not_ready = true;
-      if (OB_FAIL(share::server_service<storage::ObLSService>()->get_ls(ls))) {
-      } else if (OB_ISNULL(ls)) {
-        ret = OB_ERR_UNEXPECTED;
-      } else if (OB_FAIL(ls->get_tablet_svr()->get_read_tables(
-                     tablet_id, ObTabletCommon::DEFAULT_GET_TABLET_DURATION_US,
-                     snapshot_version_, snapshot_version_, table_iter, allow_not_ready))) {
-      } else {
-        blocksstable::ObDatumRange whole_range;
-        whole_range.set_whole_range();
-        common::ObQueryFlag query_flag(common::ObQueryFlag::Forward, false, true, false, false, false, false);
-        query_flag.disable_cache();
-        query_flag.skip_read_lob_ = 1;
-        if (FALSE_IT(step = "table_scan")) {
-        } else if (OB_FAIL(local_scan.table_scan(*data_schema_, tablet_id, table_iter, query_flag, whole_range))) {
-        } else {
-          LOG_INFO("fts aux producer table scan ready", K(tablet_id));
-        }
-      }
+  } else if (OB_FAIL(sql.append("SELECT "))) {
+  }
+  // Indexed columns, then the primary key columns (the scan order defines the
+  // document id, so it must be explicit).
+  for (int64_t i = 0; OB_SUCC(ret) && i < text_col_ids_.count(); ++i) {
+    const share::schema::ObColumnSchemaV2 *col = data_schema_->get_column_schema(text_col_ids_.at(i));
+    if (OB_ISNULL(col)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(sql.append_fmt("%s`%.*s`", 0 == i ? "" : ", ",
+                                      col->get_column_name_str().length(),
+                                      col->get_column_name_str().ptr()))) {
     }
   }
-  LOG_INFO("fts aux producer setup done", K(ret), "step", step);
-  if (OB_SUCC(ret)) {
-    const blocksstable::ObDatumRow *row = nullptr;
-    int64_t row_idx = 0;
-    step = "iterate_rows";
-    while (OB_SUCC(local_scan.get_next_row(row))) {
-      if (OB_ISNULL(row)) {
-        ret = OB_ERR_UNEXPECTED;
-      } else if (OB_UNLIKELY(row->get_column_count() < col_ids.count())) {
-        ret = OB_ERR_UNEXPECTED;
-        LOG_WARN("fts aux scan row column count mismatch", K(ret), K(row->get_column_count()), K(col_ids.count()));
-      } else {
-        // Join the indexed columns with a single space, exactly like WORD_SEGMENT().
-        int64_t total_len = text_col_pos_.count() - 1;
-        for (int64_t i = 0; OB_SUCC(ret) && i < text_col_pos_.count(); ++i) {
-          total_len += row->storage_datums_[text_col_pos_.at(i)].get_string().length();
-        }
-        if (total_len > text_buf_cap) {
-          char *new_buf = static_cast<char *>(alloc_.alloc(total_len));
-          if (OB_ISNULL(new_buf)) {
-            ret = OB_ALLOCATE_MEMORY_FAILED;
-          } else {
-            text_buf = new_buf;
-            text_buf_cap = total_len;
-          }
-        }
-        int64_t pos = 0;
-        for (int64_t i = 0; OB_SUCC(ret) && i < text_col_pos_.count(); ++i) {
-          const common::ObString str = row->storage_datums_[text_col_pos_.at(i)].get_string();
-          if (0 != i) {
-            text_buf[pos++] = ' ';
-          }
-          if (!str.empty()) {
-            MEMCPY(text_buf + pos, str.ptr(), str.length());
-            pos += str.length();
-          }
-        }
-        int64_t doc_length = 0;
-        if (OB_FAIL(ret)) {
-        } else if (OB_FAIL(tokenize_text(common::ObString(static_cast<int32_t>(pos), text_buf),
-                                         word_map, doc_length))) {
-        } else {
-          for (storage::ObFTWordMap::const_iterator iter = word_map.begin();
-               OB_SUCC(ret) && iter != word_map.end(); ++iter) {
-            const common::ObString word = iter->first.get_word().get_string();
-            char *word_buf = nullptr;
-            if (word.empty()) {
-            } else if (OB_ISNULL(word_buf = static_cast<char *>(alloc_.alloc(word.length())))) {
-              ret = OB_ALLOCATE_MEMORY_FAILED;
-            } else {
-              MEMCPY(word_buf, word.ptr(), word.length());
-              ObFtsAuxRowRec rec;
-              rec.word_ = word_buf;
-              rec.word_len_ = word.length();
-              rec.doc_id_ = row_idx;
-              rec.word_count_ = iter->second;
-              rec.doc_length_ = doc_length;
-              if (OB_FAIL(rows.push_back(rec))) {
-              }
-            }
-          }
-        }
-        if (OB_SUCC(ret)) {
-          ++row_idx;
-          ++doc_cnt;
-          token_cnt += word_map.size();
-          if (0 == (row_idx % 1000)) {
-            LOG_INFO("fts aux producer progress", K(row_idx), K(rows.count()));
-          }
-        }
-      }
-    }
-    if (OB_ITER_END == ret) {
-      ret = OB_SUCCESS;
+  const common::ObRowkeyInfo &rowkey_info = data_schema_->get_rowkey_info();
+  for (int64_t i = 0; OB_SUCC(ret) && i < rowkey_info.get_size(); ++i) {
+    uint64_t column_id = OB_INVALID_ID;
+    const share::schema::ObColumnSchemaV2 *col = nullptr;
+    if (OB_FAIL(rowkey_info.get_column_id(i, column_id))) {
+    } else if (OB_ISNULL(col = data_schema_->get_column_schema(column_id))) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(sql.append_fmt("%s`%.*s`", 0 == text_col_ids_.count() && 0 == i ? "" : ", ",
+                                      col->get_column_name_str().length(),
+                                      col->get_column_name_str().ptr()))) {
     }
   }
   if (OB_FAIL(ret)) {
-    LOG_WARN("fts aux producer failed", K(ret), "step", step, K(doc_cnt), K(token_cnt));
+  } else if (OB_FAIL(sql.append_fmt(" FROM %s AS OF SNAPSHOT %ld ORDER BY %ld",
+                                    data_table_name_.ptr(), snapshot_version_,
+                                    text_col_ids_.count() + 1))) {
+  } else {
+    // ORDER BY the first primary key column keeps the document order stable;
+    // additional key columns only matter for composite keys, which the caller
+    // rejects.
+    common::ObMySQLProxy::MySQLResult res;
+    common::sqlclient::ObMySQLResult *result = nullptr;
+    if (OB_ISNULL(GCTX.ddl_sql_proxy_)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(GCTX.ddl_sql_proxy_->read(res, sql.ptr()))) {
+      LOG_WARN("fts aux read source failed", K(ret), K(sql));
+    } else if (OB_ISNULL(result = res.get_result())) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      int64_t row_idx = 0;
+      while (OB_SUCC(result->next())) {
+        int64_t total_len = -1;
+        common::ObSEArray<common::ObString, 4> parts;
+        ObString part;
+        for (int64_t i = 0; OB_SUCC(ret) && i < text_col_ids_.count(); ++i) {
+          if (OB_FAIL(result->get_varchar(i, part))) {
+            LOG_WARN("fts aux read column failed", K(ret), K(i));
+          } else if (OB_FAIL(parts.push_back(part))) {
+          } else {
+            total_len += part.length() + 1;
+          }
+        }
+        char *text_buf = nullptr;
+        int64_t pos = 0;
+        if (OB_FAIL(ret)) {
+        } else if (OB_ISNULL(text_buf = static_cast<char *>(text_alloc.alloc(total_len + 1)))) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else {
+          for (int64_t i = 0; OB_SUCC(ret) && i < parts.count(); ++i) {
+            if (0 != i) {
+              text_buf[pos++] = ' ';
+            }
+            if (!parts.at(i).empty()) {
+              MEMCPY(text_buf + pos, parts.at(i).ptr(), parts.at(i).length());
+              pos += parts.at(i).length();
+            }
+          }
+          int64_t doc_length = 0;
+          if (OB_FAIL(tokenize_text(common::ObString(static_cast<int32_t>(pos), text_buf),
+                                    word_map, doc_length))) {
+          } else {
+            for (storage::ObFTWordMap::const_iterator iter = word_map.begin();
+                 OB_SUCC(ret) && iter != word_map.end(); ++iter) {
+              const common::ObString word = iter->first.get_word().get_string();
+              char *word_buf = nullptr;
+              if (word.empty()) {
+              } else if (OB_ISNULL(word_buf = static_cast<char *>(alloc_.alloc(word.length())))) {
+                ret = OB_ALLOCATE_MEMORY_FAILED;
+              } else {
+                MEMCPY(word_buf, word.ptr(), word.length());
+                ObFtsAuxRowRec rec;
+                rec.word_ = word_buf;
+                rec.word_len_ = word.length();
+                rec.doc_id_ = row_idx;
+                rec.word_count_ = iter->second;
+                rec.doc_length_ = doc_length;
+                if (OB_FAIL(rows.push_back(rec))) {
+                }
+              }
+            }
+          }
+          if (OB_SUCC(ret)) {
+            ++row_idx;
+            ++doc_cnt;
+            token_cnt += word_map.size();
+          }
+        }
+      }
+      if (OB_ITER_END == ret) {
+        ret = OB_SUCCESS;
+      }
+      LOG_INFO("fts aux read source done", K(ret), K(row_idx), K(rows.count()));
+    }
+  }
+  if (OB_FAIL(ret)) {
+    LOG_WARN("fts aux producer failed", K(ret), K(tablet_id), K(doc_cnt), K(token_cnt));
   }
   if (word_map.created()) {
     word_map.destroy();
@@ -941,6 +940,8 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
   const share::schema::ObTableSchema *aux_schema = nullptr;
   const share::schema::ObTableSchema *data_schema = nullptr;
   common::ObSEArray<common::ObTabletID, 4> tablet_ids;
+  char qualified_name[2 * OB_MAX_USER_TABLE_NAME_LENGTH_MYSQL + 8] = {0};
+  int32_t qualified_len = 0;
   int64_t start_time = 0;
   if (!fts_aux_direct_enabled() && !fts_aux_dryrun_enabled()) {
     // Stock inner-SQL build: do not touch the schema or the tablets at all.
@@ -960,7 +961,29 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
     ret = OB_TABLE_NOT_EXIST;
     LOG_WARN("fts data table not found", K(ret), K(param));
   } else if (OB_FAIL(ObDDLUtil::get_tablets(*GCTX.schema_service_, param.aux_table_id_, tablet_ids))) {
+  } else if (OB_UNLIKELY(tablet_ids.count() != 1)) {
+    // The document id is the scan-order row index, which only lines up with the
+    // other aux children for an unpartitioned source table.
+    ret = OB_NOT_SUPPORTED;
+    LOG_INFO("fts aux direct build skipped for partitioned source", K(param), K(tablet_ids.count()));
   } else {
+    const share::schema::ObDatabaseSchema *db_schema = nullptr;
+    common::ObString db_name;
+    int64_t qualified_pos = 0;
+    if (OB_FAIL(schema_guard.get_database_schema(data_schema->get_database_id(), db_schema))) {
+    } else if (OB_ISNULL(db_schema)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (FALSE_IT(db_name = db_schema->get_database_name_str())) {
+    } else if (OB_FAIL(databuff_printf(qualified_name, sizeof(qualified_name), qualified_pos,
+                                       "`%.*s`.`%.*s`",
+                                       db_name.length(), db_name.ptr(),
+                                       data_schema->get_table_name_str().length(),
+                                       data_schema->get_table_name_str().ptr()))) {
+    } else {
+      qualified_len = static_cast<int32_t>(qualified_pos);
+    }
+  }
+  if (OB_SUCC(ret)) {
     start_time = common::ObTimeUtility::current_time();
     LOG_INFO("fts aux scan build begin", K(param), K(tablet_ids.count()),
              "direct_build_enabled", fts_aux_direct_enabled(), "dryrun", fts_aux_dryrun_enabled());
@@ -968,8 +991,12 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
   if (OB_SUCC(ret) && fts_aux_dryrun_enabled()) {
     ObFtsAuxProducer producer;
     LOG_INFO("fts aux producer init start");
-    if (OB_FAIL(producer.init(*data_schema, *aux_schema, param.snapshot_version_))) {
-      LOG_WARN("fts aux producer init failed", K(ret));
+    producer.set_data_table_name(common::ObString(qualified_len, qualified_name));
+    const int init_ret = producer.init(*data_schema, *aux_schema, param.snapshot_version_);
+    if (OB_SUCCESS != init_ret) {
+      // A dry run only measures the producer; it must never fail the DDL.
+      LOG_WARN("fts aux producer init failed (dry run)", K(init_ret));
+      ret = OB_SUCCESS;
     } else {
       LOG_INFO("fts aux producer init done");
       for (int64_t i = 0; OB_SUCC(ret) && i < tablet_ids.count(); ++i) {
@@ -977,7 +1004,11 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
         int64_t doc_cnt = 0;
         int64_t token_cnt = 0;
         int64_t t0 = common::ObTimeUtility::current_time();
-        if (OB_FAIL(producer.build_tablet(tablet_ids.at(i), rows, doc_cnt, token_cnt))) {
+        const int build_ret = producer.build_tablet(tablet_ids.at(i), rows, doc_cnt, token_cnt);
+        if (OB_SUCCESS != build_ret) {
+          LOG_WARN("fts aux producer build tablet failed (dry run)", K(build_ret),
+                   "tablet_id", tablet_ids.at(i));
+          ret = OB_SUCCESS;
         } else {
           int64_t t1 = common::ObTimeUtility::current_time();
           const ObCollationType cs = producer.get_word_collation();
