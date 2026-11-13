@@ -2386,11 +2386,14 @@ void unmark_cuvs_index(void *key) {
 // scratch, from the real vectors, inside the DDL.
 void warmup_gpu_backend() {
 #ifdef OB_BUILD_CUVS
+  // The log macros take the error code from a variable called "ret", so one has
+  // to be in scope even when the call itself cannot fail.
+  int ret = OB_SUCCESS;
   const long ms = seekdb_cuvs_warmup();
   if (ms >= 0) {
-    LOG_INFO("[OBVSAG][cuVS] GPU backend warmed up", "ms", ms);
+    LOG_INFO("[OBVSAG][cuVS] GPU backend warmed up", K(ms));
   } else {
-    LOG_WARN("[OBVSAG][cuVS] GPU backend warm-up skipped or failed");
+    LOG_WARN("[OBVSAG][cuVS] GPU backend warm-up skipped or failed", K(ms));
   }
 #endif
 }
