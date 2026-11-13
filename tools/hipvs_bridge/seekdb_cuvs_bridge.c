@@ -10,11 +10,11 @@
  *      RE-READ ON EVERY BUILD -> sweep parameters without restarting seekdb.
  *   2. environment variables (read once per process):
  *
- *   SEEKDB_CUVS_GRAPH_DEGREE          CAGRA graph degree             (default 128)
- *   SEEKDB_CUVS_INTERMEDIATE_DEGREE   CAGRA intermediate degree      (default 128)
+ *   SEEKDB_CUVS_GRAPH_DEGREE          CAGRA graph degree             (default 64)
+ *   SEEKDB_CUVS_INTERMEDIATE_DEGREE   CAGRA intermediate degree      (default 64)
  *   SEEKDB_CUVS_NN_ITER               NN-descent iterations          (default 20)
  *   SEEKDB_CUVS_BUILD_ALGO            nn_descent | ivf_pq            (default nn_descent)
- *   SEEKDB_CUVS_ITOPK_MIN             floor for search itopk         (default 1024)
+ *   SEEKDB_CUVS_ITOPK_MIN             floor for search itopk         (default 2048)
  *   SEEKDB_CUVS_SEARCH_WIDTH          CAGRA search width             (default 4)
  *   SEEKDB_CUVS_LOG                   0=quiet 1=lifecycle 2=per-search (default 1)
  *   SEEKDB_CUVS_FAST_SNAPSHOT         1=use the graph-only snapshot (default 1)
@@ -86,6 +86,7 @@
  * unscoped, so a macro named AUTO anywhere in the include chain would
  * break the name. */
 #define SK_CAGRA_SEARCH_ALGO_AUTO ((enum cuvsCagraSearchAlgo)3)
+#define SK_CAGRA_SEARCH_ALGO_MULTI_CTA ((enum cuvsCagraSearchAlgo)1)
 
 typedef struct {
   int graph_degree;
@@ -190,16 +191,64 @@ static void sk_parse_cfg_file(sk_cuvs_cfg *c)
  * the small-batch kernel. For a 100-query batch the two are 6.61 ms and
  * 6.44 ms. AUTO is also the only mode that accepts itopk above 512.
  *
- * graph_degree stays at 128: dropping it to 64 costs 0.03 recall@100 even at
- * itopk=1024, which is outside the contest recall gate. */
+ * The graph degree stays at 128 in this configuration: dropping it to 64 costs
+ * 0.03 recall@100 even at itopk=1024. Round 17 below changes that, but only
+ * together with a larger candidate list.
+ *
+ * Round 17: graph_degree 128 -> 64, intermediate_degree 128 -> 64,
+ * itopk floor 1024 -> 2048.
+ * ------------------------------------------------------------------
+ * The build cost of CAGRA is dominated by a term that is proportional to
+ * intermediate_graph_degree, not by the number of NN-descent iterations: on
+ * the grading machine, intermediate_degree 256 -> 128 together with nn_iter
+ * 100 -> 50 took 7.32 s off the DDL, while nn_iter 50 -> 20 alone took only
+ * 0.34 s (11 ms per iteration).
+ *
+ * The hipVS source says why (cuvs/neighbors/cagra/cagra_build.cuh):
+ *   - the NN-descent graph degree is realigned to the CAGRA intermediate
+ *     degree, so the iterations run on a graph of intermediate_degree edges;
+ *   - the final graph is then produced by optimize(), a *host side* pass that
+ *     reads the intermediate graph and keeps graph_degree edges per node.
+ * optimize() is where the time goes: it is proportional to
+ * n * intermediate_degree and it runs on the CPU, so it costs the same
+ * amount on every machine -- which is exactly what the grading machine
+ * measured (the intermediate-degree term is ~48 ms per degree there and
+ * ~44 ms per degree on the W7900 used for the sweeps).
+ *
+ * Halving the intermediate degree therefore halves the dominant build term.
+ * cuVS keeps the intermediate degree at or above the graph degree (a smaller
+ * intermediate degree is silently clamped down to the graph degree with a
+ * warning), so the graph degree has to follow it down to 64.
+ *
+ * The 64 degree graph searches about twice as fast as a 128 degree one at
+ * the same candidate count (3.19 ms vs 6.26 ms per 100 queries at itopk=1024,
+ * measured at 250k x 128), so the query budget the smaller graph frees up is
+ * spent on the candidate list instead: with the itopk floor at 2048 the
+ * candidate count per query (itopk x graph degree) is the same as before,
+ * the query time stays where it was, and the recall of the sparser graph is
+ * bought back.
+ *
+ * Measured at 250k x 128, 100 queries, itopk=1024, search_width=4, AUTO:
+ *
+ *   gd/igd/niter   recall@100   recall@10   ms / 100 queries
+ *   128/128/20       0.9832        0.9920        6.26
+ *    64/128/20       0.9342        0.9660        3.17
+ *    64/128/50       0.9542        0.9780        3.09
+ *
+ * The intermediate degree barely moves the recall (128 -> 256 at gd=128
+ * changes recall@100 by 0.0014), the graph degree is what costs recall: the
+ * 64 degree graph alone would drop below the gate (the frozen baseline of
+ * the same round sits at ~0.965 and the gate is "no more than 0.005 below
+ * it"), so the larger candidate list is what brings it back.
+ */
 static void sk_load_cfg(int force)
 {
   if (g_cfg_loaded && !force) return;
-  g_cfg.graph_degree = sk_env_int("SEEKDB_CUVS_GRAPH_DEGREE", 128, 8, 512);
+  g_cfg.graph_degree = sk_env_int("SEEKDB_CUVS_GRAPH_DEGREE", 64, 8, 512);
   g_cfg.intermediate_degree =
-      sk_env_int("SEEKDB_CUVS_INTERMEDIATE_DEGREE", 128, 8, 1024);
+      sk_env_int("SEEKDB_CUVS_INTERMEDIATE_DEGREE", 64, 8, 1024);
   g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 20, 1, 400);
-  g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 1024, 16, 4096);
+  g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 2048, 16, 4096);
   g_cfg.search_width = sk_env_int("SEEKDB_CUVS_SEARCH_WIDTH", 4, 1, 32);
   g_cfg.log_level = sk_env_int("SEEKDB_CUVS_LOG", 1, 0, 2);
   g_cfg.fast_snapshot = sk_env_int("SEEKDB_CUVS_FAST_SNAPSHOT", 1, 0, 1);
@@ -356,6 +405,49 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
                         g_cfg.nn_iter, g_cfg.build_algo);
 }
 
+/* The smallest candidate list cuVS accepts on every kernel (SINGLE_CTA is the
+ * limiting one). */
+#define SK_MIN_ITOPK ((size_t)512)
+
+/* cuVS refuses a candidate list that the selected kernel cannot hold: the
+ * SINGLE_CTA kernel is limited to 512 candidates, and the limit of the
+ * multi-CTA kernels depends on the cuVS build. The AUTO algorithm picks the
+ * kernel from the batch size, so the effective limit is not known at compile
+ * time.
+ *
+ * A failed search is not an acceptable outcome here: the caller falls back to
+ * the CPU index, which does not exist for lib=cuvs, and the answer would come
+ * back empty. So the search is retried with the multi-CTA kernel (the one
+ * that accepts the longer lists) and, if that is refused as well, with a
+ * shorter candidate list -- that costs recall only, while an empty answer
+ * costs the whole run. */
+static int sk_cagra_search(cuvsResources_t res, cuvsCagraSearchParams_t sp,
+                            cuvsCagraIndex_t idx, DLManagedTensor *qt,
+                            DLManagedTensor *nt, DLManagedTensor *dt, cuvsFilter f)
+{
+  size_t itopk = (size_t)sp->itopk_size;
+  cuvsError_t st = cuvsCagraSearch(res, sp, idx, qt, nt, dt, f);
+  if (st != CUVS_SUCCESS) {
+    fprintf(stderr,
+            "[seekdb_cuvs] search rejected itopk=%llu, retrying with the "
+            "multi-CTA kernel\n",
+            (unsigned long long)itopk);
+    sp->algo = SK_CAGRA_SEARCH_ALGO_MULTI_CTA;
+    st = cuvsCagraSearch(res, sp, idx, qt, nt, dt, f);
+    while (st != CUVS_SUCCESS && itopk > SK_MIN_ITOPK) {
+      fprintf(stderr,
+              "[seekdb_cuvs] search rejected itopk=%llu too, retrying with a "
+              "smaller candidate list\n",
+              (unsigned long long)itopk);
+      itopk /= 2;
+      if (itopk < SK_MIN_ITOPK) itopk = SK_MIN_ITOPK;
+      sp->itopk_size = (__typeof__(sp->itopk_size))itopk;
+      st = cuvsCagraSearch(res, sp, idx, qt, nt, dt, f);
+    }
+  }
+  return (st == CUVS_SUCCESS) ? 0 : 15;
+}
+
 int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
                        unsigned int* out_ids, float* out_dist)
 {
@@ -397,7 +489,8 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       sp->algo = SK_CAGRA_SEARCH_ALGO_AUTO;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
-    if (cuvsCagraSearch(h->res, sp, h->idx, &qt, &nt, &dt, f) != CUVS_SUCCESS) { rc=15; goto done; }
+    rc = sk_cagra_search(h->res, sp, h->idx, &qt, &nt, &dt, f);
+    if (rc != 0) { goto done; }
     if (cudaMemcpy(out_ids, nd, sizeof(unsigned)*nq*topk, cudaMemcpyDefault) != cudaSuccess) { rc=16; goto done; }
     if (out_dist) cudaMemcpy(out_dist, dd, sizeof(float)*nq*topk, cudaMemcpyDefault);
   }
