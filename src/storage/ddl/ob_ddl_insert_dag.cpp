@@ -1807,7 +1807,7 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
         int64_t doc_cnt = 0;
         int64_t token_cnt = 0;
         int64_t t0 = common::ObTimeUtility::current_time();
-        int64_t slice_cnt = 6;
+        int64_t slice_cnt = 12;
         const char *slice_env = getenv("FTS_AUX_SLICES");
         if (nullptr != slice_env && '\0' != slice_env[0]) {
           slice_cnt = atoll(slice_env);
@@ -1838,7 +1838,7 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
   bool direct_wrote = false;
   if (OB_SUCC(ret) && fts_aux_direct_enabled()) {
     // Build the inverted rows directly and write them through the DDL insert DAG.
-    int64_t slice_cnt = 6;
+    int64_t slice_cnt = 12;
     const char *slice_env = getenv("FTS_AUX_SLICES");
     if (nullptr != slice_env && '\0' != slice_env[0]) {
       slice_cnt = atoll(slice_env);
