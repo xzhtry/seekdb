@@ -31,6 +31,9 @@
 #include "share/schema/ob_multi_version_schema_service.h"
 
 #include <algorithm>
+#include <functional>
+#include <queue>
+#include <thread>
 #include <vector>
 
 #define USING_LOG_PREFIX STORAGE
@@ -664,7 +667,17 @@ public:
                    common::ObIArray<ObFtsAuxRowRec> &rows,
                    int64_t &doc_cnt,
                    int64_t &token_cnt);
+  int build_tablet_parallel(const int64_t slice_cnt,
+                            common::ObIArray<ObFtsAuxRowRec> &rows,
+                            int64_t &doc_cnt,
+                            int64_t &token_cnt);
   ObCollationType get_word_collation() const { return word_collation_; }
+  ObCollationType get_text_collation() const { return text_collation_; }
+  const common::ObIArray<uint64_t> &get_text_col_ids() const { return text_col_ids_; }
+  const common::ObString &get_table_name() const { return data_table_name_; }
+  const common::ObString &get_parser_name() const { return aux_schema_->get_parser_name_str(); }
+  const common::ObString &get_parser_props() const { return aux_schema_->get_parser_property_str(); }
+  int64_t get_snapshot_version() const { return snapshot_version_; }
   void set_data_table_name(const common::ObString &name)
   {
     MEMSET(table_name_buf_, 0, sizeof(table_name_buf_));
@@ -677,6 +690,8 @@ public:
 private:
   int resolve_columns();
   int tokenize_text(const common::ObString &text, storage::ObFTWordMap &word_map, int64_t &doc_length);
+  int append_select_columns(common::ObSqlString &sql) const;
+  int read_key_bounds(int64_t &min_key, int64_t &max_key);
 
 private:
   common::ObArenaAllocator alloc_;
@@ -691,6 +706,7 @@ private:
   ObCollationType text_collation_;
   int64_t snapshot_version_;
   storage::ObFTParseHelper helper_;
+  common::ObSEArray<common::ObArenaAllocator *, 8> slice_allocs_;
 };
 
 int ObFtsAuxProducer::init(const share::schema::ObTableSchema &data_schema,
@@ -796,6 +812,336 @@ int ObFtsAuxProducer::tokenize_text(const common::ObString &text,
   return ret;
 }
 
+
+int ObFtsAuxProducer::append_select_columns(common::ObSqlString &sql) const
+{
+  int ret = OB_SUCCESS;
+  for (int64_t i = 0; OB_SUCC(ret) && i < text_col_ids_.count(); ++i) {
+    const share::schema::ObColumnSchemaV2 *col = data_schema_->get_column_schema(text_col_ids_.at(i));
+    if (OB_ISNULL(col)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(sql.append_fmt("%s`%.*s`", 0 == i ? "" : ", ",
+                                      col->get_column_name_str().length(),
+                                      col->get_column_name_str().ptr()))) {
+    }
+  }
+  const common::ObRowkeyInfo &rowkey_info = data_schema_->get_rowkey_info();
+  for (int64_t i = 0; OB_SUCC(ret) && i < rowkey_info.get_size(); ++i) {
+    uint64_t column_id = OB_INVALID_ID;
+    const share::schema::ObColumnSchemaV2 *col = nullptr;
+    if (OB_FAIL(rowkey_info.get_column_id(i, column_id))) {
+    } else if (OB_ISNULL(col = data_schema_->get_column_schema(column_id))) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(sql.append_fmt("%s`%.*s`", 0 == text_col_ids_.count() && 0 == i ? "" : ", ",
+                                      col->get_column_name_str().length(),
+                                      col->get_column_name_str().ptr()))) {
+    }
+  }
+  return ret;
+}
+
+namespace
+{
+struct ObFtsAuxSliceCtx;
+typedef int (*ObFtsAuxSliceFn)(ObFtsAuxSliceCtx &ctx);
+
+struct ObFtsAuxSliceCtx
+{
+  ObFtsAuxSliceCtx()
+    : fn_(nullptr), lo_(0), hi_(0), offset_(0), alloc_(nullptr),
+      doc_cnt_(0), token_cnt_(0), ret_(OB_SUCCESS), scan_us_(0), sort_us_(0)
+  {}
+  ObFtsAuxSliceFn fn_;
+  int64_t lo_;
+  int64_t hi_;
+  int64_t offset_;
+  common::ObArenaAllocator *alloc_;
+  common::ObSEArray<ObFtsAuxRowRec, 1024> rows_;
+  int64_t doc_cnt_;
+  int64_t token_cnt_;
+  int ret_;
+  int64_t scan_us_;
+  int64_t sort_us_;
+};
+
+struct ObFtsAuxRowLess
+{
+  explicit ObFtsAuxRowLess(const ObCollationType cs) : cs_(cs) {}
+  bool operator()(const ObFtsAuxRowRec &l, const ObFtsAuxRowRec &r) const
+  {
+    const int cmp = ObCharset::strcmpsp(cs_, l.word_, l.word_len_, r.word_, r.word_len_, true);
+    return cmp < 0 ? true : (cmp > 0 ? false : l.doc_id_ < r.doc_id_);
+  }
+  ObCollationType cs_;
+};
+} // namespace
+
+int ObFtsAuxProducer::read_key_bounds(int64_t &min_key, int64_t &max_key)
+{
+  int ret = OB_SUCCESS;
+  uint64_t key_col_id = OB_INVALID_ID;
+  const share::schema::ObColumnSchemaV2 *key_col = nullptr;
+  const common::ObRowkeyInfo &rowkey_info = data_schema_->get_rowkey_info();
+  common::ObSqlString sql;
+  min_key = 0;
+  max_key = 0;
+  if (OB_UNLIKELY(1 != rowkey_info.get_size())) {
+    ret = OB_NOT_SUPPORTED;
+  } else if (OB_FAIL(rowkey_info.get_column_id(0, key_col_id))) {
+  } else if (OB_ISNULL(key_col = data_schema_->get_column_schema(key_col_id))) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (!key_col->get_meta_type().is_integer_type()) {
+    ret = OB_NOT_SUPPORTED;
+  } else if (OB_FAIL(sql.append_fmt("SELECT MIN(`%.*s`), MAX(`%.*s`) FROM %s AS OF SNAPSHOT %ld",
+                                    key_col->get_column_name_str().length(),
+                                    key_col->get_column_name_str().ptr(),
+                                    key_col->get_column_name_str().length(),
+                                    key_col->get_column_name_str().ptr(),
+                                    data_table_name_.ptr(), snapshot_version_))) {
+  } else {
+    common::ObMySQLProxy::MySQLResult res;
+    common::sqlclient::ObMySQLResult *result = nullptr;
+    if (OB_FAIL(GCTX.ddl_sql_proxy_->read(res, sql.ptr()))) {
+      LOG_WARN("fts aux read key bounds failed", K(ret), K(sql));
+    } else if (OB_ISNULL(result = res.get_result())) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(result->next())) {
+    } else if (OB_FAIL(result->get_int(static_cast<int64_t>(0), min_key)) || OB_FAIL(result->get_int(static_cast<int64_t>(1), max_key))) {
+    }
+  }
+  if (OB_NOT_SUPPORTED == ret) {
+    ret = OB_SUCCESS;
+    min_key = 1;
+    max_key = 0; // signals "do not slice"
+  }
+  return ret;
+}
+
+int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
+                                            common::ObIArray<ObFtsAuxRowRec> &rows,
+                                            int64_t &doc_cnt,
+                                            int64_t &token_cnt)
+{
+  int ret = OB_SUCCESS;
+  int64_t min_key = 0;
+  int64_t max_key = 0;
+  doc_cnt = 0;
+  token_cnt = 0;
+  if (OB_UNLIKELY(!is_inited_) || slice_cnt <= 0) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(read_key_bounds(min_key, max_key))) {
+  } else if (max_key < min_key || (max_key - min_key + 1) < slice_cnt * 32) {
+    ret = OB_NOT_SUPPORTED;
+  } else {
+    const int64_t span = (max_key - min_key + 1 + slice_cnt - 1) / slice_cnt;
+    uint64_t key_col_id = OB_INVALID_ID;
+    const share::schema::ObColumnSchemaV2 *key_col = nullptr;
+    std::vector<ObFtsAuxSliceCtx> slices(static_cast<size_t>(slice_cnt));
+    int64_t offset = 0;
+    if (OB_FAIL(data_schema_->get_rowkey_info().get_column_id(0, key_col_id))
+        || OB_ISNULL(key_col = data_schema_->get_column_schema(key_col_id))) {
+      ret = OB_ERR_UNEXPECTED;
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < slice_cnt; ++i) {
+      ObFtsAuxSliceCtx &ctx = slices[static_cast<size_t>(i)];
+      ctx.lo_ = min_key + i * span;
+      ctx.hi_ = (i + 1 == slice_cnt) ? (max_key + 1) : (min_key + (i + 1) * span);
+      if (i > 0) {
+        common::ObSqlString cnt_sql;
+        common::ObMySQLProxy::MySQLResult res;
+        common::sqlclient::ObMySQLResult *result = nullptr;
+        if (OB_FAIL(cnt_sql.append_fmt("SELECT COUNT(*) FROM %s AS OF SNAPSHOT %ld WHERE `%.*s` < %ld",
+                                       data_table_name_.ptr(), snapshot_version_,
+                                       key_col->get_column_name_str().length(),
+                                       key_col->get_column_name_str().ptr(), ctx.lo_))) {
+        } else if (OB_FAIL(GCTX.ddl_sql_proxy_->read(res, cnt_sql.ptr()))) {
+        } else if (OB_ISNULL(result = res.get_result())) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(result->next())) {
+        } else if (OB_FAIL(result->get_int(static_cast<int64_t>(0), offset))) {
+        }
+      }
+      ctx.offset_ = offset;
+    }
+    if (OB_SUCC(ret)) {
+      for (int64_t i = 0; i < slice_cnt; ++i) {
+        ObFtsAuxSliceCtx &ctx = slices[static_cast<size_t>(i)];
+        if (OB_ISNULL(ctx.alloc_ = OB_NEW(ObArenaAllocator, ObMemAttr("FtsAuxSlice"),
+                                          ObMemAttr("FtsAuxSlice")))) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+          break;
+        }
+      }
+    }
+    if (OB_SUCC(ret)) {
+      // Each slice: read + tokenize + local sort on its own thread.
+      std::vector<std::thread> workers;
+      workers.reserve(static_cast<size_t>(slice_cnt));
+      for (int64_t i = 0; i < slice_cnt; ++i) {
+        ObFtsAuxSliceCtx *ctx = &slices[static_cast<size_t>(i)];
+        workers.emplace_back([this, ctx, key_col]() {
+          common::ObSqlString sql;
+          storage::ObFTWordMap word_map;
+          common::ObObjMeta meta;
+          meta.set_varchar();
+          meta.set_collation_type(text_collation_);
+          storage::ObFTParseHelper helper;
+          int &ret = ctx->ret_;
+          const int64_t t0 = common::ObTimeUtility::current_time();
+          if (OB_FAIL(sql.append("SELECT ")) || OB_FAIL(append_select_columns(sql))
+              || OB_FAIL(sql.append_fmt(" FROM %s AS OF SNAPSHOT %ld WHERE `%.*s` >= %ld AND `%.*s` < %ld ORDER BY %ld",
+                                        data_table_name_.ptr(), snapshot_version_,
+                                        key_col->get_column_name_str().length(),
+                                        key_col->get_column_name_str().ptr(), ctx->lo_,
+                                        key_col->get_column_name_str().length(),
+                                        key_col->get_column_name_str().ptr(), ctx->hi_,
+                                        text_col_ids_.count() + 1))) {
+          } else if (OB_FAIL(helper.init(ctx->alloc_, get_parser_name(), get_parser_props()))) {
+          } else if (OB_FAIL(word_map.create(256, common::ObMemAttr("FtsAuxWordMap")))) {
+          } else {
+            common::ObMySQLProxy::MySQLResult res;
+            common::sqlclient::ObMySQLResult *result = nullptr;
+            if (OB_FAIL(GCTX.ddl_sql_proxy_->read(res, sql.ptr()))) {
+              LOG_WARN("fts aux slice read failed", K(ret), K(sql));
+            } else if (OB_ISNULL(result = res.get_result())) {
+              ret = OB_ERR_UNEXPECTED;
+            } else {
+              int64_t local_idx = 0;
+              while (OB_SUCC(result->next())) {
+                int64_t total_len = -1;
+                common::ObSEArray<common::ObString, 4> parts;
+                ObString part;
+                for (int64_t c = 0; OB_SUCC(ret) && c < text_col_ids_.count(); ++c) {
+                  if (OB_FAIL(result->get_varchar(c, part))) {
+                  } else if (OB_FAIL(parts.push_back(part))) {
+                  } else {
+                    total_len += part.length() + 1;
+                  }
+                }
+                char *text_buf = nullptr;
+                int64_t pos = 0;
+                if (OB_FAIL(ret)) {
+                } else if (OB_ISNULL(text_buf = static_cast<char *>(ctx->alloc_->alloc(total_len + 1)))) {
+                  ret = OB_ALLOCATE_MEMORY_FAILED;
+                } else {
+                  for (int64_t p = 0; OB_SUCC(ret) && p < parts.count(); ++p) {
+                    if (0 != p) {
+                      text_buf[pos++] = ' ';
+                    }
+                    if (!parts.at(p).empty()) {
+                      MEMCPY(text_buf + pos, parts.at(p).ptr(), parts.at(p).length());
+                      pos += parts.at(p).length();
+                    }
+                  }
+                  int64_t doc_length = 0;
+                  if (0 == pos) {
+                    doc_length = 0;
+                  } else if (OB_FAIL(helper.segment(meta, text_buf, pos, doc_length, word_map))) {
+                  }
+                  if (OB_SUCC(ret)) {
+                    for (storage::ObFTWordMap::const_iterator iter = word_map.begin();
+                         OB_SUCC(ret) && iter != word_map.end(); ++iter) {
+                      const common::ObString word = iter->first.get_word().get_string();
+                      char *word_buf = nullptr;
+                      if (word.empty()) {
+                      } else if (OB_ISNULL(word_buf = static_cast<char *>(ctx->alloc_->alloc(word.length())))) {
+                        ret = OB_ALLOCATE_MEMORY_FAILED;
+                      } else {
+                        MEMCPY(word_buf, word.ptr(), word.length());
+                        ObFtsAuxRowRec rec;
+                        rec.word_ = word_buf;
+                        rec.word_len_ = word.length();
+                        rec.doc_id_ = ctx->offset_ + local_idx;
+                        rec.word_count_ = iter->second;
+                        rec.doc_length_ = doc_length;
+                        if (OB_FAIL(ctx->rows_.push_back(rec))) {
+                        }
+                      }
+                    }
+                    ctx->token_cnt_ += word_map.size();
+                    word_map.reuse();
+                  }
+                }
+                if (OB_SUCC(ret)) {
+                  ++local_idx;
+                }
+              }
+              if (OB_ITER_END == ret) {
+                ret = OB_SUCCESS;
+              }
+              ctx->doc_cnt_ = local_idx;
+            }
+          }
+          ctx->scan_us_ = common::ObTimeUtility::current_time() - t0;
+          if (OB_SUCC(ret)) {
+            const int64_t t1 = common::ObTimeUtility::current_time();
+            ObFtsAuxRowLess less(word_collation_);
+            std::sort(ctx->rows_.begin(), ctx->rows_.end(), less);
+            ctx->sort_us_ = common::ObTimeUtility::current_time() - t1;
+          }
+          if (word_map.created()) {
+            word_map.destroy();
+          }
+        });
+      }
+      for (size_t i = 0; i < workers.size(); ++i) {
+        if (workers[i].joinable()) {
+          workers[i].join();
+        }
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < slice_cnt; ++i) {
+        ObFtsAuxSliceCtx &ctx = slices[static_cast<size_t>(i)];
+        LOG_INFO("fts aux slice done", "slice", i, K(ctx.ret_), K(ctx.doc_cnt_), K(ctx.token_cnt_),
+                 K(ctx.rows_.count()), "scan_us", ctx.scan_us_, "sort_us", ctx.sort_us_);
+        if (OB_SUCCESS != ctx.ret_) {
+          ret = ctx.ret_;
+        }
+      }
+    }
+    // k-way merge of the per-slice sorted runs.
+    const int64_t merge_t0 = common::ObTimeUtility::current_time();
+    if (OB_SUCC(ret)) {
+      typedef std::pair<ObFtsAuxRowRec, int64_t> MergeItem;
+      ObFtsAuxRowLess less(word_collation_);
+      std::priority_queue<MergeItem, std::vector<MergeItem>,
+                          std::function<bool(const MergeItem &, const MergeItem &)> > heap(
+          [&less](const MergeItem &l, const MergeItem &r) { return less(r.first, l.first); });
+      std::vector<int64_t> cursor(static_cast<size_t>(slice_cnt), 0);
+      for (int64_t i = 0; i < slice_cnt; ++i) {
+        if (slices[static_cast<size_t>(i)].rows_.count() > 0) {
+          heap.push(MergeItem(slices[static_cast<size_t>(i)].rows_.at(0), i));
+        }
+      }
+      while (OB_SUCC(ret) && !heap.empty()) {
+        MergeItem item = heap.top();
+        heap.pop();
+        if (OB_FAIL(rows.push_back(item.first))) {
+        } else {
+          const size_t slice = static_cast<size_t>(item.second);
+          if (++cursor[slice] < slices[slice].rows_.count()) {
+            heap.push(MergeItem(slices[slice].rows_.at(cursor[slice]), item.second));
+          }
+        }
+      }
+      for (int64_t i = 0; i < slice_cnt; ++i) {
+        doc_cnt += slices[static_cast<size_t>(i)].doc_cnt_;
+        token_cnt += slices[static_cast<size_t>(i)].token_cnt_;
+      }
+      for (int64_t i = 0; i < slice_cnt; ++i) {
+        slice_allocs_.push_back(slices[static_cast<size_t>(i)].alloc_);
+      }
+    } else {
+      for (int64_t i = 0; i < slice_cnt; ++i) {
+        if (nullptr != slices[static_cast<size_t>(i)].alloc_) {
+          OB_DELETE(ObArenaAllocator, ObMemAttr("FtsAuxSlice"), slices[static_cast<size_t>(i)].alloc_);
+        }
+      }
+    }
+    LOG_INFO("fts aux parallel build", K(ret), K(slice_cnt), K(doc_cnt), K(token_cnt),
+             K(rows.count()), "merge_us", common::ObTimeUtility::current_time() - merge_t0);
+  }
+  return ret;
+}
 int ObFtsAuxProducer::build_tablet(const common::ObTabletID &tablet_id,
                                    common::ObIArray<ObFtsAuxRowRec> &rows,
                                    int64_t &doc_cnt,
@@ -1004,7 +1350,15 @@ int build_fts_inverted_aux_by_scan(const ObFtsAuxBuildParam &param)
         int64_t doc_cnt = 0;
         int64_t token_cnt = 0;
         int64_t t0 = common::ObTimeUtility::current_time();
-        const int build_ret = producer.build_tablet(tablet_ids.at(i), rows, doc_cnt, token_cnt);
+        int64_t slice_cnt = 6;
+        const char *slice_env = getenv("FTS_AUX_SLICES");
+        if (nullptr != slice_env && '\0' != slice_env[0]) {
+          slice_cnt = atoll(slice_env);
+        }
+        int build_ret = producer.build_tablet_parallel(slice_cnt, rows, doc_cnt, token_cnt);
+        if (OB_NOT_SUPPORTED == build_ret) {
+          build_ret = producer.build_tablet(tablet_ids.at(i), rows, doc_cnt, token_cnt);
+        }
         if (OB_SUCCESS != build_ret) {
           LOG_WARN("fts aux producer build tablet failed (dry run)", K(build_ret),
                    "tablet_id", tablet_ids.at(i));
