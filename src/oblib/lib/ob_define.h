@@ -1421,8 +1421,8 @@ const int64_t OB_MAX_LONGTEXT_LENGTH = 512 * 1024 * 1024L - 1; // 2^29-1,for dat
 const int64_t OB_MAX_MEDIUMTEXT_LENGTH_OLD = 256 * 1024L;  // for compatibility
 const int64_t OB_MAX_LONGTEXT_LENGTH_OLD = 512 * 1024L;  // for compatibility
 
-const int64_t OB_MIN_LOB_CHUNK_SIZE = 16 * 1024; // 16K
-const int64_t OB_MAX_LOB_CHUNK_SIZE = 1024 * 1024; // 1M
+const int64_t OB_MIN_LOB_CHUNK_SIZE = 1024; // 1K
+const int64_t OB_MAX_LOB_CHUNK_SIZE = 256 * 1024; // 256K
 const int64_t OB_DEFAULT_LOB_CHUNK_SIZE = OB_MAX_LOB_CHUNK_SIZE;
 
 const int64_t OB_MIN_LOB_INROW_THRESHOLD = 0; // 0 means disable inrow lob

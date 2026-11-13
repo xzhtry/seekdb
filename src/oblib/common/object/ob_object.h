@@ -537,7 +537,7 @@ struct ObLobId
 
 struct ObLobDataOutRowCtx
 {
-  static const int64_t OUTROW_LOB_CHUNK_SIZE_UNIT = 16 * 1024; // 16KB
+  static const int64_t OUTROW_LOB_CHUNK_SIZE_UNIT = 1024; // 1KB
   enum OpType
   {
     SQL = 0, // all sql op

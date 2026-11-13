@@ -62,10 +62,8 @@ void ObLobId::reset()
 
 int64_t ObLobDataOutRowCtx::get_real_chunk_size() const
 {
-  // ObLobDataOutRowCtx::chunk_size_ only have 8 bit, range is 0~255, and the
-  // unit is OUTROW_LOB_CHUNK_SIZE_UNIT (16KB), so a chunk size of 1MB is 64
-  // and still fits. A chunk size of zero keeps the legacy meaning: use the
-  // maximum chunk size.
+  // ObLobDataOutRowCtx::chunk_size_ only have 8 bit, range is 0~255
+  // and chunk size can not be zero, so if chunk size is 256KB, ObLobDataOutRowCtx::chunk_size_ is zero
   return chunk_size_ == 0 ? OB_MAX_LOB_CHUNK_SIZE : chunk_size_ * OUTROW_LOB_CHUNK_SIZE_UNIT;
 }
 

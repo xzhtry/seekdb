@@ -3369,7 +3369,7 @@ int ObSchemaPrinter::print_column_lob_params(const ObColumnSchemaV2 &column_sche
     // do nothing
   } else if (column_schema.get_lob_chunk_size() == OB_DEFAULT_LOB_CHUNK_SIZE) {
     // default value not display
-  } else if (OB_FAIL(databuff_printf(buf, buf_len, pos, " CHUNK '%ldKB'", column_schema.get_lob_chunk_size()/1024))) {
+  } else if (OB_FAIL(databuff_printf(buf, buf_len, pos, " CHUNK '%ldKB'", column_schema.get_lob_chunk_size()/ObLobDataOutRowCtx::OUTROW_LOB_CHUNK_SIZE_UNIT))) {
   }
   return ret;
 }

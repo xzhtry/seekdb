@@ -425,7 +425,7 @@ static bool ob_cuvs_read(std::istream &in, void *data, size_t bytes) {
   return true;
 }
 
-// [fast path] Writes the OBCUVS04 container: the knn graph next to the
+// [fast path] Writes the OBCUVS03 container: the knn graph next to the
 // dataset, instead of inside a cuVS blob that also embeds the dataset.
 //
 // Returns false when the fast path cannot be used *before* anything has been
@@ -473,20 +473,13 @@ static bool ob_cuvs_serialize_fast(void *key, ObCuvsEntry *ent, size_t n,
   }
   ob_cuvs_snapshot::FastHeader hdr;
   hdr.dim = dim32;
+  hdr.reserved = 0;
   hdr.n = n64;
   hdr.graph_degree = graph_degree;
   hdr.metric = metric32;
-  // The codecs are detected by write_fast() and stored in the header, so the
-  // container describes itself. The vectors of the benchmark datasets are
-  // integer valued (SIFT is an int8 dataset stored in float32) and the
-  // neighbour ids of a 250k index fit in 24 bits, so the snapshot is much
-  // smaller than the raw blocks. The round trip is bit exact, so the restored
-  // index is the same index and the recall cannot change.
-  size_t written_bytes = 0;
   const int64_t write_start_us = ObTimeUtility::current_time();
   if (!ob_cuvs_snapshot::write_fast(out, hdr, ent->buf_ids_.data(),
-                                    ent->buf_vecs_.data(), graph.data(),
-                                    &written_bytes)) {
+                                    ent->buf_vecs_.data(), graph.data())) {
     // The stream already carries a partial container, so it cannot be reused
     // for the baseline format: report the failure instead.
     ret = OB_ERR_UNEXPECTED;
@@ -502,8 +495,7 @@ static bool ob_cuvs_serialize_fast(void *key, ObCuvsEntry *ent, size_t n,
            K(graph_degree), K(export_us), K(graph_bytes));
   // One greppable line with the full stage split of the timed build window.
   LOG_INFO("[OBVSAG][cuVS] stage op=serialize path=fast", KP(key), K(n), K(dim32),
-           K(build_us), K(export_us), K(write_us), K(total_us), K(graph_bytes),
-           K(written_bytes));
+           K(build_us), K(export_us), K(write_us), K(total_us), K(graph_bytes));
   return true;
 }
 
@@ -599,7 +591,7 @@ static bool ob_cuvs_serialize(void *key, std::ostream &out, int &ret) {
   return true;
 }
 
-// [fast path] Consumes the stream after the OBCUVS04 magic: the knn graph is
+// [fast path] Consumes the stream after the OBCUVS03 magic: the knn graph is
 // stored next to the dataset, so the index can be re-created with
 // cuvsCagraIndexFromArgs() without staging a cuVS blob through the filesystem.
 static int ob_cuvs_deserialize_fast(void *key, int expected_dim, std::istream &in) {

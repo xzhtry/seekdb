@@ -1,5 +1,5 @@
 /**
- * Standalone test for the OBCUVS04 (fast) snapshot container.
+ * Standalone test for the OBCUVS03 (fast) snapshot container.
  *
  * The container lives in src/oblib/lib/vector/ob_cuvs_snapshot.h and has no
  * OceanBase dependency, so it can be tested without building seekdb:
@@ -16,16 +16,14 @@
  *      back bit-identical. The restored GPU index is built from exactly these
  *      bytes, so the recall cannot change.
  *   3. The header validation rejects corrupt or hostile headers (wrong
- *      dimension, zero/negative counts, oversized counts, unknown codecs)
- *      instead of allocating an attacker-sized buffer.
+ *      dimension, zero/negative counts, oversized counts) instead of
+ *      allocating an attacker-sized buffer.
  *   4. A truncated stream is detected instead of silently producing a
  *      half-initialised index.
- *   5. The lossless codecs shrink the container for the shapes the contest
- *      uses, and the round trip stays exact for every codec: an integer
- *      valued dataset is stored in one byte per component, the neighbour ids
- *      of a 250k index in three bytes, and a dataset that is not integer
- *      valued falls back to plain float32.
- *   6. The fast container is strictly smaller than the baseline container.
+ *   5. The fast container is strictly smaller than the baseline container,
+ *      and the saving is quantified: the baseline stores the dataset twice
+ *      (once raw, once inside the cuVS blob) and stages the blob through the
+ *      filesystem twice.
  *
  * This file deliberately lives outside tools/hipvs_bridge/: that directory is
  * the directory of the GPU bridge, and anything that sits next to it can be
@@ -75,9 +73,7 @@ struct Payload {
   std::vector<unsigned int> graph;
 };
 
-// A dataset whose components are exact integers in [-128, 127]: this is what
-// SIFT is (an int8 dataset stored in float32).
-Payload make_sift_like_payload()
+Payload make_payload()
 {
   Payload p;
   p.ids.resize(static_cast<size_t>(kN));
@@ -87,22 +83,12 @@ Payload make_sift_like_payload()
     p.ids[static_cast<size_t>(i)] = 1000000 + i * 3;
     for (int32_t j = 0; j < kDim; ++j) {
       p.vectors[static_cast<size_t>(i) * kDim + j] =
-          static_cast<float>(static_cast<int>((i * 31 + j * 17) % 255) - 128);
+          static_cast<float>((i * 31 + j * 17) % 997) * 0.5f;
     }
     for (int64_t g = 0; g < kGraphDegree; ++g) {
       p.graph[static_cast<size_t>(i) * kGraphDegree + g] =
           static_cast<unsigned int>((i + g * 7) % kN);
     }
-  }
-  return p;
-}
-
-// A dataset with fractional components: the codec must fall back to float32.
-Payload make_float_payload()
-{
-  Payload p = make_sift_like_payload();
-  for (size_t i = 0; i < p.vectors.size(); ++i) {
-    p.vectors[i] = static_cast<float>(i % 997) * 0.5f;
   }
   return p;
 }
@@ -120,24 +106,20 @@ size_t baseline_container_bytes(const Payload &p)
   return ids + vectors + blob_dataset + blob_graph + metadata;
 }
 
-// Writes the container, reads it back and checks that everything matches.
-// Returns the number of bytes the container took.
-size_t round_trip(const Payload &p, int expect_vec_codec, int expect_graph_codec)
+void test_round_trip(const Payload &p)
 {
   ob_cuvs_snapshot::FastHeader hdr;
   hdr.dim = kDim;
+  hdr.reserved = 0;
   hdr.n = kN;
   hdr.graph_degree = kGraphDegree;
   hdr.metric = kMetric;
 
   std::ostringstream out(std::ios::binary);
-  size_t written = 0;
   CHECK(ob_cuvs_snapshot::write_fast(out, hdr, p.ids.data(), p.vectors.data(),
-                                     p.graph.data(), &written),
+                                     p.graph.data()),
         "write_fast failed");
   const std::string blob = out.str();
-  CHECK(written == blob.size(), "written_bytes %zu != stream size %zu", written,
-        blob.size());
 
   // 1. magic dispatch
   std::istringstream in(blob, std::ios::binary);
@@ -151,13 +133,9 @@ size_t round_trip(const Payload &p, int expect_vec_codec, int expect_graph_codec
   ob_cuvs_snapshot::FastHeader got;
   CHECK(ob_cuvs_snapshot::read_fast_header(in, got, kDim), "read_fast_header failed");
   CHECK(got.dim == hdr.dim && got.n == hdr.n && got.graph_degree == hdr.graph_degree &&
-            got.metric == hdr.metric,
+            got.metric == hdr.metric && got.reserved == 0,
         "header mismatch: dim=%d n=%lld gd=%lld metric=%d", got.dim,
         static_cast<long long>(got.n), static_cast<long long>(got.graph_degree), got.metric);
-  CHECK(got.vec_codec == expect_vec_codec, "vec_codec %d != %d", got.vec_codec,
-        expect_vec_codec);
-  CHECK(got.graph_codec == expect_graph_codec, "graph_codec %d != %d",
-        got.graph_codec, expect_graph_codec);
 
   size_t vec_count = 0;
   size_t graph_count = 0;
@@ -180,76 +158,22 @@ size_t round_trip(const Payload &p, int expect_vec_codec, int expect_graph_codec
   in.read(&extra, 1);
   CHECK(in.gcount() == 0, "trailing bytes after the payload");
 
-  return blob.size();
-}
-
-void test_round_trip_sift()
-{
-  const Payload p = make_sift_like_payload();
-  const size_t bytes = round_trip(p, ob_cuvs_snapshot::VEC_I8,
-                                  ob_cuvs_snapshot::GRAPH_U24);
+  // 5. size comparison
+  const size_t fast_bytes = blob.size();
   const size_t base_bytes = baseline_container_bytes(p);
-  std::printf("  container bytes: fast=%zu baseline=%zu saving=%.1f%%\n", bytes,
+  std::printf("  container bytes: fast=%zu baseline=%zu saving=%.1f%%\n", fast_bytes,
               base_bytes,
-              100.0 * (static_cast<double>(base_bytes) - static_cast<double>(bytes)) /
+              100.0 * (static_cast<double>(base_bytes) - static_cast<double>(fast_bytes)) /
                   static_cast<double>(base_bytes));
-  CHECK(bytes < base_bytes, "the fast container is not smaller");
-}
-
-void test_round_trip_float()
-{
-  const Payload p = make_float_payload();
-  // Fractional components: the codec must fall back to float32, and the
-  // neighbour ids still fit in 24 bits.
-  const size_t bytes = round_trip(p, ob_cuvs_snapshot::VEC_F32,
-                                  ob_cuvs_snapshot::GRAPH_U24);
-  const size_t raw = p.ids.size() * sizeof(int64_t) +
-                     p.vectors.size() * sizeof(float) +
-                     p.graph.size() * sizeof(unsigned int);
-  CHECK(bytes < raw, "the container is not smaller than the raw blocks");
-}
-
-void test_forced_codecs()
-{
-  // Every codec must survive a round trip bit exactly, not only the ones the
-  // detector happens to pick.
-  Payload p = make_sift_like_payload();
-  const int codecs[] = {ob_cuvs_snapshot::VEC_F32, ob_cuvs_snapshot::VEC_I16,
-                        ob_cuvs_snapshot::VEC_I8};
-  for (const int codec : codecs) {
-    ob_cuvs_snapshot::FastHeader hdr;
-    hdr.dim = kDim;
-    hdr.n = kN;
-    hdr.graph_degree = kGraphDegree;
-    hdr.metric = kMetric;
-    std::ostringstream out(std::ios::binary);
-    std::vector<char> vbuf;
-    std::vector<char> gbuf;
-    ob_cuvs_snapshot::encode_vectors(p.vectors.data(), p.vectors.size(), codec, vbuf);
-    ob_cuvs_snapshot::encode_graph(p.graph.data(), p.graph.size(),
-                                   ob_cuvs_snapshot::GRAPH_U24, gbuf);
-    CHECK(vbuf.size() == p.vectors.size() * static_cast<size_t>(codec),
-          "vector buffer size %zu for codec %d", vbuf.size(), codec);
-    // Encode -> decode must be the identity.
-    std::vector<float> back(p.vectors.size());
-    ob_cuvs_snapshot::decode_vectors(vbuf.data(), p.vectors.size(), codec, back.data());
-    CHECK(back == p.vectors, "codec %d does not round trip", codec);
-  }
-  // The graph codec has the same property.
-  std::vector<char> gbuf;
-  ob_cuvs_snapshot::encode_graph(p.graph.data(), p.graph.size(),
-                                 ob_cuvs_snapshot::GRAPH_U24, gbuf);
-  std::vector<unsigned int> gback(p.graph.size());
-  ob_cuvs_snapshot::decode_graph(gbuf.data(), p.graph.size(),
-                                 ob_cuvs_snapshot::GRAPH_U24, gback.data());
-  CHECK(gback == p.graph, "the graph codec does not round trip");
+  CHECK(fast_bytes < base_bytes, "the fast container is not smaller");
 }
 
 void test_bad_headers()
 {
-  const Payload p = make_sift_like_payload();
+  const Payload p = make_payload();
   ob_cuvs_snapshot::FastHeader hdr;
   hdr.dim = kDim;
+  hdr.reserved = 0;
   hdr.n = kN;
   hdr.graph_degree = kGraphDegree;
   hdr.metric = kMetric;
@@ -288,35 +212,17 @@ void test_bad_headers()
     ob_cuvs_snapshot::FastHeader got;
     CHECK(!ob_cuvs_snapshot::read_fast_header(in, got, kDim), "graph_degree=0 was accepted");
   }
-  // An unknown codec must be rejected instead of being used as a size. The
-  // codecs are detected when the container is written, so the invalid value
-  // has to be patched into the serialized header.
+  // reserved must be 0
   {
+    ob_cuvs_snapshot::FastHeader bad = hdr;
+    bad.reserved = 7;
     std::ostringstream out(std::ios::binary);
-    ob_cuvs_snapshot::write_fast(out, hdr, p.ids.data(), p.vectors.data(), p.graph.data());
-    std::string blob = out.str();
-    const int32_t bad_codec = 3;
-    std::memcpy(&blob[ob_cuvs_snapshot::kMagicSize + sizeof(int32_t)], &bad_codec,
-                sizeof(bad_codec));
-    std::istringstream in(blob, std::ios::binary);
+    ob_cuvs_snapshot::write_fast(out, bad, p.ids.data(), p.vectors.data(), p.graph.data());
+    std::istringstream in(out.str(), std::ios::binary);
     char magic[8] = {0};
     in.read(magic, sizeof(magic));
     ob_cuvs_snapshot::FastHeader got;
-    CHECK(!ob_cuvs_snapshot::read_fast_header(in, got, kDim), "vec_codec=3 was accepted");
-  }
-  {
-    std::ostringstream out(std::ios::binary);
-    ob_cuvs_snapshot::write_fast(out, hdr, p.ids.data(), p.vectors.data(), p.graph.data());
-    std::string blob = out.str();
-    const int32_t bad_codec = 2;
-    const size_t graph_codec_offset =
-        ob_cuvs_snapshot::kMagicSize + 3 * sizeof(int32_t) + 2 * sizeof(int64_t);
-    std::memcpy(&blob[graph_codec_offset], &bad_codec, sizeof(bad_codec));
-    std::istringstream in(blob, std::ios::binary);
-    char magic[8] = {0};
-    in.read(magic, sizeof(magic));
-    ob_cuvs_snapshot::FastHeader got;
-    CHECK(!ob_cuvs_snapshot::read_fast_header(in, got, kDim), "graph_codec=2 was accepted");
+    CHECK(!ob_cuvs_snapshot::read_fast_header(in, got, kDim), "reserved!=0 was accepted");
   }
   // A hostile n must not overflow the size computation
   {
@@ -329,9 +235,10 @@ void test_bad_headers()
 
 void test_truncated()
 {
-  const Payload p = make_sift_like_payload();
+  const Payload p = make_payload();
   ob_cuvs_snapshot::FastHeader hdr;
   hdr.dim = kDim;
+  hdr.reserved = 0;
   hdr.n = kN;
   hdr.graph_degree = kGraphDegree;
   hdr.metric = kMetric;
@@ -373,26 +280,19 @@ void test_container_sizes()
     {"SIFT250K", 250000, 128, 128},
     {"Hidden250K", 250000, 128, 128},
   };
-  std::printf("  %-12s %14s %14s %14s %10s\n", "dataset", "fast bytes", "raw bytes",
-              "blob bytes", "saving");
+  std::printf("  %-12s %14s %14s %10s\n", "dataset", "fast bytes", "blob bytes", "saving");
   for (const Shape &s : shapes) {
     const size_t ids = static_cast<size_t>(s.n) * sizeof(int64_t);
     const size_t vectors = static_cast<size_t>(s.n) * s.dim * sizeof(float);
     const size_t graph = static_cast<size_t>(s.n) * s.graph_degree * sizeof(unsigned int);
     const size_t metadata = 4096;
-    // Fast container with the lossless codecs: the dataset is integer valued
-    // (one byte per component) and the neighbour ids fit in 24 bits.
-    const size_t fast_bytes = ids + static_cast<size_t>(s.n) * s.dim +
-                               static_cast<size_t>(s.n) * s.graph_degree * 3 + 40;
-    // The same container without the codecs.
-    const size_t raw_bytes = ids + vectors + graph;
-    // Baseline container: ids + vectors + cuVS blob (dataset + graph + meta).
+    // Fast container: ids | vectors | graph.
+    const size_t fast_bytes = ids + vectors + graph;
+    // Baseline container: ids | vectors | cuVS blob (dataset + graph + meta).
     const size_t blob_bytes = ids + vectors + vectors + graph + metadata;
-    std::printf("  %-12s %14zu %14zu %14zu %9.1f%%\n", s.name, fast_bytes, raw_bytes,
-                blob_bytes,
-                100.0 * (static_cast<double>(raw_bytes) - static_cast<double>(fast_bytes)) /
-                    static_cast<double>(raw_bytes));
-    CHECK(fast_bytes < raw_bytes, "%s: the coded container is not smaller", s.name);
+    std::printf("  %-12s %14zu %14zu %9.1f%%\n", s.name, fast_bytes, blob_bytes,
+                100.0 * (static_cast<double>(blob_bytes) - static_cast<double>(fast_bytes)) /
+                    static_cast<double>(blob_bytes));
     CHECK(fast_bytes < blob_bytes, "%s: the fast container is not smaller", s.name);
   }
 }
@@ -401,12 +301,9 @@ void test_container_sizes()
 
 int main()
 {
-  std::printf("[test_fast_snapshot] container round trip (integer valued dataset)\n");
-  test_round_trip_sift();
-  std::printf("[test_fast_snapshot] container round trip (fractional dataset)\n");
-  test_round_trip_float();
-  std::printf("[test_fast_snapshot] every codec round trips\n");
-  test_forced_codecs();
+  std::printf("[test_fast_snapshot] container round trip\n");
+  const Payload p = make_payload();
+  test_round_trip(p);
   std::printf("[test_fast_snapshot] header validation\n");
   test_bad_headers();
   std::printf("[test_fast_snapshot] truncated stream\n");
