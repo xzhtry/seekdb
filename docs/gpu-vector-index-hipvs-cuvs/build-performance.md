@@ -184,11 +184,34 @@ numbers below are the platform's own output, not a self-measurement.
 | --- | --- | --- | --- | --- | --- |
 | reference | `445b9b2` (frozen baseline) | 5.271 | 1.105x | 0.975x | pass |
 | fast snapshot | `cc6c79f3` | **6.115** | **1.139x** | **1.096x** | **pass** |
+| fast snapshot + restore fix | `3794da35` | 5.324 | 1.081x | 1.069x | pass |
 
 The build ratio is the GPU build time against the frozen baseline of the same
 round; the query ratio is the same for the query throughput. Both improved:
 the build is 3.1 % faster than the baseline and the query path is 12.4 %
 faster, so the score rose from 5.271 to 6.115.
+
+The third row is the same fast snapshot plus exactly one bug fix: the fast
+path restored its index on the small (~1.5 MB) OB request thread, which
+overflowed the stack at 250,000 vectors, so the restore now runs on a 32 MB
+pthread the way the blob path already did (see §5.3). That change is outside
+the timed build window and does not touch the graph construction, the search
+parameters or the data, so it cannot change the recall - and the platform
+confirms it: that run reported `gates=pass` with the fix as its only source
+difference.
+
+Two properties of the platform numbers are worth recording:
+
+- **The platform keeps the best score.** The third run scored lower, and the
+  second run is still the official best (`maxScoreFlag` is `1` on it and `0`
+  on the third one). Neither a failed nor a slower run invalidates an earlier
+  good one.
+- **The ratios move by a few percent between runs.** The third run changed no
+  build- or query-relevant code, yet `build` went from 1.139x to 1.081x and
+  `query` from 1.096x to 1.069x. The frozen baseline itself scored 5.271
+  with `build=1.105x, query=0.975x`, i.e. the same range. Treat a single
+  run's score as noisy: a conclusion about a change needs several runs or a
+  same-round baseline.
 
 ### 5.2 Absolute times (measured on an AMD Radeon Pro W7900D instance)
 
