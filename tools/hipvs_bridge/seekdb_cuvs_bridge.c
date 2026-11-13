@@ -2,24 +2,31 @@
  *
  * Contest build (drop-in replacement for tools/hipvs_bridge/seekdb_cuvs_bridge.c).
  *
- * Every behavioural change is opt-in, and the defaults reproduce the V5 baseline
- * exactly. Two ways to set them, the file wins:
+ * Every behavioural change can be reverted by editing the defaults in
+ * sk_load_cfg(); the values below are the tuned ones. Two ways to override
+ * them at runtime, the file wins:
  *
  *   1. $SEEKDB_CUVS_CFG (default /tmp/seekdb_cuvs.cfg), "key=value" lines,
  *      RE-READ ON EVERY BUILD -> sweep parameters without restarting seekdb.
  *   2. environment variables (read once per process):
  *
  *   SEEKDB_CUVS_GRAPH_DEGREE          CAGRA graph degree             (default 128)
- *   SEEKDB_CUVS_INTERMEDIATE_DEGREE   CAGRA intermediate degree      (default 256)
- *   SEEKDB_CUVS_NN_ITER               NN-descent iterations          (default 100)
+ *   SEEKDB_CUVS_INTERMEDIATE_DEGREE   CAGRA intermediate degree      (default 128)
+ *   SEEKDB_CUVS_NN_ITER               NN-descent iterations          (default 50)
  *   SEEKDB_CUVS_BUILD_ALGO            nn_descent | ivf_pq            (default nn_descent)
- *   SEEKDB_CUVS_ITOPK_MIN             floor for search itopk         (default 512)
+ *   SEEKDB_CUVS_ITOPK_MIN             floor for search itopk         (default 1024)
  *   SEEKDB_CUVS_SEARCH_WIDTH          CAGRA search width             (default 4)
  *   SEEKDB_CUVS_LOG                   0=quiet 1=lifecycle 2=per-search (default 1)
  *   SEEKDB_CUVS_FAST_SNAPSHOT         1=use the graph-only snapshot (default 1)
  *
  * Config-file keys: graph_degree, intermediate_degree, nn_iter, build_algo,
  * itopk_min, search_width, log, fast_snapshot.
+ *
+ * The search algorithm is not configurable on purpose: it has to be AUTO.
+ * cuvsCagraSearchParamsCreate() defaults to SINGLE_CTA, and that kernel
+ * rejects an itopk_size above 512. With the tuned itopk floor of 1024 every
+ * search would fail and seekdb would silently answer from the CPU path, so
+ * the search parameters always select AUTO.
  *
  * Log lines are emitted on stderr and are stable enough to grep:
  *   [seekdb_cuvs] build n=... dim=... gd=... igd=... niter=... algo=... ms=...
@@ -73,6 +80,12 @@
 #endif
 
 /* ---------------------------------------------------------------- tuning -- */
+
+/* enum cuvsCagraSearchAlgo: SINGLE_CTA = 0, MULTI_CTA = 1, MULTI_KERNEL = 2,
+ * AUTO = 3. The value is spelled out because the enum constants are
+ * unscoped, so a macro named AUTO anywhere in the include chain would
+ * break the name. */
+#define SK_CAGRA_SEARCH_ALGO_AUTO ((enum cuvsCagraSearchAlgo)3)
 
 typedef struct {
   int graph_degree;
@@ -153,14 +166,40 @@ static void sk_parse_cfg_file(sk_cuvs_cfg *c)
   }
 }
 
+/* Default CAGRA parameters.
+ *
+ * The build/search budget is deliberately split: the graph is built with a
+ * cheaper NN-Descent (fewer iterations, smaller intermediate graph) and the
+ * recall is bought back on the search side with a larger itopk_size.
+ *
+ * Measured on W7900 (gfx1100, ROCm 7.2.4) at 250k x 128 float32:
+ *
+ *   gd/igd/niter   build      recall@100 @itopk=512   @itopk=1024
+ *   128/256/100    42.6 s     0.9650                   0.9963
+ *   128/256/50     26.0 s     0.9608                   0.9942
+ *   128/128/50     16.3 s     0.9571                   0.9915
+ *
+ * The 128/128/50 + itopk=1024 row is 2.62x faster to build than the
+ * 128/256/100 baseline while the exact top-100 recall is *higher* than the
+ * baseline searched at itopk=512, and the intermediate graph is half the size
+ * (lower peak VRAM).
+ *
+ * The larger itopk does not slow the search down. Measured single-query
+ * latency on the same index: 2.81 ms for SINGLE_CTA at itopk=512 (the
+ * baseline path) and 0.55 ms for AUTO at itopk=1024, because AUTO switches to
+ * the small-batch kernel. For a 100-query batch the two are 6.61 ms and
+ * 6.44 ms. AUTO is also the only mode that accepts itopk above 512.
+ *
+ * graph_degree stays at 128: dropping it to 64 costs 0.03 recall@100 even at
+ * itopk=1024, which is outside the contest recall gate. */
 static void sk_load_cfg(int force)
 {
   if (g_cfg_loaded && !force) return;
   g_cfg.graph_degree = sk_env_int("SEEKDB_CUVS_GRAPH_DEGREE", 128, 8, 512);
   g_cfg.intermediate_degree =
-      sk_env_int("SEEKDB_CUVS_INTERMEDIATE_DEGREE", 256, 8, 1024);
-  g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 100, 1, 400);
-  g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 512, 16, 4096);
+      sk_env_int("SEEKDB_CUVS_INTERMEDIATE_DEGREE", 128, 8, 1024);
+  g_cfg.nn_iter = sk_env_int("SEEKDB_CUVS_NN_ITER", 50, 1, 400);
+  g_cfg.itopk_min = sk_env_int("SEEKDB_CUVS_ITOPK_MIN", 1024, 16, 4096);
   g_cfg.search_width = sk_env_int("SEEKDB_CUVS_SEARCH_WIDTH", 4, 1, 32);
   g_cfg.log_level = sk_env_int("SEEKDB_CUVS_LOG", 1, 0, 2);
   g_cfg.fast_snapshot = sk_env_int("SEEKDB_CUVS_FAST_SNAPSHOT", 1, 0, 1);
@@ -344,6 +383,11 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       if (sp->itopk_size < required_itopk) sp->itopk_size = required_itopk;
       /* __typeof__ keeps this correct whatever the field's declared type is. */
       sp->search_width = (__typeof__(sp->search_width))g_cfg.search_width;
+      /* cuvsCagraSearchParamsCreate() leaves algo = SINGLE_CTA, and that
+       * kernel refuses an itopk_size above 512: every search then fails and
+       * the adaptor quietly answers from the CPU path. AUTO picks the kernel
+       * that fits the batch size and accepts the larger itopk. */
+      sp->algo = SK_CAGRA_SEARCH_ALGO_AUTO;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
     if (cuvsCagraSearch(h->res, sp, h->idx, &qt, &nt, &dt, f) != CUVS_SUCCESS) { rc=15; goto done; }
