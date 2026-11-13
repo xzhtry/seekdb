@@ -209,7 +209,7 @@ def main() -> int:
         if ref:
             y = Y(ref)
             svg.line(px0, y, px1, y, PROD_C, 1.4, dash="6 4")
-            svg.text(px1 - 6, y - 7, f"上线配置召回水平（itopk=512）{ref:.4f}", 10, PROD_C, anchor="end")
+            svg.text(px1 - 6, y - 7, f"冻结基线配置召回水平（itopk=512）{ref:.4f}", 10, PROD_C, anchor="end")
 
     # gate line: delta <= 0.005 vs the shipped configuration
     if prod:
@@ -236,33 +236,38 @@ def main() -> int:
         for it, r, _ms in prod["pts"]:
             if it == 512:
                 svg.circle(x, Y(r), 7, PROD_C, "#ffffff", 2)
-        svg.text(x + 12, Y(max(p[1] for p in prod["pts"] if p[0] == 512)) - 26,
-                 "上线配置 gd128/igd256/it100", 10, PROD_C, weight="600")
-        svg.text(x + 12, Y(max(p[1] for p in prod["pts"] if p[0] == 512)) - 12,
-                 f"{prod['ms']/1000:.1f}s · itopk512", 10, MUTED)
+        # The label is placed to the left of the marker: the marker sits at the
+        # right edge of the panel, where the dashed recall line already is.
+        svg.text(x - 14, Y(max(p[1] for p in prod["pts"] if p[0] == 512)) + 20,
+                 "冻结基线配置 gd128/igd256/it100", 10, PROD_C, weight="600", anchor="end")
+        svg.text(x - 14, Y(max(p[1] for p in prod["pts"] if p[0] == 512)) + 34,
+                 f"{prod['ms']/1000:.1f}s · itopk512", 10, MUTED, anchor="end")
+    if alt:
+        # The configuration that was submitted in rounds 10 and 11.
+        x = X(alt["ms"])
+        pick = next((p for p in alt["pts"] if p[0] == 1024), alt["pts"][-1])
+        svg.circle(x, Y(pick[1]), 8, "#0891b2", "#ffffff", 2.4)
+        svg.text(x + 12, Y(pick[1]) - 26, "上线配置 gd128/igd128/it50 + itopk1024", 10, "#0891b2", weight="600")
+        svg.text(x + 12, Y(pick[1]) - 12,
+                 f"{alt['ms']/1000:.1f}s · 召回 {pick[1]:.4f} · 显存更省", 10, MUTED)
     if best:
         x = X(best["ms"])
         pick = next((p for p in best["pts"] if p[0] == 1024), best["pts"][-1])
         svg.circle(x, Y(pick[1]), 8, BEST_C, "#ffffff", 2.4)
-        svg.text(x + 12, Y(pick[1]) - 10, "目标配置 gd128/igd256/it20 + itopk1024", 10, BEST_C, weight="600")
-        svg.text(x + 12, Y(pick[1]) + 4,
+        svg.text(x + 12, Y(pick[1]) + 20, "备选配置 gd128/igd256/it20 + itopk1024", 10, BEST_C, weight="600")
+        svg.text(x + 12, Y(pick[1]) + 34,
                  f"{best['ms']/1000:.1f}s · itopk1024 · 召回 {pick[1]:.4f}", 10, MUTED)
-    if alt:
-        x = X(alt["ms"])
-        pick = next((p for p in alt["pts"] if p[0] == 1024), alt["pts"][-1])
-        svg.circle(x, Y(pick[1]), 8, "#0891b2", "#ffffff", 2.4)
-        svg.text(x + 12, Y(pick[1]) - 10, "备选 gd128/igd128/it50 + itopk1024", 10, "#0891b2", weight="600")
-        svg.text(x + 12, Y(pick[1]) + 4,
-                 f"{alt['ms']/1000:.1f}s · 召回 {pick[1]:.4f} · 显存更省", 10, MUTED)
 
     # legend
     lx, ly = px0 + 12, py1 - 48
     svg.circle(lx, ly - 4, 3.2, ACC_C)
     svg.text(lx + 9, ly, "各建图配置在 (itopk, sw, algo) 网格上的可达召回", 10, MUTED)
     svg.circle(lx, ly + 14, 7, PROD_C, "#ffffff", 2)
-    svg.text(lx + 14, ly + 18, "上线配置", 10, MUTED)
-    svg.circle(lx + 78, ly + 14, 8, BEST_C, "#ffffff", 2.4)
-    svg.text(lx + 92, ly + 18, "目标配置", 10, MUTED)
+    svg.text(lx + 14, ly + 18, "冻结基线配置", 10, MUTED)
+    svg.circle(lx + 104, ly + 14, 8, BEST_C, "#ffffff", 2.4)
+    svg.text(lx + 118, ly + 18, "备选配置", 10, MUTED)
+    svg.circle(lx + 186, ly + 14, 8, "#0891b2", "#ffffff", 2.4)
+    svg.text(lx + 200, ly + 18, "上线配置（第 10/11 轮）", 10, MUTED)
 
     # ---------------- panel 2: score map -------------------------------------
     qx0, qx1 = PAD_L, W - PAD_R
@@ -276,7 +281,7 @@ def main() -> int:
         t = s / 20.0
         return qy1 - t * (qy1 - qy0)
 
-    svg.text(qx0, qy0 - 16, "② 官方评分映射：构建加速比 → 总分（查询比按当前 1.096x 计）", 13, INK, weight="600")
+    svg.text(qx0, qy0 - 16, "② 官方评分映射：构建加速比 → 总分（查询比 1.599x，2 分已封顶拿满）", 13, INK, weight="600")
     for gx in (1.0, 1.5, 2.0, 2.5, 3.0, 3.5):
         x = XS(gx)
         svg.line(x, qy0, x, qy1, GRID, 1)
@@ -289,8 +294,11 @@ def main() -> int:
     svg.line(qx0, qy0, qx0, qy1, AXIS, 1.2)
     svg.text((qx0 + qx1) / 2, qy1 + 36, "构建加速比（GPU 构建耗时 ÷ CPU 基线构建耗时）", 11, MUTED, anchor="middle")
 
-    def score_of(rb):
-        return 4.0 + 14.0 * math.log(rb) / math.log(3.0) + 2.0 * math.log(1.096) / math.log(1.5)
+    def score_of(rb, rq=1.599):
+        # The query term saturates at 1.5x: four official runs pin the formula
+        # down to score = 4 + 14*ln(rb)/ln(3) + min(2, 2*ln(rq)/ln(1.5)).
+        q = min(2.0, 2.0 * math.log(rq) / math.log(1.5))
+        return 4.0 + 14.0 * math.log(rb) / math.log(3.0) + q
 
     pts = [(XS(r), YS(min(score_of(r), 20.0))) for r in [1.0 + i * 0.02 for i in range(int((rmax - 1.0) / 0.02) + 1)]]
     for i in range(len(pts) - 1):
@@ -302,25 +310,22 @@ def main() -> int:
     svg.line(x20, qy0, x20, qy1, BEST_C, 1.4, dash="5 4")
     svg.text(x20 + 6, qy0 + 16, "20 分需要构建比 3.0x", 10, BEST_C, weight="600")
 
-    # current position
-    cur = score_of(1.139)
-    xc, yc = XS(1.139), YS(cur)
-    svg.circle(xc, yc, 7, PROD_C, "#ffffff", 2)
-    svg.text(xc + 12, yc + 4, "第 8 轮：6.115 分", 10, PROD_C, weight="600")
+    # The official runs, in the order they happened. The build ratio and the
+    # score are the platform's own numbers, not an extrapolation.
+    official = [
+        (1.105, "5.271", "冻结基线 445b9b2", MUTED, -9),
+        (1.139, "6.115", "第 8 轮 cc6c79f3", MUTED, 17),
+        (1.648, "12.369", "第 10 轮 e568a8b1", ACC_C, -9),
+        (2.120, "15.575", "第 11 轮 11f2e9f5", PROD_C, 17),
+    ]
+    for r, sc, lab, col, dy in official:
+        x, y = XS(r), YS(float(sc))
+        svg.circle(x, y, 6, col, "#ffffff", 2)
+        svg.text(x + 11, y + dy, f"{lab}：{sc} 分", 10, col, weight="600")
 
-    # projected candidates
-    if prod:
-        pms = prod["ms"]
-        for s, col, tag in ((best, BEST_C, "it20"), (alt, "#0891b2", "igd128/it50")):
-            if not s:
-                continue
-            r = 1.139 * (pms / s["ms"])
-            sc = score_of(r)
-            x, y = XS(min(r, rmax)), YS(min(sc, 20.0))
-            svg.circle(x, y, 7, col, "#ffffff", 2)
-            svg.text(x + 12, y + (20 if tag == "it20" else -8),
-                     f"预估 {tag}: {r:.2f}x → {min(sc,20):.1f} 分", 10, col, weight="600")
-    svg.text(qx0, qy1 + 58, "评分式（由两轮官方成绩反推并验证）：总分 = 4 + 14·ln(构建比)/ln(3.0) + 2·ln(查询比)/ln(1.5)", 11, MUTED)
+    svg.text(qx0, qy1 + 58,
+             "评分式（由四轮官方成绩反推并验证）：总分 = 4 + 14·ln(构建比)/ln(3.0) + min(2, 2·ln(查询比)/ln(1.5))",
+             11, MUTED)
 
     svg.add("</svg>")
     pathlib.Path(a.out).write_text(svg.dump(), encoding="utf-8")
