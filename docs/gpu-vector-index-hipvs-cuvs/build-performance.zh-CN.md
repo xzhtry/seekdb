@@ -50,7 +50,7 @@ CREATE VECTOR INDEX idx ON tbl(v)
 只把建好索引的 **knn 图**导出，快照内容变成：
 
 ```
-OBCUVS03 | dim | reserved | n | graph_degree | metric | ids[n] | vectors[n*dim] | graph[n*degree]
+OBCUVS04 | dim | vec_codec | n | graph_degree | metric | graph_codec | ids[n] | vectors[n*dim] | graph[n*degree]
 ```
 
 重载时用 `cuvsCagraIndexFromArgs()` 从 `(graph, dataset)` 重建索引。
@@ -307,12 +307,13 @@ blob 路径早就是用 **32MB 栈的 pthread** 做恢复的，快路径没有 �
 
 ### 4.3 快路径确定省掉的东西（本地实测）
 
-| | 基线 `OBCUVS02` | 快路径 `OBCUVS03` |
-| --- | --- | --- |
-| 数据集份数 | 2（原始 + blob 内嵌） | 1（原始） |
-| 快照容器体积（SIFT250K） | 368.1 MiB | 246.0 MiB |
-| blob 临时文件往返 | 保存 1 写 1 读、重载 1 写 1 读 | 无 |
-| 恢复方式 | 解析 blob + 上传数据集与图 | 上传图 + 拷贝数据集 |
+| | 基线 `OBCUVS02` | 快路径 `OBCUVS03` | 快路径 + 无损编解码 `OBCUVS04` |
+| --- | --- | --- | --- |
+| 数据集份数 | 2（原始 + blob 内嵌） | 1（原始） | 1（原始） |
+| 快照容器体积（SIFT250K） | 368.1 MiB | 246.0 MiB | **124.0 MiB** |
+| blob 临时文件往返 | 保存 1 写 1 读、重载 1 写 1 读 | 无 | 无 |
+| 恢复方式 | 解析 blob + 上传数据集与图 | 上传图 + 拷贝数据集 | 上传图 + 拷贝数据集 |
+| 容器内编码 | 原始 | 原始 | 向量 int8 + 邻居 ID 24 bit（**无损**） |
 
 ---
 

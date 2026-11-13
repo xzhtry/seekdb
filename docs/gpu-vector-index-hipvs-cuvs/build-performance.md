@@ -123,16 +123,17 @@ runs offline without a GPU:
 
 ```text
 [test_fast_snapshot] contest dataset shapes
-  dataset          fast bytes     blob bytes     saving
-  SIFT250K          258000000      386004096      33.2%
-  Hidden250K        258000000      386004096      33.2%
+  dataset          fast bytes      raw bytes     blob bytes     saving
+  SIFT250K          130000040      258000000      386004096      49.6%
+  Hidden250K        130000040      258000000      386004096      49.6%
 ```
 
-| | baseline (`OBCUVS02`) | fast (`OBCUVS03`) |
-| --- | --- | --- |
-| dataset copies | 2 (raw + inside the cuVS blob) | 1 (raw) |
-| snapshot container | 386 MB | 258 MB |
-| temp-file staging of the blob | 1 write + 1 read on save, 1 write + 1 read on reload | none |
+| | baseline (`OBCUVS02`) | fast (`OBCUVS03`) | fast + codecs (`OBCUVS04`) |
+| --- | --- | --- | --- |
+| dataset copies | 2 (raw + inside the cuVS blob) | 1 (raw) | 1 (raw) |
+| snapshot container | 386 MB | 258 MB | **130 MB** |
+| temp-file staging of the blob | 1 write + 1 read on save, 1 write + 1 read on reload | none | none |
+| lossless codec | – | – | int8 vectors + 24 bit neighbour ids |
 
 Reproduce with:
 

@@ -43,6 +43,7 @@ AXIS = "#cbd5e1"
 CPU_C = "#94a3b8"
 GPU_C = "#2f6df0"
 FAST_C = "#16a34a"
+COMP_C = "#0891b2"
 BLOB_C = "#cbd5e1"
 ACCENT = "#f59e0b"
 NINTH_C = "#7c3aed"
@@ -211,7 +212,7 @@ def panel_score_curve(svg: Svg, y0: int) -> int:
 
 def panel_container_bytes(svg: Svg, y0: int) -> int:
     """Snapshot container size: measured locally by test_fast_snapshot."""
-    h = 215
+    h = 251
     svg.text(PAD_L, y0 - 12, "快照容器体积（SIFT250K / Hidden250K，本地实测）", size=15, weight="600")
     svg.text(PAD_L, y0 + 4, "数据只存一份，且不再有 cuVS blob 过文件系统两遍",
              size=12, fill=MUTED)
@@ -223,6 +224,10 @@ def panel_container_bytes(svg: Svg, y0: int) -> int:
     metadata = 4096
     fast_total = ids + vectors + graph
     blob_total = ids + vectors + vectors + graph + metadata
+    # OBCUVS04 keeps the same container but stores the two big blocks in a
+    # lossless codec: int8 vectors (the contest datasets are integer valued)
+    # and 24 bit neighbour ids.
+    comp_total = ids + n * dim * 1 + n * degree * 3
 
     x0, x1 = PAD_L, W - PAD_R
     maxv = nice_ceiling(blob_total)
@@ -234,6 +239,7 @@ def panel_container_bytes(svg: Svg, y0: int) -> int:
     rows = [
         ("基线 OBCUVS02：数据存两份 + cuVS blob 过文件系统两遍", blob_total, BLOB_C),
         ("快路径 OBCUVS03：数据只存一份，无 blob 往返", fast_total, FAST_C),
+        ("快路径 OBCUVS04：再无损压缩两个大块（int8 向量 + 24bit 邻居 ID）", comp_total, COMP_C),
     ]
     y = y0 + 30
     for label, total, color in rows:
@@ -246,6 +252,10 @@ def panel_container_bytes(svg: Svg, y0: int) -> int:
     svg.text(x0, y, f"节省 {fmt_bytes(blob_total - fast_total)}"
              f"（{(blob_total - fast_total) / blob_total * 100:.1f}%）",
              size=12, fill=FAST_C, weight="600")
+    svg.text(x0, y + 22, f"再省 {fmt_bytes(fast_total - comp_total)}"
+             f"（{(fast_total - comp_total) / fast_total * 100:.1f}%），合计 "
+             f"{(blob_total - comp_total) / blob_total * 100:.1f}%",
+             size=12, fill=COMP_C, weight="600")
     return h
 
 
@@ -459,7 +469,7 @@ def panel_official_runs(svg: Svg, y0: int) -> int:
 
 def build_reference_svg() -> str:
     svg = Svg()
-    svg.height = 60 + 250 + 215 + 344 + 60
+    svg.height = 60 + 250 + 251 + 344 + 60
     svg.rect(0, 0, W, svg.height, "#ffffff")
     y = PAD_T
     y += panel_score_curve(svg, y) + 34
@@ -470,7 +480,7 @@ def build_reference_svg() -> str:
 
 def build_benchmark_svg(bench: dict, stages: dict) -> str:
     svg = Svg()
-    svg.height = 60 + 260 + 212 + 250 + 344 + 215 + 140
+    svg.height = 60 + 260 + 212 + 250 + 344 + 251 + 140
     svg.rect(0, 0, W, svg.height, "#ffffff")
     y = PAD_T
     y += panel_cpu_gpu(svg, y, bench) + 26

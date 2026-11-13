@@ -1,132 +1,88 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1481" viewBox="0 0 960 1481" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif"><rect x="0.00" y="0.00" width="960.00" height="1481.00" fill="#ffffff"/>
-<text x="92.00" y="52.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">CPU 与 GPU 构建耗时（CREATE VECTOR INDEX 计时窗口）</text>
-<text x="92.00" y="68.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">同一批数据、同一组索引参数，只有 lib 不同（250,000 × 128，3 次重复）</text>
-<rect x="143.00" y="134.77" width="150.00" height="143.23" fill="#94a3b8" rx="4"/>
-<text x="218.00" y="126.77" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="middle" font-weight="600">159.1s</text>
-<line x1="305.00" y1="129.47" x2="305.00" y2="136.29" stroke="#0f172a" stroke-width="2"/>
-<line x1="301.00" y1="129.47" x2="309.00" y2="129.47" stroke="#0f172a" stroke-width="2"/>
-<line x1="301.00" y1="136.29" x2="309.00" y2="136.29" stroke="#0f172a" stroke-width="2"/>
-<text x="305.00" y="316.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">157.5s–165.0s</text>
-<text x="299.00" y="298.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="600">CPU  lib=vsag</text>
-<rect x="557.00" y="236.35" width="150.00" height="41.65" fill="#2f6df0" rx="4"/>
-<text x="632.00" y="228.35" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="middle" font-weight="600">46.3s</text>
-<line x1="719.00" y1="235.26" x2="719.00" y2="236.74" stroke="#0f172a" stroke-width="2"/>
-<line x1="715.00" y1="235.26" x2="723.00" y2="235.26" stroke="#0f172a" stroke-width="2"/>
-<line x1="715.00" y1="236.74" x2="723.00" y2="236.74" stroke="#0f172a" stroke-width="2"/>
-<text x="719.00" y="316.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">45.8s–47.5s</text>
-<text x="713.00" y="298.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="600">GPU  lib=cuvs</text>
-<line x1="92.00" y1="278.00" x2="920.00" y2="278.00" stroke="#cbd5e1" stroke-width="1.5"/>
-<line x1="92.00" y1="278.00" x2="920.00" y2="278.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="282.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">0s</text>
-<line x1="92.00" y1="242.00" x2="920.00" y2="242.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="246.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">40s</text>
-<line x1="92.00" y1="206.00" x2="920.00" y2="206.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="210.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">80s</text>
-<line x1="92.00" y1="170.00" x2="920.00" y2="170.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="174.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">120s</text>
-<line x1="92.00" y1="134.00" x2="920.00" y2="134.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="138.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">160s</text>
-<line x1="92.00" y1="98.00" x2="920.00" y2="98.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="102.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">200s</text>
-<text x="920.00" y="92.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="13" fill="#2f6df0" text-anchor="end" font-weight="600">GPU 构建加速比：3.439x（CPU 中位数 ÷ GPU 中位数）</text>
-<text x="92.00" y="338.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">构建窗口分段耗时（build / export / write）</text>
-<text x="92.00" y="354.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">这决定还有多少工程优化空间：若 build 占大头，改图才有意义</text>
-<text x="92.00" y="380.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">快路径 OBCUVS03</text>
-<rect x="92.00" y="388.00" width="92.04" height="28.00" fill="#2f6df0" rx="2"/>
-<text x="138.02" y="407.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#ffffff" text-anchor="middle" font-weight="600">build 42.6s</text>
-<rect x="184.04" y="388.00" width="3.00" height="28.00" fill="#f59e0b" rx="2"/>
-<rect x="187.04" y="388.00" width="3.00" height="28.00" fill="#16a34a" rx="2"/>
-<text x="198.04" y="407.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">总计 42.9s</text>
-<text x="92.00" y="426.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">build 99.30% · export 0.02% · write 0.68%</text>
-<text x="92.00" y="442.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">基线 OBCUVS02</text>
-<rect x="92.00" y="450.00" width="91.78" height="28.00" fill="#2f6df0" rx="2"/>
-<text x="137.89" y="469.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#ffffff" text-anchor="middle" font-weight="600">build 42.5s</text>
-<rect x="183.78" y="450.00" width="3.00" height="28.00" fill="#16a34a" rx="2"/>
-<text x="194.78" y="469.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">总计 43.0s</text>
-<text x="92.00" y="488.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">build 98.84% · export 0.00% · write 0.57%</text>
-<text x="92.00" y="538.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">两条路径的 build 占比都不低于 98.84%：export 与 write 合计不到 1%，构建窗口里没有留给快照格式的优化空间</text>
-<line x1="92.00" y1="518.00" x2="920.00" y2="518.00" stroke="#cbd5e1" stroke-width="1.5"/>
-<text x="92.00" y="558.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">柱宽按毫秒比例；build = GPU 建图，export = 图回传主机，write = 快照写入</text>
-<text x="92.00" y="582.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">构建加速比 → 总分（评分公式 14·ln(r)/ln(3.0) + 查询分）</text>
-<text x="92.00" y="598.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">曲线为构建分（14·ln(r)/ln(3.0)）；两个圆点是平台真实跑出来的构建加速比，标注为该轮的总分</text>
-<line x1="92.00" y1="800.00" x2="920.00" y2="800.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="804.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">0</text>
-<line x1="92.00" y1="755.50" x2="920.00" y2="755.50" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="759.50" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">5</text>
-<line x1="92.00" y1="711.00" x2="920.00" y2="711.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="715.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">10</text>
-<line x1="92.00" y1="666.50" x2="920.00" y2="666.50" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="670.50" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">15</text>
-<line x1="92.00" y1="622.00" x2="920.00" y2="622.00" stroke="#e2e8f0" stroke-width="1"/>
-<text x="82.00" y="626.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">20</text>
-<line x1="92.00" y1="622.00" x2="92.00" y2="800.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
-<text x="92.00" y="818.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">0.0x</text>
-<line x1="230.00" y1="622.00" x2="230.00" y2="800.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
-<text x="230.00" y="818.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">0.5x</text>
-<line x1="368.00" y1="622.00" x2="368.00" y2="800.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
-<text x="368.00" y="818.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">1.0x</text>
-<line x1="506.00" y1="622.00" x2="506.00" y2="800.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
-<text x="506.00" y="818.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">1.5x</text>
-<line x1="644.00" y1="622.00" x2="644.00" y2="800.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
-<text x="644.00" y="818.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">2.0x</text>
-<line x1="782.00" y1="622.00" x2="782.00" y2="800.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
-<text x="782.00" y="818.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">2.5x</text>
-<line x1="920.00" y1="622.00" x2="920.00" y2="800.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
-<text x="920.00" y="818.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">3.0x</text>
-<line x1="92.00" y1="800.00" x2="920.00" y2="800.00" stroke="#cbd5e1" stroke-width="1.5"/>
-<path d="M368.00,800.00 L369.84,799.25 L371.68,798.50 L373.52,797.75 L375.36,797.02 L377.20,796.28 L379.04,795.55 L380.88,794.83 L382.72,794.11 L384.56,793.39 L386.40,792.68 L388.24,791.97 L390.08,791.27 L391.92,790.57 L393.76,789.88 L395.60,789.19 L397.44,788.51 L399.28,787.82 L401.12,787.15 L402.96,786.47 L404.80,785.80 L406.64,785.14 L408.48,784.48 L410.32,783.82 L412.16,783.17 L414.00,782.52 L415.84,781.87 L417.68,781.23 L419.52,780.59 L421.36,779.95 L423.20,779.32 L425.04,778.69 L426.88,778.07 L428.72,777.45 L430.56,776.83 L432.40,776.21 L434.24,775.60 L436.08,774.99 L437.92,774.39 L439.76,773.79 L441.60,773.19 L443.44,772.59 L445.28,772.00 L447.12,771.41 L448.96,770.83 L450.80,770.24 L452.64,769.66 L454.48,769.09 L456.32,768.51 L458.16,767.94 L460.00,767.37 L461.84,766.81 L463.68,766.24 L465.52,765.68 L467.36,765.13 L469.20,764.57 L471.04,764.02 L472.88,763.47 L474.72,762.92 L476.56,762.38 L478.40,761.84 L480.24,761.30 L482.08,760.76 L483.92,760.23 L485.76,759.70 L487.60,759.17 L489.44,758.64 L491.28,758.12 L493.12,757.60 L494.96,757.08 L496.80,756.56 L498.64,756.05 L500.48,755.54 L502.32,755.03 L504.16,754.52 L506.00,754.01 L507.84,753.51 L509.68,753.01 L511.52,752.51 L513.36,752.02 L515.20,751.52 L517.04,751.03 L518.88,750.54 L520.72,750.05 L522.56,749.57 L524.40,749.08 L526.24,748.60 L528.08,748.12 L529.92,747.64 L531.76,747.17 L533.60,746.69 L535.44,746.22 L537.28,745.75 L539.12,745.29 L540.96,744.82 L542.80,744.36 L544.64,743.89 L546.48,743.43 L548.32,742.98 L550.16,742.52 L552.00,742.06 L553.84,741.61 L555.68,741.16 L557.52,740.71 L559.36,740.26 L561.20,739.82 L563.04,739.37 L564.88,738.93 L566.72,738.49 L568.56,738.05 L570.40,737.62 L572.24,737.18 L574.08,736.75 L575.92,736.31 L577.76,735.88 L579.60,735.46 L581.44,735.03 L583.28,734.60 L585.12,734.18 L586.96,733.76 L588.80,733.34 L590.64,732.92 L592.48,732.50 L594.32,732.08 L596.16,731.67 L598.00,731.25 L599.84,730.84 L601.68,730.43 L603.52,730.02 L605.36,729.62 L607.20,729.21 L609.04,728.81 L610.88,728.40 L612.72,728.00 L614.56,727.60 L616.40,727.20 L618.24,726.81 L620.08,726.41 L621.92,726.02 L623.76,725.62 L625.60,725.23 L627.44,724.84 L629.28,724.45 L631.12,724.06 L632.96,723.68 L634.80,723.29 L636.64,722.91 L638.48,722.53 L640.32,722.14 L642.16,721.76 L644.00,721.39 L645.84,721.01 L647.68,720.63 L649.52,720.26 L651.36,719.88 L653.20,719.51 L655.04,719.14 L656.88,718.77 L658.72,718.40 L660.56,718.03 L662.40,717.67 L664.24,717.30 L666.08,716.94 L667.92,716.57 L669.76,716.21 L671.60,715.85 L673.44,715.49 L675.28,715.13 L677.12,714.78 L678.96,714.42 L680.80,714.07 L682.64,713.71 L684.48,713.36 L686.32,713.01 L688.16,712.66 L690.00,712.31 L691.84,711.96 L693.68,711.61 L695.52,711.27 L697.36,710.92 L699.20,710.58 L701.04,710.23 L702.88,709.89 L704.72,709.55 L706.56,709.21 L708.40,708.87 L710.24,708.53 L712.08,708.20 L713.92,707.86 L715.76,707.52 L717.60,707.19 L719.44,706.86 L721.28,706.53 L723.12,706.19 L724.96,705.86 L726.80,705.53 L728.64,705.21 L730.48,704.88 L732.32,704.55 L734.16,704.23 L736.00,703.90 L737.84,703.58 L739.68,703.26 L741.52,702.94 L743.36,702.61 L745.20,702.29 L747.04,701.98 L748.88,701.66 L750.72,701.34 L752.56,701.02 L754.40,700.71 L756.24,700.39 L758.08,700.08 L759.92,699.77 L761.76,699.45 L763.60,699.14 L765.44,698.83 L767.28,698.52 L769.12,698.22 L770.96,697.91 L772.80,697.60 L774.64,697.29 L776.48,696.99 L778.32,696.68 L780.16,696.38 L782.00,696.08 L783.84,695.78 L785.68,695.47 L787.52,695.17 L789.36,694.87 L791.20,694.58 L793.04,694.28 L794.88,693.98 L796.72,693.68 L798.56,693.39 L800.40,693.09 L802.24,692.80 L804.08,692.51 L805.92,692.21 L807.76,691.92 L809.60,691.63 L811.44,691.34 L813.28,691.05 L815.12,690.76 L816.96,690.47 L818.80,690.19 L820.64,689.90 L822.48,689.61 L824.32,689.33 L826.16,689.04 L828.00,688.76 L829.84,688.48 L831.68,688.19 L833.52,687.91 L835.36,687.63 L837.20,687.35 L839.04,687.07 L840.88,686.79 L842.72,686.51 L844.56,686.23 L846.40,685.96 L848.24,685.68 L850.08,685.41 L851.92,685.13 L853.76,684.86 L855.60,684.58 L857.44,684.31 L859.28,684.04 L861.12,683.77 L862.96,683.50 L864.80,683.22 L866.64,682.96 L868.48,682.69 L870.32,682.42 L872.16,682.15 L874.00,681.88 L875.84,681.62 L877.68,681.35 L879.52,681.08 L881.36,680.82 L883.20,680.56 L885.04,680.29 L886.88,680.03 L888.72,679.77 L890.56,679.51 L892.40,679.24 L894.24,678.98 L896.08,678.72 L897.92,678.47 L899.76,678.21 L901.60,677.95 L903.44,677.69 L905.28,677.43 L907.12,677.18 L908.96,676.92 L910.80,676.67 L912.64,676.41 L914.48,676.16 L916.32,675.91 L918.16,675.65 L920.00,675.40" stroke="#2f6df0" stroke-width="2.5" fill="none"/>
-<line x1="396.98" y1="622.00" x2="396.98" y2="800.00" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4 4"/>
-<circle cx="396.98" cy="788.68" r="4.5" fill="#cbd5e1"/>
-<line x1="406.36" y1="622.00" x2="406.36" y2="800.00" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="4 4"/>
-<circle cx="406.36" cy="785.24" r="4.5" fill="#16a34a"/>
-<circle cx="572.24" cy="634.00" r="4.5" fill="#cbd5e1"/>
-<text x="584.24" y="638.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">冻结基线 445b9b2：1.105x → 总分 5.271</text>
-<circle cx="572.24" cy="658.00" r="4.5" fill="#16a34a"/>
-<text x="584.24" y="662.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">本方案 cc6c79f3：1.139x → 总分 6.115</text>
-<text x="506.00" y="838.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle" font-weight="normal">构建加速比（基线构建耗时 ÷ 本方案构建耗时）</text>
-<text x="92.00" y="866.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">官方提测实测结果（平台输出，2026-11-09 / 2026-11-13）</text>
-<text x="92.00" y="882.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">冻结基线 445b9b2 · 第 8 轮 cc6c79f3 · 第 9 轮 3794da35；三轮门槛均为 gates=pass</text>
-<text x="92.00" y="900.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">第 9 轮与第 8 轮的源码只差一处「恢复线程栈」，且该改动在计时窗口之外 —— 比值回落是评测抖动；平台取最高分，最好成绩仍是 6.115</text>
-<text x="92.00" y="974.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">构建加速比 build</text>
-<text x="234.00" y="945.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
-<rect x="242.00" y="932.00" width="518.02" height="18.00" fill="#cbd5e1" rx="3"/>
-<text x="768.02" y="945.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.105x</text>
-<text x="234.00" y="969.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
-<rect x="242.00" y="956.00" width="533.96" height="18.00" fill="#16a34a" rx="3"/>
-<text x="783.96" y="969.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.139x</text>
-<text x="234.00" y="993.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
-<rect x="242.00" y="980.00" width="506.77" height="18.00" fill="#7c3aed" rx="3"/>
-<text x="756.77" y="993.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.081x</text>
-<line x1="710.80" y1="930.00" x2="710.80" y2="1000.00" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 4"/>
-<text x="715.80" y="1012.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#f59e0b" text-anchor="start" font-weight="normal">1.0x = 冻结基线</text>
-<text x="92.00" y="1066.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">查询吞吐比 query</text>
-<text x="234.00" y="1037.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
-<rect x="242.00" y="1024.00" width="457.08" height="18.00" fill="#cbd5e1" rx="3"/>
-<text x="707.08" y="1037.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">0.975x</text>
-<text x="234.00" y="1061.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
-<rect x="242.00" y="1048.00" width="513.80" height="18.00" fill="#16a34a" rx="3"/>
-<text x="763.80" y="1061.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.096x</text>
-<text x="234.00" y="1085.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
-<rect x="242.00" y="1072.00" width="501.15" height="18.00" fill="#7c3aed" rx="3"/>
-<text x="751.15" y="1085.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.069x</text>
-<line x1="710.80" y1="1022.00" x2="710.80" y2="1092.00" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 4"/>
-<text x="715.80" y="1104.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#f59e0b" text-anchor="start" font-weight="normal">1.0x = 冻结基线</text>
-<text x="92.00" y="1158.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">总分 score</text>
-<text x="234.00" y="1129.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
-<rect x="242.00" y="1116.00" width="441.26" height="18.00" fill="#cbd5e1" rx="3"/>
-<text x="691.26" y="1129.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">5.271</text>
-<text x="234.00" y="1153.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
-<rect x="242.00" y="1140.00" width="511.91" height="18.00" fill="#16a34a" rx="3"/>
-<text x="761.91" y="1153.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">6.115</text>
-<text x="234.00" y="1177.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
-<rect x="242.00" y="1164.00" width="445.69" height="18.00" fill="#7c3aed" rx="3"/>
-<text x="695.69" y="1177.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">5.324</text>
-<text x="92.00" y="1232.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">快照容器体积（SIFT250K / Hidden250K，本地实测）</text>
-<text x="92.00" y="1248.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">数据只存一份，且不再有 cuVS blob 过文件系统两遍</text>
-<text x="92.00" y="1274.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">基线 OBCUVS02：数据存两份 + cuVS blob 过文件系统两遍</text>
-<rect x="92.00" y="1282.00" width="799.03" height="24.00" fill="#cbd5e1" rx="4"/>
-<text x="899.03" y="1299.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">368.1 MiB</text>
-<text x="92.00" y="1336.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">快路径 OBCUVS03：数据只存一份，无 blob 往返</text>
-<rect x="92.00" y="1344.00" width="534.06" height="24.00" fill="#16a34a" rx="4"/>
-<text x="634.06" y="1361.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">246.0 MiB</text>
-<text x="92.00" y="1398.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#16a34a" text-anchor="start" font-weight="600">节省 122.1 MiB（33.2%）</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="965" viewBox="0 0 960 965" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif"><rect x="0.00" y="0.00" width="960.00" height="965.00" fill="#ffffff"/>
+<text x="92.00" y="50.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">构建加速比 → 总分（评分公式 14·ln(r)/ln(3.0) + 查询分）</text>
+<text x="92.00" y="66.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">曲线为构建分（14·ln(r)/ln(3.0)）；两个圆点是平台真实跑出来的构建加速比，标注为该轮的总分</text>
+<line x1="92.00" y1="268.00" x2="920.00" y2="268.00" stroke="#e2e8f0" stroke-width="1"/>
+<text x="82.00" y="272.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">0</text>
+<line x1="92.00" y1="223.50" x2="920.00" y2="223.50" stroke="#e2e8f0" stroke-width="1"/>
+<text x="82.00" y="227.50" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">5</text>
+<line x1="92.00" y1="179.00" x2="920.00" y2="179.00" stroke="#e2e8f0" stroke-width="1"/>
+<text x="82.00" y="183.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">10</text>
+<line x1="92.00" y1="134.50" x2="920.00" y2="134.50" stroke="#e2e8f0" stroke-width="1"/>
+<text x="82.00" y="138.50" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">15</text>
+<line x1="92.00" y1="90.00" x2="920.00" y2="90.00" stroke="#e2e8f0" stroke-width="1"/>
+<text x="82.00" y="94.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">20</text>
+<line x1="92.00" y1="90.00" x2="92.00" y2="268.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="92.00" y="286.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">0.0x</text>
+<line x1="230.00" y1="90.00" x2="230.00" y2="268.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="230.00" y="286.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">0.5x</text>
+<line x1="368.00" y1="90.00" x2="368.00" y2="268.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="368.00" y="286.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">1.0x</text>
+<line x1="506.00" y1="90.00" x2="506.00" y2="268.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="506.00" y="286.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">1.5x</text>
+<line x1="644.00" y1="90.00" x2="644.00" y2="268.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="644.00" y="286.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">2.0x</text>
+<line x1="782.00" y1="90.00" x2="782.00" y2="268.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="782.00" y="286.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">2.5x</text>
+<line x1="920.00" y1="90.00" x2="920.00" y2="268.00" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 4"/>
+<text x="920.00" y="286.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="normal">3.0x</text>
+<line x1="92.00" y1="268.00" x2="920.00" y2="268.00" stroke="#cbd5e1" stroke-width="1.5"/>
+<path d="M368.00,268.00 L369.84,267.25 L371.68,266.50 L373.52,265.75 L375.36,265.02 L377.20,264.28 L379.04,263.55 L380.88,262.83 L382.72,262.11 L384.56,261.39 L386.40,260.68 L388.24,259.97 L390.08,259.27 L391.92,258.57 L393.76,257.88 L395.60,257.19 L397.44,256.51 L399.28,255.82 L401.12,255.15 L402.96,254.47 L404.80,253.80 L406.64,253.14 L408.48,252.48 L410.32,251.82 L412.16,251.17 L414.00,250.52 L415.84,249.87 L417.68,249.23 L419.52,248.59 L421.36,247.95 L423.20,247.32 L425.04,246.69 L426.88,246.07 L428.72,245.45 L430.56,244.83 L432.40,244.21 L434.24,243.60 L436.08,242.99 L437.92,242.39 L439.76,241.79 L441.60,241.19 L443.44,240.59 L445.28,240.00 L447.12,239.41 L448.96,238.83 L450.80,238.24 L452.64,237.66 L454.48,237.09 L456.32,236.51 L458.16,235.94 L460.00,235.37 L461.84,234.81 L463.68,234.24 L465.52,233.68 L467.36,233.13 L469.20,232.57 L471.04,232.02 L472.88,231.47 L474.72,230.92 L476.56,230.38 L478.40,229.84 L480.24,229.30 L482.08,228.76 L483.92,228.23 L485.76,227.70 L487.60,227.17 L489.44,226.64 L491.28,226.12 L493.12,225.60 L494.96,225.08 L496.80,224.56 L498.64,224.05 L500.48,223.54 L502.32,223.03 L504.16,222.52 L506.00,222.01 L507.84,221.51 L509.68,221.01 L511.52,220.51 L513.36,220.02 L515.20,219.52 L517.04,219.03 L518.88,218.54 L520.72,218.05 L522.56,217.57 L524.40,217.08 L526.24,216.60 L528.08,216.12 L529.92,215.64 L531.76,215.17 L533.60,214.69 L535.44,214.22 L537.28,213.75 L539.12,213.29 L540.96,212.82 L542.80,212.36 L544.64,211.89 L546.48,211.43 L548.32,210.98 L550.16,210.52 L552.00,210.06 L553.84,209.61 L555.68,209.16 L557.52,208.71 L559.36,208.26 L561.20,207.82 L563.04,207.37 L564.88,206.93 L566.72,206.49 L568.56,206.05 L570.40,205.62 L572.24,205.18 L574.08,204.75 L575.92,204.31 L577.76,203.88 L579.60,203.46 L581.44,203.03 L583.28,202.60 L585.12,202.18 L586.96,201.76 L588.80,201.34 L590.64,200.92 L592.48,200.50 L594.32,200.08 L596.16,199.67 L598.00,199.25 L599.84,198.84 L601.68,198.43 L603.52,198.02 L605.36,197.62 L607.20,197.21 L609.04,196.81 L610.88,196.40 L612.72,196.00 L614.56,195.60 L616.40,195.20 L618.24,194.81 L620.08,194.41 L621.92,194.02 L623.76,193.62 L625.60,193.23 L627.44,192.84 L629.28,192.45 L631.12,192.06 L632.96,191.68 L634.80,191.29 L636.64,190.91 L638.48,190.53 L640.32,190.14 L642.16,189.76 L644.00,189.39 L645.84,189.01 L647.68,188.63 L649.52,188.26 L651.36,187.88 L653.20,187.51 L655.04,187.14 L656.88,186.77 L658.72,186.40 L660.56,186.03 L662.40,185.67 L664.24,185.30 L666.08,184.94 L667.92,184.57 L669.76,184.21 L671.60,183.85 L673.44,183.49 L675.28,183.13 L677.12,182.78 L678.96,182.42 L680.80,182.07 L682.64,181.71 L684.48,181.36 L686.32,181.01 L688.16,180.66 L690.00,180.31 L691.84,179.96 L693.68,179.61 L695.52,179.27 L697.36,178.92 L699.20,178.58 L701.04,178.23 L702.88,177.89 L704.72,177.55 L706.56,177.21 L708.40,176.87 L710.24,176.53 L712.08,176.20 L713.92,175.86 L715.76,175.52 L717.60,175.19 L719.44,174.86 L721.28,174.53 L723.12,174.19 L724.96,173.86 L726.80,173.53 L728.64,173.21 L730.48,172.88 L732.32,172.55 L734.16,172.23 L736.00,171.90 L737.84,171.58 L739.68,171.26 L741.52,170.94 L743.36,170.61 L745.20,170.29 L747.04,169.98 L748.88,169.66 L750.72,169.34 L752.56,169.02 L754.40,168.71 L756.24,168.39 L758.08,168.08 L759.92,167.77 L761.76,167.45 L763.60,167.14 L765.44,166.83 L767.28,166.52 L769.12,166.22 L770.96,165.91 L772.80,165.60 L774.64,165.29 L776.48,164.99 L778.32,164.68 L780.16,164.38 L782.00,164.08 L783.84,163.78 L785.68,163.47 L787.52,163.17 L789.36,162.87 L791.20,162.58 L793.04,162.28 L794.88,161.98 L796.72,161.68 L798.56,161.39 L800.40,161.09 L802.24,160.80 L804.08,160.51 L805.92,160.21 L807.76,159.92 L809.60,159.63 L811.44,159.34 L813.28,159.05 L815.12,158.76 L816.96,158.47 L818.80,158.19 L820.64,157.90 L822.48,157.61 L824.32,157.33 L826.16,157.04 L828.00,156.76 L829.84,156.48 L831.68,156.19 L833.52,155.91 L835.36,155.63 L837.20,155.35 L839.04,155.07 L840.88,154.79 L842.72,154.51 L844.56,154.23 L846.40,153.96 L848.24,153.68 L850.08,153.41 L851.92,153.13 L853.76,152.86 L855.60,152.58 L857.44,152.31 L859.28,152.04 L861.12,151.77 L862.96,151.50 L864.80,151.22 L866.64,150.96 L868.48,150.69 L870.32,150.42 L872.16,150.15 L874.00,149.88 L875.84,149.62 L877.68,149.35 L879.52,149.08 L881.36,148.82 L883.20,148.56 L885.04,148.29 L886.88,148.03 L888.72,147.77 L890.56,147.51 L892.40,147.24 L894.24,146.98 L896.08,146.72 L897.92,146.47 L899.76,146.21 L901.60,145.95 L903.44,145.69 L905.28,145.43 L907.12,145.18 L908.96,144.92 L910.80,144.67 L912.64,144.41 L914.48,144.16 L916.32,143.91 L918.16,143.65 L920.00,143.40" stroke="#2f6df0" stroke-width="2.5" fill="none"/>
+<line x1="396.98" y1="90.00" x2="396.98" y2="268.00" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4 4"/>
+<circle cx="396.98" cy="256.68" r="4.5" fill="#cbd5e1"/>
+<line x1="406.36" y1="90.00" x2="406.36" y2="268.00" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="4 4"/>
+<circle cx="406.36" cy="253.24" r="4.5" fill="#16a34a"/>
+<circle cx="572.24" cy="102.00" r="4.5" fill="#cbd5e1"/>
+<text x="584.24" y="106.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">冻结基线 445b9b2：1.105x → 总分 5.271</text>
+<circle cx="572.24" cy="126.00" r="4.5" fill="#16a34a"/>
+<text x="584.24" y="130.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">本方案 cc6c79f3：1.139x → 总分 6.115</text>
+<text x="506.00" y="306.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle" font-weight="normal">构建加速比（基线构建耗时 ÷ 本方案构建耗时）</text>
+<text x="92.00" y="334.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">官方提测实测结果（平台输出，2026-11-09 / 2026-11-13）</text>
+<text x="92.00" y="350.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">冻结基线 445b9b2 · 第 8 轮 cc6c79f3 · 第 9 轮 3794da35；三轮门槛均为 gates=pass</text>
+<text x="92.00" y="368.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">第 9 轮与第 8 轮的源码只差一处「恢复线程栈」，且该改动在计时窗口之外 —— 比值回落是评测抖动；平台取最高分，最好成绩仍是 6.115</text>
+<text x="92.00" y="442.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">构建加速比 build</text>
+<text x="234.00" y="413.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
+<rect x="242.00" y="400.00" width="518.02" height="18.00" fill="#cbd5e1" rx="3"/>
+<text x="768.02" y="413.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.105x</text>
+<text x="234.00" y="437.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
+<rect x="242.00" y="424.00" width="533.96" height="18.00" fill="#16a34a" rx="3"/>
+<text x="783.96" y="437.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.139x</text>
+<text x="234.00" y="461.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
+<rect x="242.00" y="448.00" width="506.77" height="18.00" fill="#7c3aed" rx="3"/>
+<text x="756.77" y="461.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.081x</text>
+<line x1="710.80" y1="398.00" x2="710.80" y2="468.00" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 4"/>
+<text x="715.80" y="480.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#f59e0b" text-anchor="start" font-weight="normal">1.0x = 冻结基线</text>
+<text x="92.00" y="534.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">查询吞吐比 query</text>
+<text x="234.00" y="505.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
+<rect x="242.00" y="492.00" width="457.08" height="18.00" fill="#cbd5e1" rx="3"/>
+<text x="707.08" y="505.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">0.975x</text>
+<text x="234.00" y="529.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
+<rect x="242.00" y="516.00" width="513.80" height="18.00" fill="#16a34a" rx="3"/>
+<text x="763.80" y="529.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.096x</text>
+<text x="234.00" y="553.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
+<rect x="242.00" y="540.00" width="501.15" height="18.00" fill="#7c3aed" rx="3"/>
+<text x="751.15" y="553.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.069x</text>
+<line x1="710.80" y1="490.00" x2="710.80" y2="560.00" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 4"/>
+<text x="715.80" y="572.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#f59e0b" text-anchor="start" font-weight="normal">1.0x = 冻结基线</text>
+<text x="92.00" y="626.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">总分 score</text>
+<text x="234.00" y="597.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
+<rect x="242.00" y="584.00" width="441.26" height="18.00" fill="#cbd5e1" rx="3"/>
+<text x="691.26" y="597.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">5.271</text>
+<text x="234.00" y="621.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
+<rect x="242.00" y="608.00" width="511.91" height="18.00" fill="#16a34a" rx="3"/>
+<text x="761.91" y="621.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">6.115</text>
+<text x="234.00" y="645.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
+<rect x="242.00" y="632.00" width="445.69" height="18.00" fill="#7c3aed" rx="3"/>
+<text x="695.69" y="645.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">5.324</text>
+<text x="92.00" y="700.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">快照容器体积（SIFT250K / Hidden250K，本地实测）</text>
+<text x="92.00" y="716.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">数据只存一份，且不再有 cuVS blob 过文件系统两遍</text>
+<text x="92.00" y="742.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">基线 OBCUVS02：数据存两份 + cuVS blob 过文件系统两遍</text>
+<rect x="92.00" y="750.00" width="799.03" height="24.00" fill="#cbd5e1" rx="4"/>
+<text x="899.03" y="767.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">368.1 MiB</text>
+<text x="92.00" y="804.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">快路径 OBCUVS03：数据只存一份，无 blob 往返</text>
+<rect x="92.00" y="812.00" width="534.06" height="24.00" fill="#16a34a" rx="4"/>
+<text x="634.06" y="829.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">246.0 MiB</text>
+<text x="92.00" y="866.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">快路径 OBCUVS04：再无损压缩两个大块（int8 向量 + 24bit 邻居 ID）</text>
+<rect x="92.00" y="874.00" width="269.10" height="24.00" fill="#0891b2" rx="4"/>
+<text x="369.10" y="891.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">124.0 MiB</text>
+<text x="92.00" y="928.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#16a34a" text-anchor="start" font-weight="600">节省 122.1 MiB（33.2%）</text>
+<text x="92.00" y="950.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0891b2" text-anchor="start" font-weight="600">再省 122.1 MiB（49.6%），合计 66.3%</text></svg>

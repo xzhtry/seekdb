@@ -3,7 +3,7 @@
 
 Panels
   1  build time vs recall@100 frontier at 250k x 128 (measured on the cloud box)
-  2  score map: build ratio -> contest score, with the current 6.115 marked
+  2  score map: build ratio -> contest score, with every official run marked
 
 Everything is read from the raw sweep logs, so no number is transcribed by hand.
 
@@ -281,7 +281,7 @@ def main() -> int:
         t = s / 20.0
         return qy1 - t * (qy1 - qy0)
 
-    svg.text(qx0, qy0 - 16, "② 官方评分映射：构建加速比 → 总分（查询比 1.599x，2 分已封顶拿满）", 13, INK, weight="600")
+    svg.text(qx0, qy0 - 16, "② 官方评分映射：构建加速比 → 总分（查询比 ≥1.5x，2 分已封顶拿满）", 13, INK, weight="600")
     for gx in (1.0, 1.5, 2.0, 2.5, 3.0, 3.5):
         x = XS(gx)
         svg.line(x, qy0, x, qy1, GRID, 1)
@@ -313,18 +313,49 @@ def main() -> int:
     # The official runs, in the order they happened. The build ratio and the
     # score are the platform's own numbers, not an extrapolation.
     official = [
-        (1.105, "5.271", "冻结基线 445b9b2", MUTED, -9),
-        (1.139, "6.115", "第 8 轮 cc6c79f3", MUTED, 17),
-        (1.648, "12.369", "第 10 轮 e568a8b1", ACC_C, -9),
-        (2.120, "15.575", "第 11 轮 11f2e9f5", PROD_C, 17),
+        (1.105, "5.271", "冻结基线 445b9b2", MUTED),
+        (1.081, "5.324", "第 9 轮 3794da35", MUTED),
+        (1.139, "6.115", "第 8 轮 cc6c79f3", MUTED),
+        (1.648, "12.369", "第 10 轮 e568a8b1", ACC_C),
+        (2.120, "15.575", "第 11 轮 11f2e9f5", PROD_C),
+        (2.114, "15.539", "第 13 轮 5800e6b4", PROD_C),
+        (2.188, "15.977", "第 14 轮 e4a56362", BEST_C),
+        (2.180, "15.937", "第 15 轮 c60fd055", MUTED),
     ]
-    for r, sc, lab, col, dy in official:
+    for r, sc, _lab, col in official:
         x, y = XS(r), YS(float(sc))
         svg.circle(x, y, 6, col, "#ffffff", 2)
-        svg.text(x + 11, y + dy, f"{lab}：{sc} 分", 10, col, weight="600")
+
+    # Rounds 11/13/14/15 land within 15 px of each other, so they share one
+    # callout instead of four overlapping labels.
+    svg.text(XS(2.188) - 12, YS(15.977) - 7,
+             "第 11~15 轮：2.11~2.19x ⇒ 15.54~15.98 分（第 14 轮最好）",
+             10, BEST_C, weight="600", anchor="end")
+
+    # Short labels where they cannot collide with each other.
+    svg.text(XS(1.105) + 10, YS(5.271) - 4, "冻结基线", 10, MUTED, weight="600")
+    svg.text(XS(1.139) + 10, YS(6.115) - 6, "第 8 轮", 10, MUTED, weight="600")
+    svg.text(XS(1.081) - 10, YS(5.324) + 14, "第 9 轮", 10, MUTED, weight="600", anchor="end")
+    svg.text(XS(1.648) + 10, YS(12.369) - 5, "第 10 轮 e568a8b1", 10, ACC_C, weight="600")
+
+    # The full ledger of official runs, two columns, in the free area under
+    # the curve.
+    svg.text(qx0 + 9, qy1 - 62, "官方提测记录（平台自己回显的构建比 / 总分）", 10, MUTED, weight="600")
+    ledger = [
+        ("冻结基线 445b9b2", "1.105x / 5.271", "第 11 轮 11f2e9f5", "2.120x / 15.575"),
+        ("第 8 轮 cc6c79f3", "1.139x / 6.115", "第 13 轮 5800e6b4", "2.114x / 15.539"),
+        ("第 9 轮 3794da35", "1.081x / 5.324", "第 14 轮 e4a56362", "2.188x / 15.977"),
+        ("第 10 轮 e568a8b1", "1.648x / 12.369", "第 15 轮 c60fd055", "2.180x / 15.937"),
+    ]
+    for i, (la, va, lb, vb) in enumerate(ledger):
+        yy = qy1 - 44 + i * 16
+        svg.text(qx0 + 9, yy, la, 10, MUTED)
+        svg.text(qx0 + 108, yy, va, 10, INK, weight="600")
+        svg.text(qx0 + 216, yy, lb, 10, MUTED)
+        svg.text(qx0 + 330, yy, vb, 10, INK, weight="600")
 
     svg.text(qx0, qy1 + 58,
-             "评分式（由四轮官方成绩反推并验证）：总分 = 4 + 14·ln(构建比)/ln(3.0) + min(2, 2·ln(查询比)/ln(1.5))",
+             "评分式（由九轮官方成绩反推并验证）：总分 = 4 + 14·ln(构建比)/ln(3.0) + min(2, 2·ln(查询比)/ln(1.5))",
              11, MUTED)
 
     svg.add("</svg>")

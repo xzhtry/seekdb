@@ -33,18 +33,23 @@ snapshot container holds:
 | --- | --- | --- | --- | --- | --- |
 | baseline (`OBCUVS02`) | 2 MB | 128 MB | 128 MB (inside the blob) | 256 MB | **386 MB** |
 | fast (`OBCUVS03`) | 2 MB | 128 MB | 128 MB | – | **258 MB** |
+| fast + lossless codecs (`OBCUVS04`) | 2 MB | **32 MB** | **96 MB** | – | **130 MB** |
 
-`docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp` prints these numbers; the saving is
-33.2 % of the container bytes, and the temp-file staging of the blob disappears
-entirely.
+`docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp` prints these numbers; `OBCUVS03`
+saves 33.2 % of the container bytes and drops the temp-file staging of the blob
+entirely, `OBCUVS04` saves a further 49.6 % on top of it (see §2.4).
 
 ## 2. What the fast path does
 
 Instead of shipping a cuVS blob, the fast path ships only the **knn graph**:
 
 ```
-OBCUVS03 | dim | reserved | n | graph_degree | metric | ids[n] | vectors[n*dim] | graph[n*degree]
+OBCUVS04 | dim | vec_codec | n | graph_degree | metric | graph_codec | ids[n] | vectors[n*dim] | graph[n*degree]
 ```
+
+`vec_codec` and `graph_codec` name the encoding of the two big blocks (see
+§2.4); the container is therefore **self describing** and needs no external
+parameter to be read back.
 
 The index is then re-created from `(graph, dataset)` with
 `cuvsCagraIndexFromArgs()`.
@@ -113,13 +118,48 @@ directly. A hipVS build that does not export them keeps working: the bridge
 falls back to the cuVS file format, so the server still links and still serves
 GPU queries.
 
+### 2.4 Lossless compression of the two big blocks
+
+The contest shapes are dominated by two blocks: the dataset (250000 x 128
+float32 = 128 MB) and the knn graph (250000 x 128 neighbour ids = 128 MB).
+`OBCUVS04` stores both in a **lossless** codec that the writer *detects* and
+records in the header:
+
+| block | codec | encoding | selected when |
+| --- | --- | --- | --- |
+| vectors | `VEC_I8 = 1` | 1 byte per component | every component is an integer in [-128, 127] |
+| vectors | `VEC_I16 = 2` | 2 bytes per component | every component is an integer in [-32768, 32767] |
+| vectors | `VEC_F32 = 4` | 4 bytes per component | anything else (identical to `OBCUVS03`) |
+| graph | `GRAPH_U24 = 3` | 3 bytes per neighbour id | every neighbour id is < 2^24 |
+| graph | `GRAPH_U32 = 4` | 4 bytes per neighbour id | anything else (identical to `OBCUVS03`) |
+
+The property that matters: **the codec is only chosen when the round trip is
+bit exact.** A component that cannot be represented exactly falls back to the
+next codec, and the last fallback is the original float32 layout. The graph is
+a list of `uint32` ids, so 24 bits store it exactly whenever the ids fit.
+
+Consequences:
+
+- the restored index holds **the same graph over the same vector values**, so
+  the recall, the neighbour ids and the query latency are unchanged — the
+  change is a **storage** change, not an index change;
+- a dataset that is not integer valued simply keeps the float32 codec, so the
+  mechanism can never lose precision;
+- the container still describes itself, so an `OBCUVS04` reader never has to
+  guess how to interpret the payload.
+
+For the contest shapes the two codecs are the int8 one (the SIFT vectors are
+integer valued; the benchmark stores int8 data in float32) and the 24 bit one
+(250000 neighbours fit in 24 bits), which gives 130,000,040 bytes instead of
+258,000,000 — **49.6 % smaller**.
+
 ## 3. Files
 
 | file | role |
 | --- | --- |
 | `tools/hipvs_bridge/seekdb_cuvs_bridge.c` | graph export, index restore, probe |
 | `tools/hipvs_bridge/seekdb_cuvs_bridge.h` | the new C ABI |
-| `src/oblib/lib/vector/ob_cuvs_snapshot.h` | the `OBCUVS03` container (no OB dependency) |
+| `src/oblib/lib/vector/ob_cuvs_snapshot.h` | the `OBCUVS04` container (no OB dependency) |
 | `src/oblib/lib/vector/ob_vsag_adaptor.cpp` | fast serialize/deserialize, stage timings |
 | `docs/gpu-vector-index-hipvs-cuvs/validation/test_fast_snapshot.cpp` | standalone container unit test |
 
