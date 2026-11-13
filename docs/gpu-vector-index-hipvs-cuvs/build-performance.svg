@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1409" viewBox="0 0 960 1409" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif"><rect x="0.00" y="0.00" width="960.00" height="1409.00" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1481" viewBox="0 0 960 1481" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif"><rect x="0.00" y="0.00" width="960.00" height="1481.00" fill="#ffffff"/>
 <text x="92.00" y="52.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">CPU 与 GPU 构建耗时（CREATE VECTOR INDEX 计时窗口）</text>
 <text x="92.00" y="68.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">同一批数据、同一组索引参数，只有 lib 不同（250,000 × 128，3 次重复）</text>
 <rect x="143.00" y="134.77" width="150.00" height="143.23" fill="#94a3b8" rx="4"/>
@@ -84,39 +84,49 @@
 <circle cx="572.24" cy="658.00" r="4.5" fill="#16a34a"/>
 <text x="584.24" y="662.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">本方案 cc6c79f3：1.139x → 总分 6.115</text>
 <text x="506.00" y="838.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle" font-weight="normal">构建加速比（基线构建耗时 ÷ 本方案构建耗时）</text>
-<text x="92.00" y="866.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">官方提测实测结果（平台输出，2026-11-09）</text>
-<text x="92.00" y="882.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">同一轮的冻结基线 445b9b2  vs  本方案 cc6c79f3；两轮门槛均为 gates=pass</text>
-<text x="92.00" y="940.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">构建加速比 build</text>
-<text x="180.00" y="927.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">基线</text>
-<rect x="188.00" y="914.00" width="565.76" height="18.00" fill="#cbd5e1" rx="3"/>
-<text x="761.76" y="927.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.105x</text>
-<text x="180.00" y="951.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">本方案</text>
-<rect x="188.00" y="938.00" width="583.17" height="18.00" fill="#16a34a" rx="3"/>
-<text x="779.17" y="951.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.139x</text>
-<line x1="700.00" y1="912.00" x2="700.00" y2="960.00" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 4"/>
-<text x="705.00" y="972.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#f59e0b" text-anchor="start" font-weight="normal">1.0x = 冻结基线</text>
-<text x="92.00" y="1020.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">查询吞吐比 query</text>
-<text x="180.00" y="1007.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">基线</text>
-<rect x="188.00" y="994.00" width="499.20" height="18.00" fill="#cbd5e1" rx="3"/>
-<text x="695.20" y="1007.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">0.975x</text>
-<text x="180.00" y="1031.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">本方案</text>
-<rect x="188.00" y="1018.00" width="561.15" height="18.00" fill="#16a34a" rx="3"/>
-<text x="757.15" y="1031.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.096x</text>
-<line x1="700.00" y1="992.00" x2="700.00" y2="1040.00" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 4"/>
-<text x="705.00" y="1052.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#f59e0b" text-anchor="start" font-weight="normal">1.0x = 冻结基线</text>
-<text x="92.00" y="1100.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">总分 score</text>
-<text x="180.00" y="1087.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">基线</text>
-<rect x="188.00" y="1074.00" width="481.92" height="18.00" fill="#cbd5e1" rx="3"/>
-<text x="677.92" y="1087.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">5.271</text>
-<text x="180.00" y="1111.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">本方案</text>
-<rect x="188.00" y="1098.00" width="559.09" height="18.00" fill="#16a34a" rx="3"/>
-<text x="755.09" y="1111.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">6.115</text>
-<text x="92.00" y="1160.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">快照容器体积（SIFT250K / Hidden250K，本地实测）</text>
-<text x="92.00" y="1176.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">数据只存一份，且不再有 cuVS blob 过文件系统两遍</text>
-<text x="92.00" y="1202.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">基线 OBCUVS02：数据存两份 + cuVS blob 过文件系统两遍</text>
-<rect x="92.00" y="1210.00" width="799.03" height="24.00" fill="#cbd5e1" rx="4"/>
-<text x="899.03" y="1227.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">368.1 MiB</text>
-<text x="92.00" y="1264.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">快路径 OBCUVS03：数据只存一份，无 blob 往返</text>
-<rect x="92.00" y="1272.00" width="534.06" height="24.00" fill="#16a34a" rx="4"/>
-<text x="634.06" y="1289.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">246.0 MiB</text>
-<text x="92.00" y="1326.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#16a34a" text-anchor="start" font-weight="600">节省 122.1 MiB（33.2%）</text></svg>
+<text x="92.00" y="866.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">官方提测实测结果（平台输出，2026-11-09 / 2026-11-13）</text>
+<text x="92.00" y="882.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">冻结基线 445b9b2 · 第 8 轮 cc6c79f3 · 第 9 轮 3794da35；三轮门槛均为 gates=pass</text>
+<text x="92.00" y="900.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">第 9 轮与第 8 轮的源码只差一处「恢复线程栈」，且该改动在计时窗口之外 —— 比值回落是评测抖动；平台取最高分，最好成绩仍是 6.115</text>
+<text x="92.00" y="974.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">构建加速比 build</text>
+<text x="234.00" y="945.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
+<rect x="242.00" y="932.00" width="518.02" height="18.00" fill="#cbd5e1" rx="3"/>
+<text x="768.02" y="945.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.105x</text>
+<text x="234.00" y="969.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
+<rect x="242.00" y="956.00" width="533.96" height="18.00" fill="#16a34a" rx="3"/>
+<text x="783.96" y="969.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.139x</text>
+<text x="234.00" y="993.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
+<rect x="242.00" y="980.00" width="506.77" height="18.00" fill="#7c3aed" rx="3"/>
+<text x="756.77" y="993.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.081x</text>
+<line x1="710.80" y1="930.00" x2="710.80" y2="1000.00" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 4"/>
+<text x="715.80" y="1012.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#f59e0b" text-anchor="start" font-weight="normal">1.0x = 冻结基线</text>
+<text x="92.00" y="1066.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">查询吞吐比 query</text>
+<text x="234.00" y="1037.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
+<rect x="242.00" y="1024.00" width="457.08" height="18.00" fill="#cbd5e1" rx="3"/>
+<text x="707.08" y="1037.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">0.975x</text>
+<text x="234.00" y="1061.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
+<rect x="242.00" y="1048.00" width="513.80" height="18.00" fill="#16a34a" rx="3"/>
+<text x="763.80" y="1061.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.096x</text>
+<text x="234.00" y="1085.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
+<rect x="242.00" y="1072.00" width="501.15" height="18.00" fill="#7c3aed" rx="3"/>
+<text x="751.15" y="1085.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">1.069x</text>
+<line x1="710.80" y1="1022.00" x2="710.80" y2="1092.00" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3 4"/>
+<text x="715.80" y="1104.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="10" fill="#f59e0b" text-anchor="start" font-weight="normal">1.0x = 冻结基线</text>
+<text x="92.00" y="1158.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">总分 score</text>
+<text x="234.00" y="1129.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">冻结基线</text>
+<rect x="242.00" y="1116.00" width="441.26" height="18.00" fill="#cbd5e1" rx="3"/>
+<text x="691.26" y="1129.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">5.271</text>
+<text x="234.00" y="1153.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 8 轮</text>
+<rect x="242.00" y="1140.00" width="511.91" height="18.00" fill="#16a34a" rx="3"/>
+<text x="761.91" y="1153.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">6.115</text>
+<text x="234.00" y="1177.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="end" font-weight="normal">第 9 轮</text>
+<rect x="242.00" y="1164.00" width="445.69" height="18.00" fill="#7c3aed" rx="3"/>
+<text x="695.69" y="1177.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">5.324</text>
+<text x="92.00" y="1232.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="600">快照容器体积（SIFT250K / Hidden250K，本地实测）</text>
+<text x="92.00" y="1248.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="start" font-weight="normal">数据只存一份，且不再有 cuVS blob 过文件系统两遍</text>
+<text x="92.00" y="1274.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">基线 OBCUVS02：数据存两份 + cuVS blob 过文件系统两遍</text>
+<rect x="92.00" y="1282.00" width="799.03" height="24.00" fill="#cbd5e1" rx="4"/>
+<text x="899.03" y="1299.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">368.1 MiB</text>
+<text x="92.00" y="1336.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="normal">快路径 OBCUVS03：数据只存一份，无 blob 往返</text>
+<rect x="92.00" y="1344.00" width="534.06" height="24.00" fill="#16a34a" rx="4"/>
+<text x="634.06" y="1361.28" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#0f172a" text-anchor="start" font-weight="600">246.0 MiB</text>
+<text x="92.00" y="1398.00" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif" font-size="12" fill="#16a34a" text-anchor="start" font-weight="600">节省 122.1 MiB（33.2%）</text></svg>

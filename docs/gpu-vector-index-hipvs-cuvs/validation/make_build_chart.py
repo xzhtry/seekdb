@@ -45,6 +45,7 @@ GPU_C = "#2f6df0"
 FAST_C = "#16a34a"
 BLOB_C = "#cbd5e1"
 ACCENT = "#f59e0b"
+NINTH_C = "#7c3aed"
 FONT = "Segoe UI, PingFang SC, Microsoft YaHei, Helvetica, Arial, sans-serif"
 
 W = 960
@@ -414,26 +415,35 @@ def panel_stages(svg: Svg, y0: int, stages: dict) -> int:
 
 
 def panel_official_runs(svg: Svg, y0: int) -> int:
-    """The platform's own numbers for the two evaluation runs."""
-    h = 272
-    svg.text(PAD_L, y0 - 14, "官方提测实测结果（平台输出，2026-11-09）", size=15, weight="600")
-    svg.text(PAD_L, y0 + 2, "同一轮的冻结基线 445b9b2  vs  本方案 cc6c79f3；两轮门槛均为 gates=pass",
+    """The platform's own numbers for the three evaluation runs."""
+    h = 344
+    svg.text(PAD_L, y0 - 14, "官方提测实测结果（平台输出，2026-11-09 / 2026-11-13）",
+             size=15, weight="600")
+    svg.text(PAD_L, y0 + 2,
+             "冻结基线 445b9b2 · 第 8 轮 cc6c79f3 · 第 9 轮 3794da35；三轮门槛均为 gates=pass",
              size=12, fill=MUTED)
+    svg.text(PAD_L, y0 + 20,
+             "第 9 轮与第 8 轮的源码只差一处「恢复线程栈」，且该改动在计时窗口之外 —— "
+             "比值回落是评测抖动；平台取最高分，最好成绩仍是 6.115",
+             size=11, fill=MUTED)
 
-    # name, baseline value, our value, axis maximum, unit, reference line
+    # name, baseline value, round 8, round 9, axis maximum, unit, reference line
     groups = [
-        ("构建加速比 build", 1.105, 1.139, 1.25, "x", 1.0),
-        ("查询吞吐比 query", 0.975, 1.096, 1.25, "x", 1.0),
-        ("总分 score", 5.271, 6.115, 7.0, "", None),
+        ("构建加速比 build", 1.105, 1.139, 1.081, 1.25, "x", 1.0),
+        ("查询吞吐比 query", 0.975, 1.096, 1.069, 1.25, "x", 1.0),
+        ("总分 score", 5.271, 6.115, 5.324, 7.0, "", None),
     ]
 
-    x0 = PAD_L + 96
+    # the group name gets its own column on the left, the run tags the next one
+    x0 = PAD_L + 150
     x1 = W - PAD_R - 92
     span = x1 - x0
-    y = y0 + 34
-    for name, base, ours, scale, unit, ref in groups:
-        svg.text(PAD_L, y + 26, name, size=12, fill=INK, weight="600")
-        for offset, value, color, tag in ((0, base, BLOB_C, "基线"), (24, ours, FAST_C, "本方案")):
+    y = y0 + 52
+    for name, base, r8, r9, scale, unit, ref in groups:
+        svg.text(PAD_L, y + 42, name, size=12, fill=INK, weight="600")
+        for offset, value, color, tag in ((0, base, BLOB_C, "冻结基线"),
+                                         (24, r8, FAST_C, "第 8 轮"),
+                                         (48, r9, NINTH_C, "第 9 轮")):
             yy = y + offset
             svg.text(x0 - 8, yy + 13, tag, size=11, fill=MUTED, anchor="end")
             w = span * (value / scale)
@@ -441,15 +451,15 @@ def panel_official_runs(svg: Svg, y0: int) -> int:
             svg.text(x0 + w + 8, yy + 13, f"{value:g}{unit}", size=12, fill=INK, weight="600")
         if ref is not None:
             xr = x0 + span * (ref / scale)
-            svg.line(xr, y - 2, xr, y + 46, ACCENT, 1.2, dash="3 4")
-            svg.text(xr + 5, y + 58, "1.0x = 冻结基线", size=10, fill=ACCENT)
-        y += 80
+            svg.line(xr, y - 2, xr, y + 68, ACCENT, 1.2, dash="3 4")
+            svg.text(xr + 5, y + 80, "1.0x = 冻结基线", size=10, fill=ACCENT)
+        y += 92
     return h
 
 
 def build_reference_svg() -> str:
     svg = Svg()
-    svg.height = 60 + 250 + 215 + 272 + 60
+    svg.height = 60 + 250 + 215 + 344 + 60
     svg.rect(0, 0, W, svg.height, "#ffffff")
     y = PAD_T
     y += panel_score_curve(svg, y) + 34
@@ -460,7 +470,7 @@ def build_reference_svg() -> str:
 
 def build_benchmark_svg(bench: dict, stages: dict) -> str:
     svg = Svg()
-    svg.height = 60 + 260 + 212 + 250 + 272 + 215 + 140
+    svg.height = 60 + 260 + 212 + 250 + 344 + 215 + 140
     svg.rect(0, 0, W, svg.height, "#ffffff")
     y = PAD_T
     y += panel_cpu_gpu(svg, y, bench) + 26
