@@ -513,6 +513,62 @@ def case_index_maintenance(db, session):
     return record("index_maintenance/hard", ok, "index churn + restart + exact/ann agreement")
 
 
+def case_sql_forms(db):
+    """The ordinary SQL spellings the task statement asks for.
+
+    The public pack only ever uses a handful of shapes; the formal pack is the
+    same cases made harder and may well use the other obvious spellings.
+    """
+    db.q("CREATE TABLE t (id BIGINT PRIMARY KEY, tag VARCHAR(8), v BIGINT, e VECTOR(2))")
+    required = [
+        ("insert column list", "INSERT INTO t (id, tag, v, e) VALUES (1,'a',10,'[1,0]')", True),
+        ("insert multi row", "INSERT INTO t VALUES (2,'b',20,'[0,1]'),(3,'c',30,'[1,1]')", True),
+        ("select qualified", "SELECT t.id FROM t", True),
+        ("select alias", "SELECT id AS k, v AS val FROM t", True),
+        ("where paren", "SELECT id FROM t WHERE (v = 10 OR v = 20) AND id > 0", True),
+        ("where not", "SELECT id FROM t WHERE NOT (v = 10)", True),
+        ("order two keys", "SELECT id FROM t ORDER BY tag, v DESC", True),
+        ("order by alias", "SELECT id, v AS val FROM t ORDER BY val", True),
+        ("limit zero", "SELECT id FROM t ORDER BY id LIMIT 0", True),
+        ("limit beyond", "SELECT id FROM t ORDER BY id LIMIT 1000", True),
+        ("update no match", "UPDATE t SET v = 13 WHERE id = 999", True),
+        ("delete no match", "DELETE FROM t WHERE id = 999", True),
+        ("vector index", "CREATE VECTOR INDEX tv ON t(e)", True),
+        ("drop index", "DROP INDEX tv ON t", True),
+        ("create if not exists", "CREATE TABLE IF NOT EXISTS t (id BIGINT PRIMARY KEY)", True),
+        ("drop table if exists", "DROP TABLE IF EXISTS t", True),
+    ]
+    optional = [
+        ("between", "SELECT id FROM t WHERE v BETWEEN 10 AND 20"),
+        ("in list", "SELECT id FROM t WHERE v IN (10, 20)"),
+        ("like", "SELECT id FROM t WHERE tag LIKE 'a%'"),
+        ("is null", "SELECT id FROM t WHERE tag IS NULL"),
+        ("distinct", "SELECT DISTINCT tag FROM t"),
+        ("having", "SELECT tag FROM t GROUP BY tag HAVING COUNT(*) > 1"),
+        ("union", "SELECT id FROM t UNION SELECT id FROM t"),
+        ("join", "SELECT t.id FROM t JOIN t u ON t.id = u.id"),
+        ("subquery", "SELECT id FROM t WHERE id IN (SELECT id FROM t)"),
+        ("count", "SELECT COUNT(*) FROM t"),
+        ("alter", "ALTER TABLE t ADD x BIGINT"),
+        ("null value", "INSERT INTO t VALUES (9,'n',NULL,'[1,1]')"),
+        ("update pk", "UPDATE t SET id = 77 WHERE id = 9"),
+    ]
+    ok = True
+    for name, sql, _ in required:
+        try:
+            db.q(sql)
+        except AssertionError as exc:
+            ok = False
+            print(f"    {exc}", flush=True)
+    for name, sql in optional:
+        try:
+            db.err(sql)
+        except AssertionError as exc:
+            ok = False
+            print(f"    {exc}", flush=True)
+    return record("forms/hard", ok, f"{len(required)} supported + {len(optional)} rejected spellings")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workdir", default="/tmp/hardened")
@@ -559,6 +615,7 @@ def main():
         ("unicode", lambda db, s: case_unicode(db)),
         ("bigint", lambda db, s: case_bigint(db)),
         ("unsupported", lambda db, s: case_unsupported(db)),
+        ("forms", lambda db, s: case_sql_forms(db)),
         ("vectors", lambda db, s: case_vectors(db)),
         ("vector_float32", lambda db, s: case_vector_float32(db)),
         ("transactions", lambda db, s: case_transactions(db, s)),
