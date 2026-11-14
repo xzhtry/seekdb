@@ -437,6 +437,16 @@ def case_transactions(db, session):
     session.start()
     got = [x[0] for x in db.rows("SELECT id FROM t ORDER BY id")]
     ok &= same(got, [1, 2, 3, 4])
+
+    # a vector query inside a transaction must see the transaction's own
+    # vector update ("事务内读到自己的修改；表数据与向量检索一致")
+    db.q("BEGIN")
+    db.q("UPDATE t SET embedding = '[9,9]' WHERE id = 3")
+    inside = db.rows("SELECT id, L2_DISTANCE(embedding,'[0,0]') AS d FROM t WHERE id = 3")
+    ok &= same(inside[0][1], math.sqrt(162.0))
+    db.q("ROLLBACK")
+    after = db.rows("SELECT id, L2_DISTANCE(embedding,'[0,0]') AS d FROM t WHERE id = 3")
+    ok &= same(after[0][1], 1.0)     # row 3 keeps its original [0,1] vector
     return record("transactions/hard", ok, f"ids after restart={got}")
 
 
