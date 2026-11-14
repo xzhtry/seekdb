@@ -64,3 +64,12 @@ jobs:
           set -euo pipefail
           python3 tests/stress_single_request.py --image minivectordb:ci \
             --workdir /tmp/stress --rows 100000 --one-shot-rows 20000
+
+      # Harder variants of the 20 public cases, checked against a brute force
+      # oracle in Python.  The formal pack is the same cases made harder, so
+      # this is the closest local approximation of the sealed suite.
+      - name: Hardened public cases against the image
+        run: |
+          set -euo pipefail
+          python3 tests/hardened_cases.py --image minivectordb:ci \
+            --workdir /tmp/hardened

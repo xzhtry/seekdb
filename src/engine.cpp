@@ -1163,7 +1163,38 @@ Value eval_expr(const Expr &e, const EvalContext &ctx) {
   fail(ER_UNSUPPORTED, "unsupported expression");
 }
 
+// Compare an exact 64 bit integer with a double without losing precision.
+// Converting the integer to double silently rounds everything above 2**53,
+// which would make "value > 9007199254740992" miss a row that holds
+// 9007199254740993.
+static int cmp_i64_double(i64 i, double d) {
+  if (std::isnan(d)) fail(ER_TRUNCATED_WRONG_VALUE, "cannot compare with NaN");
+  if (std::isinf(d)) return d > 0 ? -1 : 1;
+  if (d == std::trunc(d)) {
+    // Integer valued double.
+    if (d >= 9223372036854775808.0) return -1;    // 2**63 is above every i64
+    if (d < -9223372036854775808.0) return 1;      // below every i64
+    i64 di = static_cast<i64>(d);
+    return i < di ? -1 : (i > di ? 1 : 0);
+  }
+  // Fractional double: |d| < 2**52, so floor(d) is exactly representable.
+  double fl = std::floor(d);
+  i64 fi = static_cast<i64>(fl);
+  if (i < fi) return -1;
+  if (i > fi) return 1;
+  return -1;  // i == floor(d) and d still has a positive fraction
+}
+
 static int compare_values(const Value &a, const Value &b) {
+  if (a.type == ValueType::INT && b.type == ValueType::INT) {
+    if (a.i < b.i) return -1;
+    if (a.i > b.i) return 1;
+    return 0;
+  }
+  if (a.type == ValueType::INT && b.type == ValueType::DOUBLE)
+    return cmp_i64_double(a.i, b.d);
+  if (a.type == ValueType::DOUBLE && b.type == ValueType::INT)
+    return -cmp_i64_double(b.i, a.d);
   if ((a.type == ValueType::INT || a.type == ValueType::DOUBLE) &&
       (b.type == ValueType::INT || b.type == ValueType::DOUBLE)) {
     double x = a.type == ValueType::INT ? static_cast<double>(a.i) : a.d;
