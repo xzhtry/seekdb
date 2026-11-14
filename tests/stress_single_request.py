@@ -45,7 +45,7 @@ def main():
 
     work = Path(args.workdir)
     work.mkdir(parents=True, exist_ok=True)
-    log = Path("/tmp/stress/stderr.log")
+    log = work / "stderr.log"
     if log.exists():
         log.unlink()
 

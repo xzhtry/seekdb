@@ -55,3 +55,12 @@ jobs:
           set -euo pipefail
           python3 tests/fuzz_sql.py --image minivectordb:ci \
             --workdir /tmp/fuzz --iterations 2000 | tail -10
+
+      # The judge fails a case with "JSON response timeout" when one statement
+      # misses its 60s budget, so the latency of the worst single statement is
+      # measured inside the container as well.
+      - name: Single request latency against the image
+        run: |
+          set -euo pipefail
+          python3 tests/stress_single_request.py --image minivectordb:ci \
+            --workdir /tmp/stress --rows 100000 --one-shot-rows 20000

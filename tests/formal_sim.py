@@ -57,8 +57,13 @@ class Harness:
         if self.log.exists():
             self.log.unlink()
         if image:
+            # Use the same volume mode as protocol_check/run.py: the volume
+            # lives as long as the session and is therefore reused across the
+            # restarts of a case.  A bind mount would not work: the judge
+            # drops every capability, so a 0700 host directory would be
+            # unwritable inside the container.
             self.command = None
-            self.data_root = str(self.data_dir)
+            self.data_root = None
         else:
             self.command = [BIN, "--data-dir", str(self.data_dir), "--protocol", "jsonl"]
             self.data_root = None
@@ -75,9 +80,11 @@ class Harness:
 
     @property
     def data_path(self):
-        """Directory the database actually writes to."""
+        """Directory the database actually writes to (None for volume mode)."""
         if self.session.bind_data is not None:
             return Path(self.session.bind_data.name)
+        if self.image:
+            return None
         return self.data_dir
 
     def shutdown(self):
@@ -91,6 +98,14 @@ class Harness:
             self.session.close()
         except Exception:  # noqa: BLE001
             pass
+
+
+def measure_mb(h):
+    """Size of the data directory, or -1 when it lives in a docker volume."""
+    path = h.data_path
+    if path is None:
+        return -1.0
+    return sum(f.stat().st_size for f in path.glob("*")) / 1048576.0
 
 
 def expect_error(h, sql, label):
@@ -124,7 +139,7 @@ def scenario_bulk(rows, batch, dims, workdir, image):
     r = h.sql("SELECT id FROM docs ORDER BY id")
     seen = len(r.get("rows", []))
     h.shutdown()
-    data_mb = sum(f.stat().st_size for f in h.data_path.glob("*")) / 1048576.0
+    data_mb = measure_mb(h)
     ready2 = h.start()
     r2 = h.sql("SELECT id FROM docs ORDER BY id")
     seen2 = len(r2.get("rows", []))
@@ -136,7 +151,6 @@ def scenario_bulk(rows, batch, dims, workdir, image):
                   f"ready={ready_s:.2f}s ready_after_restart={ready2:.2f}s",
                   load_s) and record("bulk/startup_budget", ready2 < CONFIG["startup_timeout"],
                                      f"ready_after_restart={ready2:.2f}s limit={CONFIG['startup_timeout']}s")
-
 
 # ---------------------------------------------------------------------------
 # Scenario 2: repeated updates grow the data file; recovery must stay fast.
@@ -156,7 +170,7 @@ def scenario_update_growth(rows, rounds, workdir, image):
             return False
     upd_s = time.monotonic() - t0
     h.shutdown()
-    data_mb = sum(f.stat().st_size for f in h.data_path.glob("*")) / 1048576.0
+    data_mb = measure_mb(h)
     ready2 = h.start()
     r2 = h.sql("SELECT id, embedding FROM docs ORDER BY id")
     n = len(r2.get("rows", []))
@@ -310,6 +324,11 @@ def main():
     }
     for name, fn in todo.items():
         if wanted and name not in wanted:
+            continue
+        if name == "crash2" and args.image:
+            # The "kill during recovery" scenario drives a local process, so it
+            # cannot run against an image.
+            print("[SKIP] crash/during_recovery (needs a local process)", flush=True)
             continue
         try:
             fn()

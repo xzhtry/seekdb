@@ -90,7 +90,10 @@ def main():
         log.unlink()
 
     if args.image:
-        session = Session(CONFIG, str(log), image=args.image, data_root=str(work))
+        # Volume mode, like protocol_check/run.py: a bind mount from a 0700
+        # host directory is not writable inside the container because the judge
+        # drops every capability.
+        session = Session(CONFIG, str(log), image=args.image)
     else:
         session = Session(CONFIG, str(log),
                           command=[BIN, "--data-dir", str(work), "--protocol", "jsonl"])
