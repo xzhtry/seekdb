@@ -650,7 +650,33 @@ struct ObFtsAuxRowRec
   int64_t doc_id_;
   uint64_t word_count_;
   uint64_t doc_length_;
+  uint64_t word_key_;  // first 4 collation weights, big-endian, space padded
 };
+
+// First 4 characters of the collation weight string.  ob_strnxfrm pads a short
+// word with the space weight, so comparing these 8 bytes is a valid prefix
+// comparison for the collation order; a tie needs the exact comparison.
+OB_INLINE uint64_t fts_aux_word_key(const ObCollationType cs,
+                                    const char *word,
+                                    const int32_t len)
+{
+  unsigned char buf[8];
+  memset(buf, 0, sizeof(buf));
+  if (OB_NOT_NULL(word) && len > 0) {
+    const ObCharsetInfo *cs_info = ObCharset::get_charset(cs);
+    if (OB_NOT_NULL(cs_info) && OB_NOT_NULL(cs_info->coll->strnxfrm)) {
+      bool is_valid = true;
+      cs_info->coll->strnxfrm(cs_info, buf, sizeof(buf), static_cast<unsigned int>(sizeof(buf)),
+                              reinterpret_cast<const unsigned char *>(word), len,
+                              OB_STRXFRM_PAD_WITH_SPACE, &is_valid);
+    }
+  }
+  uint64_t key = 0;
+  for (int64_t i = 0; i < 8; ++i) {
+    key = (key << 8) | static_cast<uint64_t>(buf[i]);
+  }
+  return key;
+}
 
 class ObFtsAuxProducer
 {
@@ -898,6 +924,9 @@ struct ObFtsAuxRowLess
   explicit ObFtsAuxRowLess(const ObCollationType cs) : cs_(cs) {}
   bool operator()(const ObFtsAuxRowRec &l, const ObFtsAuxRowRec &r) const
   {
+    if (l.word_key_ != r.word_key_) {
+      return l.word_key_ < r.word_key_;
+    }
     const int cmp = ObCharset::strcmpsp(cs_, l.word_, l.word_len_, r.word_, r.word_len_, true);
     if (0 != cmp) {
       return cmp < 0;
@@ -981,21 +1010,6 @@ int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
       ObFtsAuxSliceCtx &ctx = slices[static_cast<size_t>(i)];
       ctx.lo_ = min_key + i * span;
       ctx.hi_ = (i + 1 == slice_cnt) ? (max_key + 1) : (min_key + (i + 1) * span);
-      if (i > 0) {
-        common::ObSqlString cnt_sql;
-        common::ObMySQLProxy::MySQLResult res;
-        common::sqlclient::ObMySQLResult *result = nullptr;
-        if (OB_FAIL(cnt_sql.append_fmt("SELECT COUNT(*) FROM %s AS OF SNAPSHOT %ld WHERE `%.*s` < %ld",
-                                       data_table_name_.ptr(), snapshot_version_,
-                                       key_col->get_column_name_str().length(),
-                                       key_col->get_column_name_str().ptr(), ctx.lo_))) {
-        } else if (OB_FAIL(GCTX.ddl_sql_proxy_->read(res, cnt_sql.ptr()))) {
-        } else if (OB_ISNULL(result = res.get_result())) {
-          ret = OB_ERR_UNEXPECTED;
-        } else if (OB_FAIL(result->next())) {
-        } else if (OB_FAIL(result->get_int(static_cast<int64_t>(0), offset))) {
-        }
-      }
       ctx.offset_ = offset;
     }
     if (OB_SUCC(ret)) {
@@ -1100,6 +1114,8 @@ int ObFtsAuxProducer::build_tablet_parallel(const int64_t slice_cnt,
                         ObFtsAuxRowRec rec;
                         rec.word_ = word_buf;
                         rec.word_len_ = word.length();
+                        rec.word_key_ = fts_aux_word_key(word_collation_, word_buf,
+                                                         static_cast<int32_t>(word.length()));
                         rec.doc_id_str_ = doc_id_buf;
                         rec.doc_id_ = ctx->offset_ + local_idx;
                         rec.word_count_ = iter->second;
@@ -1350,6 +1366,8 @@ int ObFtsAuxProducer::build_tablet(const common::ObTabletID &tablet_id,
                 ObFtsAuxRowRec rec;
                 rec.word_ = word_buf;
                 rec.word_len_ = word.length();
+                rec.word_key_ = fts_aux_word_key(word_collation_, word_buf,
+                                                 static_cast<int32_t>(word.length()));
                 rec.doc_id_str_ = doc_id_buf;
                 rec.doc_id_ = row_idx;
                 rec.word_count_ = iter->second;
