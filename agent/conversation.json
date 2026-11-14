@@ -298,12 +298,12 @@
     },
     {
       "id": "e16",
-      "title": "第三轮正式提测（framed 文本协议加固版）",
+      "title": "第三轮正式提测（framed 文本协议加固版）与第四轮提测（官方 JSONL 版）",
       "hypothesis": "把镜像运行时依赖、语句边界双形态、驱动指令静默三项风险收敛后重投，如果正式驱动认 framed 帧，本轮应能通过功能准入。",
-      "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=d1bf3d2d598840745b8d6f3bd01b4f6cd57e6103",
-      "output": "提测成功；2026-11-14 08:27 记录，任务状态：执行成功；成绩：-；结果：成功 0 失败 1；仍无失败日志",
-      "student_role": "学生授权 Agent 执行提测（u6），并提供了判断依据与验证方案（u7/u9）。",
-      "conclusion": "本轮仍然 0/1。随后从官方题包得知判题器讲 JSONL 协议，framed 文本输出会被判为 invalid JSON response。也就是说三次提测（073cba57、12c24e46、d1bf3d2d）的共同原因是协议格式，而不是 SQL 语义或镜像构建。"
+      "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=d1bf3d2d598840745b8d6f3bd01b4f6cd57e6103；随后在改成官方 JSONL 协议后又提交一次，Commit=81d7e68e691cbabb8bff7ff11f06379c4c946c90",
+      "output": "第三轮：2026-11-14 08:27 记录，任务状态：执行成功；成绩：-；结果：成功 0 失败 1；仍无失败日志。第四轮：提交时间 08:52（平台记录显示 08:46），Commit=81d7e68e691cbabb8bff7ff11f06379c4c946c90，任务状态：执行中。",
+      "student_role": "学生授权 Agent 执行提测（u6），并提供了判断依据与验证方案（u7/u9）；第三轮失败后由学生指出官方题包链接（u11），才定位到协议问题。",
+      "conclusion": "第三轮仍然 0/1。官方题包随后证实判题器讲 JSONL 协议，framed 文本输出会被判为 invalid JSON response——三次旧提测（073cba57、12c24e46、d1bf3d2d）的共同原因是协议格式，而不是 SQL 语义或镜像构建。第四轮提交的是按官方协议重写后的版本，是本材料的最终参评版本。"
     },
     {
       "id": "e17",
@@ -348,7 +348,7 @@
       "ann 模式目前返回精确结果，没有实现近似索引；精确结果的 Recall@K 为 1.0，应满足题面 0.95 的要求，但如果正式评测另设 ann 查询的耗时门槛，需要补索引。"
     ],
     "next_steps": [
-      "用改成官方 JSONL 协议的新 commit 重新提测，并用 protocol_check/run.py 在本地先把 20 个公开用例跑成 20/20。",
+      "等待第四轮（81d7e68e，官方 JSONL 协议版）的正式评测结果：若准入通过，即可拿到性能与 Agent prompt 两项排名分。",
       "确认正式评测里 error.code 的映射：当前按公开断言的语义名输出（duplicate_key、unsupported_sql 等），若配置里冻结的是数字错误码，只需改一处映射表。",
       "继续优化 1,000 次查询的 SQL/向量解析开销；本地 10k×128 查询约 0.70 s（按随机查询字符串、含 Python 驱动开销）。"
     ]

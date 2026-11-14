@@ -66,6 +66,12 @@
       "source": "student",
       "content": "把不确定性变成可回归的本地测试",
       "note": "被问及“最该写进学习材料的一条经验”时，学生的总结。"
+    },
+    {
+      "id": "u11",
+      "source": "student",
+      "content": "https://github.com/oceanbase/seekdb/tree/2026-competition-round2/mysqltest",
+      "note": "2026-11-14 上午，第三次提测仍然“成功 0 失败 1”。学生没有让 Agent 继续猜协议，而是直接给出官方题包目录，提示应当重新核对官方分支。Agent 拉取官方分支后发现题包已更新：新增 STDIO_PROTOCOL.md 与 protocol_check/，协议由我们猜测的文本格式改为 JSONL。"
     }
   ],
   "conversations": [
@@ -140,6 +146,18 @@
       "source": "student",
       "content": "把不确定性变成可回归的本地测试",
       "context": "学生的总结。Agent 把它落成了仓库里的两条可执行资产（协议冒烟脚本 + 无分号回归开关），而不是只写成一句话。"
+    },
+    {
+      "id": "c13",
+      "source": "student",
+      "content": "https://github.com/oceanbase/seekdb/tree/2026-competition-round2/mysqltest",
+      "context": "第三次提测（2026-11-14 08:27）仍然 0/1 之后，学生给出的唯一一条线索：去看官方题包目录，而不是继续猜协议。"
+    },
+    {
+      "id": "c14",
+      "source": "agent",
+      "content": "官方分支已经更新：新增 STDIO_PROTOCOL.md 与 protocol_check/run.py，协议是 JSONL —— 启动输出 {\"type\":\"ready\"}，随后逐行接收 execute/shutdown JSON 请求并逐行返回响应；文档明确写着“纯文本 READY、直接输入 SQL、文本表格均不符合正式协议”。我们前三版实现的 framed 文本协议属于猜测，所以三次提测失败的原因是协议格式，而不是 SQL 语义或镜像构建。",
+      "context": "Agent 按学生给的线索复核官方分支后的结论。这一轮学生只提供了线索，复核与改写由 Agent 完成。"
     }
   ],
   "experiments": [
@@ -280,12 +298,39 @@
     },
     {
       "id": "e16",
-      "title": "第二轮正式提测（协议加固后的版本）",
-      "hypothesis": "把镜像运行时依赖、语句边界双形态、驱动指令静默三项风险收敛后重投，如果正式驱动认 framed 帧，本轮应能通过功能准入并拿到性能与 Agent prompt 两个分数。",
-      "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=待填（本轮提交的完整 40 位 SHA）",
-      "output": "待填：平台返回的任务状态、成绩与结果（成功/失败用例数）。",
-      "student_role": "学生授权 Agent 执行提测（u6），并提供了判断依据与验证方案（u7/u9）。",
-      "conclusion": "待填。"
+      "title": "第三轮正式提测（framed 文本协议加固版）与第四轮提测（官方 JSONL 版）",
+      "hypothesis": "把镜像运行时依赖、语句边界双形态、驱动指令静默三项风险收敛后重投，如果正式驱动认 framed 帧，本轮应能通过功能准入。",
+      "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=d1bf3d2d598840745b8d6f3bd01b4f6cd57e6103；随后在改成官方 JSONL 协议后又提交一次，Commit=81d7e68e691cbabb8bff7ff11f06379c4c946c90",
+      "output": "第三轮：2026-11-14 08:27 记录，任务状态：执行成功；成绩：-；结果：成功 0 失败 1；仍无失败日志。第四轮：提交时间 08:52（平台记录显示 08:46），Commit=81d7e68e691cbabb8bff7ff11f06379c4c946c90，任务状态：执行中。",
+      "student_role": "学生授权 Agent 执行提测（u6），并提供了判断依据与验证方案（u7/u9）；第三轮失败后由学生指出官方题包链接（u11），才定位到协议问题。",
+      "conclusion": "第三轮仍然 0/1。官方题包随后证实判题器讲 JSONL 协议，framed 文本输出会被判为 invalid JSON response——三次旧提测（073cba57、12c24e46、d1bf3d2d）的共同原因是协议格式，而不是 SQL 语义或镜像构建。第四轮提交的是按官方协议重写后的版本，是本材料的最终参评版本。"
+    },
+    {
+      "id": "e17",
+      "title": "官方题包更新与协议定位",
+      "hypothesis": "学生指出的官方题包目录可能已经包含此前缺失的协议说明；拉取官方分支并逐文件比对即可确认。",
+      "command": "git fetch official 2026-competition-round2；git diff official/2026-competition-round2 HEAD -- mysqltest；git show official/2026-competition-round2:STDIO_PROTOCOL.md",
+      "output": "官方分支从 9f6df2ba 前进到 f4d4e266，新增 STDIO_PROTOCOL.md 与 protocol_check/{run.py,_transport.py,_assertions.py,config.json,README.md,example_stdio.py}；题包 README 新增原文：“进程通信采用标准输入/输出 JSONL 协议；详见根目录 STDIO_PROTOCOL.md”。协议要点：启动输出 {\"type\":\"ready\"}；请求 {\"id\":N,\"op\":\"execute\",\"sql\":\"...\",\"search_mode\":\"exact\"}；响应回传同类型 id 与布尔 ok；查询回 columns/rows，修改回 affected_rows，失败回 error.code（非空字符串）；shutdown 响应之后不得再有任何 stdout 且退出码为 0。",
+      "student_role": "学生提供了定位线索并要求复核官方题包；Agent 执行拉取、比对与阅读。",
+      "conclusion": "协议猜测问题被证实：判题器不读文本协议。官方同时给出协议自测工具 protocol_check/run.py，支持用 --command 直接跑本地程序。"
+    },
+    {
+      "id": "e18",
+      "title": "按官方协议重写通信层并用官方驱动验证",
+      "hypothesis": "把通信层换成 JSONL（ready 握手、逐行请求、类型化响应、shutdown 后静默退出）之后，公开用例就能用官方驱动全部通过。",
+      "command": "重写 src/main.cpp 协议层（最小 JSON 解析、请求分发、类型化 JSON 响应），结果集改为保留 Value 类型，使 BIGINT 输出为 JSON 整数、VARCHAR 输出为 JSON 字符串、向量投影输出为 JSON 数组；再执行 cd protocol_check && python3 run.py --command '[...]' --handshake-only --output ... 与 python3 run.py --command '[...]' --output ...",
+      "output": "handshake: PASS；sql_crud / sql_comparisons / sql_ordering / sql_empty / sql_primary_key / sql_unicode / sql_bigint / sql_unsupported / storage_restart / vector_euclidean / transaction_commit / transaction_rollback / storage_mutations / storage_multiple_tables / vector_ties_and_filter / vector_float32 / vector_index_maintenance / transaction_failed_insert / transaction_autocommit_atomic / transaction_shutdown_rollback 共 20 个用例全部 PASS。",
+      "student_role": "学生未参与协议实现；本轮的关键动作（学生指出官方题包、Agent 复核并改写）是学生线索与 Agent 执行的组合。",
+      "conclusion": "同一份实现先用猜测的 framed 协议三次提测全败，改成官方 JSONL 后在官方自测驱动下 20/20 通过，证实此前失败来自协议层。"
+    },
+    {
+      "id": "e19",
+      "title": "错误语义名与公开断言对齐",
+      "hypothesis": "公开断言用的是语义名（duplicate_key、unsupported_sql）而不是数字错误码；本题明确不支持的语句（ALTER、JOIN、聚合、子查询、NULL、外键、嵌套事务、主键更新）必须返回同一类“不支持”错误，不能混成语法错误。",
+      "command": "读 mysqltest/cases/sql_primary_key.result 与 sql_unsupported.result；对照 protocol_check/_assertions.py（error_codes 为空时只要求非空字符串）；把解析器的“不支持”分支统一到 ER_UNSUPPORTED 并在协议层映射为 unsupported_sql",
+      "output": "sql_primary_key.result: {\"error\": \"duplicate_key\"}；sql_unsupported.result: {\"error\": \"unsupported_sql\"}；改后 ALTER TABLE 返回 {\"code\":\"unsupported_sql\",...}，重复主键返回 {\"code\":\"duplicate_key\",...}，官方自测 20/20 仍全部 PASS。",
+      "student_role": "学生未参与该细节；这是 Agent 从公开断言反推的语义对齐。",
+      "conclusion": "错误码采用公开断言同款的语义名，并把题目列出的不支持语法统一归到 unsupported_sql，避免被判成另一种语义。"
     }
   ],
   "retrospective": {
@@ -293,29 +338,38 @@
       "先实现 append-only 记录 + WAL 提交，再补事务 overlay；崩溃恢复顺序（WAL fsync → 数据写 → checkpoint）清晰，且与自己在 u8 中的表述一致。",
       "把“缓存”与“数据源”分开：缓存未命中走 mmap 记录读取，使大表测试不依赖全量内存。",
       "对拍而不是只看输出：AVX2 距离错误是在随机 64 维对拍中暴露的，8 维小例子没有暴露。",
-      "把不确定性变成可回归的本地测试：语句边界的两种形态、注释/驱动指令的静默、多行语句的合并不早触发，都落成了仓库里可重复执行的脚本，而不是一次性的手工检查。"
+      "把不确定性变成可回归的本地测试：语句边界的两种形态、注释/驱动指令的静默、多行语句的合并不早触发，都落成了仓库里可重复执行的脚本，而不是一次性的手工检查。",
+      "官方题包自带 protocol_check/run.py：用它对本地二进制跑 20 个公开用例，比自己写断言更接近真实判题语义（id 类型、ok 布尔、浮点容差、restart 与 ann 指令）。"
     ],
     "what_failed_or_uncertain": [
-      "官方测试驱动/协议没有公开下载入口，framed 协议是推测；这是当前最大不确定性。",
+      "前三次正式提测（073cba57、12c24e46、d1bf3d2d）都按猜测的文本协议实现，而官方协议直到 2026-11-14 才随题包发布；这三次失败与 SQL 语义、镜像构建都无关，纯粹是协议格式不匹配。教训是：评测协议未公布时，应该把“协议形态”当成一个需要被官方工具证伪的假设，而不是靠提交去试。",
       "第一轮我把两次 0/1 归因到 value 保留字和 SQL 语义，忽略了“两次提交都早于运行时库修复”这个时间线事实；复核提测记录后才发现归因不完整。",
       "学生主要给出方向与取舍，具体代码、调试和实验由 Agent 完成；材料不把 Agent 的成果算成学生理解。",
-      "ann 模式目前返回精确结果，没有实现近似索引；如果正式评测对 ann 查询耗时另设门槛，需要补索引。"
+      "ann 模式目前返回精确结果，没有实现近似索引；精确结果的 Recall@K 为 1.0，应满足题面 0.95 的要求，但如果正式评测另设 ann 查询的耗时门槛，需要补索引。"
     ],
     "next_steps": [
-      "拿到本轮提测结果后，若仍是 0/1，下一步换响应帧变体（MVDB_PROTOCOL=mysql/json/tsv）再投一次，用结果反推驱动期望的帧格式；两次正式额度分开用于两个假设，不混改。",
-      "向组委会确认 stdin/stdout 帧格式与题包“协议检查工具”的获取方式；社区已有同题帖子，官方回复为“已经反馈问题”。",
+      "等待第四轮（81d7e68e，官方 JSONL 协议版）的正式评测结果：若准入通过，即可拿到性能与 Agent prompt 两项排名分。",
+      "确认正式评测里 error.code 的映射：当前按公开断言的语义名输出（duplicate_key、unsupported_sql 等），若配置里冻结的是数字错误码，只需改一处映射表。",
       "继续优化 1,000 次查询的 SQL/向量解析开销；本地 10k×128 查询约 0.70 s（按随机查询字符串、含 Python 驱动开销）。"
     ]
   },
   "limitations": [
-    "官方公开题包只有 .test/.result 和驱动指令，不包含进程通信驱动；stdin/stdout 的 READY/结果帧格式仍只能按 framed 协议实现，并用 MVDB_PROTOCOL=mysql/tsv/json 兼容。",
+    "官方公开题包最初只有 .test/.result 和驱动指令，不包含进程通信驱动；协议直到 2026-11-14 才随 STDIO_PROTOCOL.md 与 protocol_check/ 发布。",
     "2026-11-09 15:55 的 framed 探测结果为“执行成功、成功 0 失败 1”，平台无失败日志；后定位到当时解析器把 value 当保留字，公开题包中的 value 列会失败，已修复并在本地跑通 20/20 公开用例。",
-    "2026-11-09 19:55 用修复后的 commit 12c24e46 再次提测，结果仍为“执行成功、成功 0 失败 1”，仍无日志；2026-11-14 复核发现两次提交都早于运行时库修复，因此旧归因不完整，本轮已重建镜像运行时依赖并加入协议形态回归。",
-    "2026-11-14 查 600081 排行榜为“暂无数据”，与社区里其他队伍的 0/1 反馈一致；因此协议格式仍未被平台反馈确认，仍属推测。",
+    "2026-11-09 19:55 用修复后的 commit 12c24e46 再次提测，结果仍为“执行成功、成功 0 失败 1”；2026-11-14 复核发现两次提交都早于运行时库修复，因此旧归因不完整，本轮已重建镜像运行时依赖并加入协议形态回归。",
+    "2026-11-14 08:27 用 framed 协议提测（d1bf3d2d）仍为“成功 0 失败 1”。随后官方题包更新，确认判题器使用 JSONL 协议，纯文本 READY 与文本表格都不符合协议——这解释了三次提测全部失败的原因。改为 JSONL 后，官方 protocol_check 驱动下握手与 20 个公开用例全部 PASS。",
+    "2026-11-14 查 600081 排行榜为“暂无数据”，与社区里其他队伍的 0/1 反馈一致。",
     "未实现 HNSW/IVF 等近似索引；ann 模式为精确扫描。",
-    "单客户端、单显式事务；不支持 NULL/JOIN/聚合/子查询/ALTER/主键更新。"
+    "单客户端、单显式事务；不支持 NULL/JOIN/聚合/子查询/ALTER/外键/嵌套事务/主键更新，这些语句统一返回 unsupported_sql 语义错误。"
   ],
   "evidence_index": [
+    {
+      "dimension": "独立验证与质疑",
+      "tier": 1.5,
+      "reason": "第三次提测仍然 0/1 时，学生没有接受“协议只能猜”的结论，而是指出应当重新核对官方题包目录。Agent 按此拉取官方分支，核对出新发布的 STDIO_PROTOCOL.md，确认判题器讲 JSONL 而非我们实现的文本协议；随后按官方协议重写通信层并用官方自测驱动复测，20 个公开用例全部通过。学生的质疑构成了这条“提出反例 → 查到实证 → 改方案 → 复测”的完整证据链。",
+      "student_evidence": {"pointer": "/user_prompts/10/content", "quote": "https://github.com/oceanbase/seekdb/tree/2026-competition-round2/mysqltest"},
+      "result_evidence": {"pointer": "/experiments/17/output", "quote": "20 个用例全部 PASS"}
+    },
     {
       "dimension": "独立验证与质疑",
       "tier": 1.0,
@@ -335,7 +389,7 @@
       "tier": 1.0,
       "reason": "学生给出的是一条可执行的验证路线（本地按驱动可能行为做对照回归），Agent 据此实现了两套回归并跑出结果，其中还真实暴露并修正了“BEGIN/COMMIT/ROLLBACK 被误判为续行关键字”的挂死问题。",
       "student_evidence": {"pointer": "/user_prompts/8/content", "quote": "本地按驱动可能行为做对照回归"},
-      "result_evidence": {"pointer": "/experiments/13/output", "quote": "协议冒烟"}
+      "result_evidence": {"pointer": "/experiments/13/output", "quote": "21 项全部 PASS"}
     },
     {
       "dimension": "取舍与反思",
