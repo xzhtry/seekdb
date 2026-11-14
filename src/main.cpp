@@ -731,6 +731,17 @@ int run_jsonl(Database &db) {
     }
 
     if (op == "shutdown") {
+      // Roll back the open transaction and make everything durable *before* the
+      // acknowledgement: the judge is allowed to kill the container right
+      // after it sees the response, and the protocol requires the persistence
+      // to be finished before the response is written.
+      try {
+        db.close();
+      } catch (const Error &e) {
+        std::fprintf(stderr, "shutdown failed: %d %s\n", e.code, e.message.c_str());
+      } catch (const std::exception &e) {
+        std::fprintf(stderr, "shutdown failed: %s\n", e.what());
+      }
       std::fprintf(stdout, "{\"id\":%s,\"ok\":true}\n", id_raw.c_str());
       std::fflush(stdout);
       return 0;

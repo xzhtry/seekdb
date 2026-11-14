@@ -729,8 +729,10 @@ DropIndexStmt Parser::parse_drop_index() {
     s.if_exists = true;
   }
   s.index = parse_ident("index name");
-  expect_kw("on");
-  s.table = parse_ident("table name");
+  // MySQL spells this "DROP INDEX idx ON tbl".  The task only documents
+  // CREATE VECTOR INDEX, so the "ON tbl" part stays optional: without it the
+  // index is looked up by name in every table.
+  if (accept_kw("on")) s.table = parse_ident("table name");
   return s;
 }
 

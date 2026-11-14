@@ -32,3 +32,26 @@ jobs:
           cd protocol_check
           python3 run.py --image minivectordb:ci \
             --output "protocol-results/public-${{ github.run_id }}"
+
+      # The judge runs the image with --memory=2g --cpus=2 --read-only and a
+      # 120s startup / 60s request budget.  These scenarios reproduce the
+      # requirements the public pack only mentions in prose (data volume beyond
+      # the memory budget, forced kill, a second kill during recovery, illegal
+      # vectors, ANN mode) against the real image under those limits.
+      - name: Formal simulation against the image
+        run: |
+          set -euo pipefail
+          python3 tests/formal_sim.py --image minivectordb:ci \
+            --workdir /tmp/formal-sim --rows 20000
+
+      - name: Robustness sweep against the image
+        run: |
+          set -euo pipefail
+          python3 tests/robustness.py --image minivectordb:ci \
+            --workdir /tmp/robustness | tail -25
+
+      - name: SQL fuzz against the image
+        run: |
+          set -euo pipefail
+          python3 tests/fuzz_sql.py --image minivectordb:ci \
+            --workdir /tmp/fuzz --iterations 2000 | tail -10
