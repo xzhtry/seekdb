@@ -376,6 +376,9 @@ private:
   int check_is_correlated_cte(ObSelectStmt *stmt, ObIArray<ObSelectStmt *> &visited_cte, bool &is_correlated);
   int convert_join_preds_vector_to_scalar(JoinedTable &joined_table, bool &trans_happened);
   int preserve_order_for_fulltext_search(ObDMLStmt *stmt, bool& trans_happened);
+  // Fulltext statements skip the regular rule list, so the COUNT(*) over a
+  // limited view rewrite is driven from here.
+  int merge_count_over_limited_view(ObDMLStmt *stmt, bool &trans_happened);
 
   int flatten_conditions(ObDMLStmt *stmt, bool &trans_happened);
   int recursive_flatten_join_conditions(ObDMLStmt *stmt, TableItem *table, bool &trans_happened);

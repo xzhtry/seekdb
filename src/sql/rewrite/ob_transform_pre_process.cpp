@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_REWRITE
 #include "sql/rewrite/ob_transform_pre_process.h"
 #include "sql/optimizer/ob_optimizer_util.h"
+#include "sql/rewrite/ob_transform_view_merge.h"
 #include "sql/engine/expr/ob_expr_arg_case.h"
 #include "sql/resolver/dml/ob_select_resolver.h"
 #include "sql/rewrite/ob_expand_aggregate_utils.h"
@@ -188,6 +189,15 @@ int ObTransformPreProcess::transform_one_stmt(common::ObIArray<ObParentDMLStmt> 
     }
     if (OB_SUCC(ret)) {
      if (OB_FAIL(stmt->formalize_stmt(ctx_->session_info_))) {
+      }
+    }
+    // Runs after the statement is formalized: the merge relies on valid expr
+    // references.  It lives in pre-process because fulltext statements skip the
+    // regular rewrite rule list entirely.
+    if (OB_SUCC(ret)) {
+      if (OB_FAIL(merge_count_over_limited_view(stmt, is_happened))) {
+      } else {
+        trans_happened |= is_happened;
       }
     }
   }
@@ -3790,6 +3800,24 @@ int ObTransformPreProcess::do_flatten_conditions(ObDMLStmt *stmt, ObIArray<ObRaw
 
 // full-text index queries on a single base table are processed with order preservation. 
 // (Order is not preserved in multi-table join scenarios.)
+int ObTransformPreProcess::merge_count_over_limited_view(ObDMLStmt *stmt,
+                                                          bool &trans_happened)
+{
+  int ret = OB_SUCCESS;
+  trans_happened = false;
+  if (OB_ISNULL(stmt) || OB_ISNULL(ctx_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (!stmt->is_select_stmt()) {
+    // do nothing
+  } else {
+    ObTransformViewMerge view_merge(ctx_);
+    if (OB_FAIL(view_merge.merge_count_over_limited_view(stmt, trans_happened))) {
+    } else if (trans_happened && OB_FAIL(stmt->formalize_stmt(ctx_->session_info_))) {
+    }
+  }
+  return ret;
+}
+
 int ObTransformPreProcess::preserve_order_for_fulltext_search(ObDMLStmt *stmt, bool& trans_happened)
 {
   int ret = OB_SUCCESS;

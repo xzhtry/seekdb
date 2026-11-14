@@ -50,7 +50,16 @@ public:
                                               ObDMLStmt *&stmt,
                                               bool &trans_happened) override;
   virtual int construct_transform_hint(ObDMLStmt &stmt, void *trans_params) override;
+
+  // COUNT(*) over (SELECT ... LIMIT n) counts min(n, rows): merge the view into
+  // the parent and wrap the count with LEAST(limit, COUNT(*)).  Driven from the
+  // pre-process stage because fulltext statements skip the regular rule list.
+  int merge_count_over_limited_view(ObDMLStmt *stmt, bool &trans_happened);
 private:
+  int try_merge_count_over_limit(ObDMLStmt *parent_stmt,
+                                 TableItem *table_item,
+                                 ObSelectStmt *child_stmt,
+                                 bool &trans_happened);
   struct ViewMergeHelper {
     ViewMergeHelper():
       parent_table(NULL),

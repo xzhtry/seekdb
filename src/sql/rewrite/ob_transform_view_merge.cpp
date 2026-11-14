@@ -326,6 +326,117 @@ int ObTransformViewMerge::check_semi_right_table_can_be_merged(ObDMLStmt *stmt,
   return ret;
 }
 
+// A COUNT(*) whose only input is a limited simple view counts min(limit, rows).
+// Detach the limit, drop the ordering (it cannot change a row count), merge the
+// view into the parent and wrap the count with LEAST(limit, COUNT(*)).
+int ObTransformViewMerge::try_merge_count_over_limit(ObDMLStmt *parent_stmt,
+                                                     TableItem *table_item,
+                                                     ObSelectStmt *child_stmt,
+                                                     bool &trans_happened)
+{
+  int ret = OB_SUCCESS;
+  trans_happened = false;
+  ObSelectStmt *select_stmt = nullptr;
+  ObRawExpr *count_expr = nullptr;
+  ObRawExpr *limit_expr = nullptr;
+  ObSysFunRawExpr *least_expr = nullptr;
+  ViewMergeHelper helper;
+  if (OB_ISNULL(parent_stmt) || OB_ISNULL(table_item) || OB_ISNULL(child_stmt)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (!parent_stmt->is_select_stmt()
+             || OB_ISNULL(ctx_)
+             || OB_ISNULL(ctx_->expr_factory_)
+             || OB_ISNULL(ctx_->session_info_)) {
+  } else if (OB_ISNULL(select_stmt = static_cast<ObSelectStmt *>(parent_stmt))) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (1 != select_stmt->get_select_item_size()
+             || 1 != select_stmt->get_from_item_size()
+             || select_stmt->get_from_item(0).is_joined_
+             || select_stmt->get_condition_size() > 0
+             || !select_stmt->get_group_exprs().empty()
+             || select_stmt->has_rollup()
+             || select_stmt->has_having()
+             || select_stmt->has_order_by()
+             || select_stmt->has_limit()
+             || select_stmt->has_distinct()
+             || select_stmt->has_window_function()
+             || select_stmt->is_set_stmt()) {
+  } else if (OB_ISNULL(count_expr = select_stmt->get_select_item(0).expr_)
+             || T_FUN_COUNT != count_expr->get_expr_type()
+             || count_expr->has_flag(CNT_COLUMN)
+             || static_cast<ObAggFunRawExpr *>(count_expr)->is_param_distinct()) {
+  } else if (!child_stmt->has_limit()
+             || OB_NOT_NULL(child_stmt->get_offset_expr())
+             || OB_NOT_NULL(child_stmt->get_limit_percent_expr())
+             || child_stmt->is_fetch_with_ties()
+             || child_stmt->is_set_stmt()
+             || !child_stmt->is_single_table_stmt()
+             || 1 != child_stmt->get_from_item_size()
+             || child_stmt->get_from_item(0).is_joined_
+             || child_stmt->has_distinct()
+             || !child_stmt->get_group_exprs().empty()
+             || child_stmt->has_rollup()
+             || 0 != child_stmt->get_aggr_item_size()
+             || child_stmt->has_window_function()
+             || child_stmt->has_having()
+             || child_stmt->has_ora_rowscn()
+             || child_stmt->is_contains_assignment()
+             || !child_stmt->get_subquery_exprs().empty()) {
+  } else if (OB_ISNULL(limit_expr = child_stmt->get_limit_expr())) {
+    // The limit may be a folded literal or a bound parameter; LEAST evaluates it
+    // at execution, so only its presence matters here.
+  } else if (FALSE_IT(child_stmt->get_order_items().reuse())) {
+  } else if (FALSE_IT(child_stmt->set_limit_offset(nullptr, nullptr))) {
+  } else if (FALSE_IT(child_stmt->set_has_fetch(false))) {
+  } else if (FALSE_IT(helper.trans_table = table_item)) {
+  } else if (OB_FAIL(do_view_merge(parent_stmt, child_stmt, table_item, helper))) {
+  } else if (OB_FAIL(append(select_stmt->get_match_exprs(), child_stmt->get_match_exprs()))) {
+  } else if (OB_FAIL(ctx_->expr_factory_->create_raw_expr(T_FUN_SYS_LEAST, least_expr))) {
+  } else if (OB_ISNULL(least_expr)) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else if (OB_FAIL(least_expr->set_param_exprs(count_expr, limit_expr))) {
+  } else if (OB_FAIL(least_expr->formalize(ctx_->session_info_))) {
+  } else {
+    select_stmt->get_select_item(0).expr_ = least_expr;
+    trans_happened = true;
+  }
+  return ret;
+}
+
+int ObTransformViewMerge::merge_count_over_limited_view(ObDMLStmt *stmt,
+                                                        bool &trans_happened)
+{
+  int ret = OB_SUCCESS;
+  trans_happened = false;
+  if (OB_ISNULL(stmt)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    int64_t i = 0;
+    while (OB_SUCC(ret) && i < stmt->get_from_item_size()) {
+      bool is_happened = false;
+      TableItem *table_item = stmt->get_table_item(stmt->get_from_item(i));
+      ObSelectStmt *child_stmt = nullptr;
+      if (OB_ISNULL(table_item)
+          || table_item->is_joined_table()
+          || !table_item->is_generated_table()
+          || OB_ISNULL(child_stmt = table_item->ref_query_)) {
+      } else if (0 == child_stmt->get_match_exprs().count()) {
+        // Only fulltext statements need this rewrite: they skip the regular
+        // rewrite rule list, so the pre-process stage is the only place it can
+        // run.  Other statements are left to the cost-based optimizer.
+      } else if (OB_FAIL(try_merge_count_over_limit(stmt, table_item, child_stmt,
+                                                    is_happened))) {
+      } else {
+        trans_happened |= is_happened;
+      }
+      if (OB_SUCC(ret) && !is_happened) {
+        ++i;
+      }
+    }
+  }
+  return ret;
+}
+
 /*@brief transform_basic_table processes normal generated table
  */
 int ObTransformViewMerge::transform_generated_table(ObDMLStmt *parent_stmt,
