@@ -85,7 +85,7 @@ def main():
     rng = random.Random(args.seed)
     work = Path(args.workdir)
     work.mkdir(parents=True, exist_ok=True)
-    log = Path("/tmp/fuzz/stderr.log")
+    log = work / "stderr.log"
     if log.exists():
         log.unlink()
 
