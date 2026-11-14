@@ -67,6 +67,7 @@ int ObTextRetrievalTokenIter::init(const ObTextRetrievalScanIterParam &iter_para
   inv_scan_domain_id_col_ = iter_param.inv_scan_domain_id_col_;
   max_batch_size_ = OB_MAX(iter_param.eval_ctx_->max_batch_size_, 1);
   inv_idx_agg_cache_mode_ = iter_param.inv_idx_agg_cache_mode_;
+  skip_relevance_ = iter_param.skip_relevance_;
 
   if (OB_ISNULL(inv_idx_scan_iter_) || OB_ISNULL(eval_ctx_) || OB_ISNULL(inv_idx_scan_param_) ||
       OB_ISNULL(inv_scan_domain_id_col_) || OB_ISNULL(allocator_) || OB_ISNULL(mem_context_.ref_context())) {
@@ -208,7 +209,7 @@ int ObTextRetrievalTokenIter::get_next_row()
     if (OB_UNLIKELY(OB_ITER_END != ret)) {
     }
   } else {
-    if (need_calc_relevance()) {
+    if (need_calc_relevance() && !skip_relevance_) {
       clear_row_wise_evaluated_flag();
       if (OB_FAIL(fill_token_doc_cnt())) {
       } else if (OB_FAIL(fill_token_weight())) {
@@ -252,7 +253,7 @@ int ObTextRetrievalTokenIter::get_next_batch(const int64_t capacity, int64_t &co
   }
 
   if (OB_FAIL(ret)) {
-  } else if (need_calc_relevance()) {
+  } else if (need_calc_relevance() && !skip_relevance_) {
     const sql::ObBitVector *skip = NULL;
     PRINT_VECTORIZED_ROWS(SQL, DEBUG, *eval_ctx_, *inv_idx_scan_param_->output_exprs_, count, skip);
     clear_batch_wise_evaluated_flag(count);
@@ -432,6 +433,7 @@ int ObTextRetrievalDaaTTokenIter::init(const ObTextRetrievalScanIterParam &iter_
     } else {
       eval_ctx_ = iter_param.eval_ctx_;
       relevance_expr_ = iter_param.relevance_expr_;
+      skip_relevance_ = iter_param.skip_relevance_;
       inv_scan_domain_id_col_ = iter_param.inv_scan_domain_id_col_;
       max_batch_size_ = OB_MAX(iter_param.eval_ctx_->max_batch_size_, 1);
       common::ObDatumBasicFuncs *basic_funcs = ObDatumFuncs::get_basic_func(inv_scan_domain_id_col_->datum_meta_.type_, CS_TYPE_BINARY);
@@ -487,7 +489,7 @@ int ObTextRetrievalDaaTTokenIter::get_next_row() {
     need_load = true;
   }
   if (OB_SUCC(ret) && need_load) {
-    if (OB_NOT_NULL(relevance_expr_)) {
+    if (OB_NOT_NULL(relevance_expr_) && !skip_relevance_) {
       if (OB_FAIL(save_relevances_and_docids())) {
       }
     } else if (OB_FAIL(save_docids())) {

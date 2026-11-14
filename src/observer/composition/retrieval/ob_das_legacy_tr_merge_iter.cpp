@@ -364,6 +364,8 @@ int ObDASLegacyTRMergeIter::init_dim_iter_param(ObTextRetrievalScanIterParam &it
     iter_param.mem_context_ = mem_context_;
     iter_param.eval_ctx_ = ir_rtdef_->eval_ctx_;
     iter_param.relevance_expr_ = ir_ctdef_->relevance_expr_;
+    // A COUNT(*)-only scan answers from the match count; the score is unused.
+    iter_param.skip_relevance_ = ir_ctdef_->is_count_only_;
     iter_param.inv_scan_doc_length_col_ = ir_ctdef_->inv_scan_doc_length_col_;
     iter_param.inv_scan_domain_id_col_ = ir_ctdef_->inv_scan_domain_id_col_;
     iter_param.inv_idx_agg_cache_mode_ = function_lookup_mode_ && !taat_mode_;
