@@ -288,6 +288,19 @@ void Wal::truncate() {
 // ===========================================================================
 // Table.
 // ===========================================================================
+// How much appended data may stay un-fsynced.  MVDB_SYNC_MB overrides the
+// default; 0 disables the periodic fsync (only useful for measuring).
+u64 data_sync_interval() {
+  static u64 value = [] {
+    if (const char *e = std::getenv("MVDB_SYNC_MB")) {
+      long v = std::strtol(e, nullptr, 10);
+      if (v >= 0) return static_cast<u64>(v) * 1024u * 1024u;
+    }
+    return static_cast<u64>(kDataSyncInterval);
+  }();
+  return value;
+}
+
 Table::Table(Database *db, TableSchema schema, std::string data_path)
     : db_(db), schema_(std::move(schema)), data_path_(std::move(data_path)) {
   if (const char *e = std::getenv("MVDB_CACHE_MB")) {
@@ -427,7 +440,10 @@ RowRef Table::append_record(WalType type, u64 txn, i64 row_id, std::string_view 
   return ref;
 }
 
-void Table::fsync_data() { ::fdatasync(fd_); }
+void Table::fsync_data() {
+  ::fdatasync(fd_);
+  synced_bytes_ = file_size_;
+}
 
 bool Table::recover_records(const WalScan &wal, u64 checkpoint, bool wal_empty) {
   bool needs_compact = false;
@@ -870,6 +886,12 @@ void Database::commit_changes(std::vector<Change> &changes) {
       c.table->cache_row(c.id, c.row, false);
     }
   }
+  // Push the data file out to disk regularly: in the judge's 2 GiB memory
+  // cgroup the dirty page cache counts against the limit, and once it fills
+  // up every following write is throttled until the writeback catches up.
+  for (Change &c : changes) {
+    if (c.table->unsynced_bytes() > data_sync_interval()) c.table->fsync_data();
+  }
   if (wal_.size() > 64ull * 1024ull * 1024ull) checkpoint_now();
 }
 
@@ -922,6 +944,10 @@ void Database::commit_txn() {
       c.table->rows()[c.id] = ref;
       c.table->cache_row(c.id, c.row, false);
     }
+  }
+  // Same dirty page cache bound as in the autocommit path.
+  for (Change &c : changes) {
+    if (c.table->unsynced_bytes() > data_sync_interval()) c.table->fsync_data();
   }
   if (wal_.size() > 64ull * 1024ull * 1024ull) checkpoint_now();
 }

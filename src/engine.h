@@ -106,6 +106,11 @@ class Table {
                     bool cache_it = true);
   RowRef append_record(WalType type, u64 txn, i64 row_id, std::string_view payload);
   void fsync_data();
+  // Bytes appended since the last fsync.  Bounding this keeps the dirty page
+  // cache of a large table from filling the memory cgroup of the judge
+  // (2 GiB): unreclaimable dirty pages count against that limit and slow every
+  // following write down.
+  u64 unsynced_bytes() const { return file_size_ - synced_bytes_; }
 
   bool get_ref(i64 id, RowRef &ref) const;
   bool has_row(i64 id) const;
@@ -142,6 +147,7 @@ class Table {
   std::string data_path_;
   int fd_ = -1;
   u64 file_size_ = 0;
+  u64 synced_bytes_ = 0;  // data file size at the last fsync
   MappedFile map_;
   std::unordered_map<i64, RowRef> rows_;
   std::unordered_map<i64, Row> cache_;

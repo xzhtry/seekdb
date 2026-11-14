@@ -183,6 +183,10 @@ void atomic_write_file(const std::string &path, const std::string &content);
 // Runtime limits.
 constexpr size_t kMaxRecordPayload = 64u * 1024u * 1024u;
 constexpr size_t kDefaultCacheBudget = 32ull * 1024ull * 1024ull;
+// How much appended data may stay un-fsynced.  The judge runs the container in
+// a 2 GiB memory cgroup; dirty page cache counts against that limit and is
+// not reclaimable, so a large bulk load has to push it out as it goes.
+constexpr u64 kDataSyncInterval = 32ull * 1024ull * 1024ull;
 constexpr u32 kDataMagic = 0x5244564Du;   // "MVDR" little endian
 constexpr u32 kWalMagic = 0x5744564Du;    // "MVDW"
 constexpr u32 kCatalogMagic = 0x5441434Du;  // "MDAT" -> catalog tag
