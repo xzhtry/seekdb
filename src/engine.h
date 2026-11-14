@@ -116,6 +116,8 @@ class Table {
   bool has_row(i64 id) const;
   std::optional<Row> load_row(const RowRef &ref) const;
   std::optional<Row> load_row_by_id(i64 id) const;
+  // Load a row into an existing buffer, without allocating a new one.
+  bool load_row_into(i64 id, Row &out) const;
   void put_row(i64 id, Row row);
   void erase_row(i64 id);
   void cache_row(i64 id, const Row &row, bool force = false);
@@ -266,6 +268,8 @@ void validate_cond_columns(const Cond &c, const TableSchema &schema);
 
 std::string serialize_row(const TableSchema &schema, const Row &row);
 Row deserialize_row(const TableSchema &schema, const char *payload, u32 len);
+// Same as deserialize_row(), but it reuses the buffers of an existing row.
+void deserialize_row_into(const TableSchema &schema, const char *payload, u32 len, Row &row);
 Value coerce_for_column(const Value &v, const Column &col);
 Value literal_value(const Expr &e);
 

@@ -34,6 +34,11 @@ struct Expr {
   std::vector<float> fnums; // prepared query vector (float32)
   std::vector<ExprPtr> args;
   std::string text;         // original-ish text for column headers
+  // Index of the column in the table schema, resolved once by prepare_expr().
+  // -1 means "not a column of the current table" (a literal or an alias).
+  // Resolving it up front keeps the per row evaluation free of the string
+  // search that dominates a scan over a large table.
+  int col_index = -1;
 };
 
 inline ExprPtr make_expr(ExprKind k) {

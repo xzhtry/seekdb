@@ -14,6 +14,7 @@ ExprPtr clone_expr(const Expr &e) {
   n->nums = e.nums;
   n->fnums = e.fnums;
   n->text = e.text;
+  n->col_index = e.col_index;
   n->args.reserve(e.args.size());
   for (const auto &a : e.args) n->args.push_back(clone_expr(*a));
   return n;
