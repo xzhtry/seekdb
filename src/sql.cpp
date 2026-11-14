@@ -28,6 +28,35 @@ bool is_ident_char(unsigned char c) {
   return std::isalnum(c) || c == '_' || c == '$' || c >= 0x80;
 }
 
+// Aggregate functions are explicitly out of scope for this task.
+bool is_aggregate_name(const std::string &name) {
+  static const char *kNames[] = {"count", "sum", "avg", "min", "max",
+                                 "group_concat", "bit_and", "bit_or", "std",
+                                 "stddev", "stddev_pop", "stddev_samp", "var_pop",
+                                 "var_samp", "variance", "any_value", "json_arrayagg",
+                                 "json_objectagg"};
+  for (const char *n : kNames)
+    if (iequals(name, n)) return true;
+  return false;
+}
+
+// Statement keywords that this task explicitly does not support.
+bool is_unsupported_statement(const std::string &name) {
+  static const char *kNames[] = {"alter",   "truncate", "replace", "load",
+                                 "grant",   "revoke",   "call",    "execute",
+                                 "prepare", "deallocate", "savepoint", "release",
+                                 "rename",  "attach",   "detach",  "vacuum",
+                                 "analyze", "optimize", "repair",  "flush",
+                                 "lock",    "unlock",   "use",     "import",
+                                 "checkpoint", "cluster", "handler", "do",
+                                 "kill",    "reset",    "purge",   "change",
+                                 "unregister", "register", "listen", "signal",
+                                 "binlog",  "xa"};
+  for (const char *n : kNames)
+    if (iequals(name, n)) return true;
+  return false;
+}
+
 std::string unescape_sql_string(std::string_view s) {
   std::string out;
   out.reserve(s.size());
@@ -435,6 +464,11 @@ Statement Parser::parse_statement() {
     next();
     st.kind = StmtKind::QUIT;
   } else {
+    // Statements this task explicitly does not support are reported as
+    // "unsupported" rather than as a plain syntax error.
+    if (is_unsupported_statement(peek().text)) {
+      fail(ER_UNSUPPORTED, "unsupported statement '" + peek().text + "'");
+    }
     fail(ER_PARSE, "unsupported statement near '" + peek().text + "'");
   }
   return st;
@@ -469,6 +503,15 @@ SelectStmt Parser::parse_select() {
     parse_ident("table alias");
   } else if (peek().type == Token::Type::IDENT && !is_clause_keyword(peek())) {
     next();  // bare table alias, not used for name resolution
+  }
+  // JOIN / GROUP BY / HAVING / UNION are out of scope for this task.
+  if (peek().type == Token::Type::IDENT && !peek().quoted) {
+    const std::string kw = to_lower(peek().text);
+    if (kw == "join" || kw == "inner" || kw == "left" || kw == "right" ||
+        kw == "full" || kw == "cross" || kw == "natural" || kw == "group" ||
+        kw == "having" || kw == "union" || kw == "window" || kw == "into") {
+      fail(ER_UNSUPPORTED, "unsupported query feature '" + kw + "'");
+    }
   }
   if (accept_kw("where")) {
     s.where = parse_condition();
@@ -636,6 +679,8 @@ CreateTableStmt Parser::parse_create_table() {
           // No NULL/default support; consume the value so parsing succeeds but
           // report a clear error at execution time.
           parse_expr();
+        } else if (accept_kw("references")) {
+          fail(ER_UNSUPPORTED, "foreign keys are not supported");
         } else {
           break;
         }
@@ -835,6 +880,10 @@ ExprPtr Parser::parse_primary() {
   }
   if (t.type == Token::Type::IDENT) {
     std::string name = t.text;
+    if (iequals(name, "null")) {
+      // NULL is explicitly out of scope for this task.
+      fail(ER_UNSUPPORTED, "NULL is not supported");
+    }
     if (is_clause_keyword(t)) {
       fail(ER_PARSE, "expected expression near '" + name + "'");
     }
@@ -845,6 +894,9 @@ ExprPtr Parser::parse_primary() {
       name = parse_ident("column name");
     }
     if (accept_punct('(')) {
+      if (is_aggregate_name(name)) {
+        fail(ER_UNSUPPORTED, "aggregate functions are not supported");
+      }
       std::vector<ExprPtr> args;
       if (!accept_punct(')')) {
         for (;;) {

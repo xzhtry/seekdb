@@ -19,9 +19,10 @@ COPY --from=build /src/build/minivectordb /app/minivectordb
 # with a non root user.
 RUN mkdir -p /data && chmod 1777 /data
 VOLUME ["/data"]
-ENV MVDB_PROTOCOL=framed
+# The judge speaks the JSON Lines protocol over stdin/stdout.
+ENV MVDB_PROTOCOL=jsonl
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/app/minivectordb"]
-CMD ["--data-dir", "/data", "--protocol", "framed"]
+CMD ["--data-dir", "/data", "--protocol", "jsonl"]

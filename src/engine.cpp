@@ -815,9 +815,10 @@ bool Database::has_visible_row(Table *t, i64 id) const {
 }
 
 void Database::begin_txn() {
-  // MySQL semantics: a second BEGIN implicitly commits the previous
-  // transaction and starts a new one.  Nested transactions are not supported.
-  if (txn_active_) commit_txn();
+  // Nested transactions are not part of this task, and silently committing the
+  // previous transaction would be exactly the "execute with another meaning"
+  // behaviour the task forbids.  Report the MySQL style error instead.
+  if (txn_active_) fail(ER_TXN_ACTIVE, "Transaction already active");
   txn_active_ = true;
   txn_id_ = alloc_txn();
   overlay_.clear();
@@ -1526,9 +1527,9 @@ ResultSet Database::exec_select(const Statement &st) {
           EvalContext ctx;
           ctx.schema = &schema;
           ctx.row = result[i].row;
-          std::vector<std::string> out;
+          std::vector<Value> out;
           out.reserve(items.size());
-          for (const auto &it : items) out.push_back(value_to_string(eval_expr(*it.expr, ctx)));
+          for (const auto &it : items) out.push_back(eval_expr(*it.expr, ctx));
           rs.rows.push_back(std::move(out));
         }
         return rs;
@@ -1676,9 +1677,9 @@ ResultSet Database::exec_select(const Statement &st) {
   if (s.limit >= 0) end = std::min(end, start + static_cast<size_t>(s.limit));
   rs.rows.reserve(end - start);
   for (size_t i = start; i < end; ++i) {
-    std::vector<std::string> out;
+    std::vector<Value> out;
     out.reserve(result[i].out.size());
-    for (const auto &v : result[i].out) out.push_back(value_to_string(v));
+    for (const auto &v : result[i].out) out.push_back(v);
     rs.rows.push_back(std::move(out));
   }
   (void)matched;
@@ -2084,7 +2085,7 @@ ResultSet Database::exec_show_tables() {
   std::vector<std::string> names;
   for (const auto &kv : tables_) names.push_back(kv.second->schema().name);
   std::sort(names.begin(), names.end());
-  for (const auto &n : names) rs.rows.push_back({n});
+  for (const auto &n : names) rs.rows.push_back({Value::make_string(n)});
   return rs;
 }
 
@@ -2100,7 +2101,8 @@ ResultSet Database::exec_describe(const Statement &st) {
     if (c.type == ColType::BIGINT) type = "bigint";
     else if (c.type == ColType::VARCHAR) type = "varchar(" + std::to_string(c.param) + ")";
     else type = "vector(" + std::to_string(c.param) + ")";
-    rs.rows.push_back({c.name, type, static_cast<int>(i) == t->schema().pk_index ? "PRI" : ""});
+    rs.rows.push_back({Value::make_string(c.name), Value::make_string(type),
+                       Value::make_string(static_cast<int>(i) == t->schema().pk_index ? "PRI" : "")});
   }
   return rs;
 }

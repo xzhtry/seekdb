@@ -1,0 +1,8 @@
+{"id":1,"op":"execute","sql":"CREATE TABLE docs (id BIGINT PRIMARY KEY, content VARCHAR(16));","search_mode":"exact"}
+{"id":2,"op":"execute","sql":"INSERT INTO docs VALUES (1, '你好');","search_mode":"exact"}
+{"id":3,"op":"execute","sql":"SELECT id, content FROM docs ORDER BY id;","search_mode":"exact"}
+{"id":4,"op":"execute","sql":"SELECT id, L2_DISTANCE(v, '[0,0]') AS d FROM v1;","search_mode":"ann"}
+{"id":5,"op":"execute","sql":"INSERT INTO docs VALUES (1, 'dup');","search_mode":"exact"}
+{"id":6,"op":"execute","sql":"ALTER TABLE docs ADD COLUMN x INT;","search_mode":"exact"}
+{"id":7,"op":"execute","sql":"SELECT * FROM docs;","search_mode":"exact"}
+{"id":8,"op":"shutdown"}

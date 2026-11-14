@@ -2,6 +2,7 @@
 #include "sql.h"
 
 #include <csignal>
+#include <cmath>
 #include <poll.h>
 
 namespace mvdb {
@@ -309,30 +310,223 @@ std::string json_escape(std::string_view s) {
   return out;
 }
 
-// True when the text is a plain number; used to give JSON output real types.
-bool looks_numeric(const std::string &s) {
-  if (s.empty()) return false;
+// ---------------------------------------------------------------------------
+// JSON Lines protocol (the protocol the official judge speaks).
+//
+//   stdout, once at startup:  {"type":"ready"}
+//   stdin:  {"id":1,"op":"execute","sql":"SELECT ...;","search_mode":"exact"}
+//   stdout: {"id":1,"ok":true,"columns":["id"],"rows":[[1]]}
+//           {"id":2,"ok":true,"affected_rows":1}
+//           {"id":3,"ok":false,"error":{"code":"duplicate_key","message":"..."}}
+//   stdin:  {"id":4,"op":"shutdown"}  ->  {"id":4,"ok":true}  then exit(0)
+//
+// The request id is echoed verbatim so its JSON type (number or string) is
+// preserved, `ok` is always a JSON boolean and nothing else is ever written to
+// stdout.
+// ---------------------------------------------------------------------------
+
+struct JsonField {
+  std::string key;
+  std::string raw;  // exact source text of the value
+  std::string str;  // decoded value when the value is a JSON string
+  bool is_string = false;
+};
+
+void json_skip_ws(const std::string &s, size_t &i) {
+  while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) ++i;
+}
+
+bool json_read_string(const std::string &s, size_t &i, std::string &out) {
+  if (i >= s.size() || s[i] != '"') return false;
+  ++i;
+  out.clear();
+  while (i < s.size()) {
+    char c = s[i++];
+    if (c == '"') return true;
+    if (c != '\\') {
+      out.push_back(c);
+      continue;
+    }
+    if (i >= s.size()) return false;
+    char e = s[i++];
+    switch (e) {
+      case '"': out.push_back('"'); break;
+      case '\\': out.push_back('\\'); break;
+      case '/': out.push_back('/'); break;
+      case 'b': out.push_back('\b'); break;
+      case 'f': out.push_back('\f'); break;
+      case 'n': out.push_back('\n'); break;
+      case 'r': out.push_back('\r'); break;
+      case 't': out.push_back('\t'); break;
+      case 'u': {
+        if (i + 4 > s.size()) return false;
+        unsigned cp = 0;
+        for (int k = 0; k < 4; ++k) {
+          char h = s[i++];
+          cp <<= 4;
+          if (h >= '0' && h <= '9') cp |= static_cast<unsigned>(h - '0');
+          else if (h >= 'a' && h <= 'f') cp |= static_cast<unsigned>(h - 'a' + 10);
+          else if (h >= 'A' && h <= 'F') cp |= static_cast<unsigned>(h - 'A' + 10);
+          else return false;
+        }
+        if (cp < 0x80) {
+          out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+          out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+          out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+        break;
+      }
+      default: out.push_back(e); break;
+    }
+  }
+  return false;
+}
+
+bool json_read_value(const std::string &s, size_t &i, JsonField &f) {
+  json_skip_ws(s, i);
+  if (i >= s.size()) return false;
+  size_t start = i;
+  char c = s[i];
+  if (c == '"') {
+    std::string tmp;
+    if (!json_read_string(s, i, tmp)) return false;
+    f.is_string = true;
+    f.str = tmp;
+    f.raw = s.substr(start, i - start);
+    return true;
+  }
+  if (s.compare(i, 4, "true") == 0) {
+    i += 4;
+    f.raw = "true";
+    return true;
+  }
+  if (s.compare(i, 5, "false") == 0) {
+    i += 5;
+    f.raw = "false";
+    return true;
+  }
+  if (s.compare(i, 4, "null") == 0) {
+    i += 4;
+    f.raw = "null";
+    return true;
+  }
+  if (c == '-' || (c >= '0' && c <= '9')) {
+    while (i < s.size() && (std::isdigit(static_cast<unsigned char>(s[i])) || s[i] == '-' ||
+                            s[i] == '+' || s[i] == '.' || s[i] == 'e' || s[i] == 'E')) {
+      ++i;
+    }
+    f.raw = s.substr(start, i - start);
+    return true;
+  }
+  return false;
+}
+
+bool json_parse_line(const std::string &line, std::vector<JsonField> &fields) {
   size_t i = 0;
-  if (s[i] == '-' || s[i] == '+') ++i;
-  bool digits = false, dot = false, expo = false;
-  for (; i < s.size(); ++i) {
-    char c = s[i];
-    if (std::isdigit(static_cast<unsigned char>(c))) {
-      digits = true;
+  json_skip_ws(line, i);
+  if (i >= line.size() || line[i] != '{') return false;
+  ++i;
+  json_skip_ws(line, i);
+  if (i < line.size() && line[i] == '}') return true;
+  for (;;) {
+    json_skip_ws(line, i);
+    std::string key;
+    if (!json_read_string(line, i, key)) return false;
+    json_skip_ws(line, i);
+    if (i >= line.size() || line[i] != ':') return false;
+    ++i;
+    JsonField f;
+    f.key = key;
+    if (!json_read_value(line, i, f)) return false;
+    fields.push_back(std::move(f));
+    json_skip_ws(line, i);
+    if (i < line.size() && line[i] == ',') {
+      ++i;
       continue;
     }
-    if (c == '.' && !dot && !expo) {
-      dot = true;
-      continue;
-    }
-    if ((c == 'e' || c == 'E') && digits && !expo) {
-      expo = true;
-      if (i + 1 < s.size() && (s[i + 1] == '-' || s[i + 1] == '+')) ++i;
-      continue;
-    }
+    if (i < line.size() && line[i] == '}') return true;
     return false;
   }
-  return digits;
+}
+
+// Semantic error names used by the public assertion pack.
+const char *error_name(int code) {
+  switch (code) {
+    case 1062: return "duplicate_key";
+    case 1235: return "unsupported_sql";
+    case 1064: return "syntax_error";
+    case 1050: return "table_exists";
+    case 1051: return "table_not_found";
+    case 1146: return "unknown_table";
+    case 1054: return "unknown_column";
+    case 1136: return "wrong_value_count";
+    case 1406: return "data_too_long";
+    case 1264: return "out_of_range";
+    case 1265: return "truncated_wrong_value";
+    case 1366: return "invalid_vector";
+    case 1568: return "unsupported_sql";  // nested transactions are out of scope
+    case 1048: return "null_not_allowed";
+    case 1176: return "key_not_found";
+    case 1690: return "data_out_of_range";
+    case 1105: return "internal_error";
+    default: return "error";
+  }
+}
+
+void json_write_string(const std::string &s) {
+  std::fputc('"', stdout);
+  std::string e = json_escape(s);
+  std::fwrite(e.data(), 1, e.size(), stdout);
+  std::fputc('"', stdout);
+}
+
+// Emit a value with its JSON type: BIGINT as an integer, VARCHAR as a string,
+// a vector as an array of numbers and distances as JSON numbers.
+void json_write_value(const Value &v) {
+  switch (v.type) {
+    case ValueType::INT:
+      std::fputs(format_i64(v.i).c_str(), stdout);
+      break;
+    case ValueType::DOUBLE: {
+      double d = v.d;
+      if (!std::isfinite(d)) {
+        std::fputs("null", stdout);
+        break;
+      }
+      if (d == std::floor(d) && std::fabs(d) < 9.0e18) {
+        std::fprintf(stdout, "%lld", static_cast<long long>(d));
+      } else {
+        std::fputs(format_double(d).c_str(), stdout);
+      }
+      break;
+    }
+    case ValueType::STRING:
+      json_write_string(v.s);
+      break;
+    case ValueType::VECTOR: {
+      std::fputc('[', stdout);
+      for (size_t i = 0; i < v.v.size(); ++i) {
+        if (i) std::fputc(',', stdout);
+        float f = v.v[i];
+        if (!std::isfinite(f)) {
+          std::fputs("null", stdout);
+          continue;
+        }
+        if (f == std::floor(f) && std::fabs(f) < 9.0e18) {
+          std::fprintf(stdout, "%lld", static_cast<long long>(f));
+        } else {
+          std::fputs(format_float(f).c_str(), stdout);
+        }
+      }
+      std::fputc(']', stdout);
+      break;
+    }
+  }
 }
 
 class Output {
@@ -380,39 +574,18 @@ class Output {
     if (mode_ == "framed") {
       std::printf("RESULT %zu %zu\n", rs.columns.size(), rs.rows.size());
       if (headers_) write_row(rs.columns);
-      for (const auto &r : rs.rows) write_row(r);
+      for (const auto &r : rs.rows) write_values(r);
     } else if (mode_ == "mysql") {
       if (rs.query) {
         if (headers_) write_row(rs.columns);
-        for (const auto &r : rs.rows) write_row(r);
+        for (const auto &r : rs.rows) write_values(r);
       } else {
         std::fputs("OK\n", stdout);
       }
-    } else if (mode_ == "json") {
-      std::fputs("{\"status\":\"result\",\"columns\":[", stdout);
-      for (size_t i = 0; i < rs.columns.size(); ++i) {
-        if (i) std::fputc(',', stdout);
-        std::printf("\"%s\"", json_escape(rs.columns[i]).c_str());
-      }
-      std::fputs("],\"rows\":[", stdout);
-      for (size_t i = 0; i < rs.rows.size(); ++i) {
-        if (i) std::fputc(',', stdout);
-        std::fputc('[', stdout);
-        for (size_t j = 0; j < rs.rows[i].size(); ++j) {
-          if (j) std::fputc(',', stdout);
-          const std::string &v = rs.rows[i][j];
-          if (looks_numeric(v))
-            std::fputs(v.c_str(), stdout);
-          else
-            std::printf("\"%s\"", json_escape(v).c_str());
-        }
-        std::fputc(']', stdout);
-      }
-      std::fputs("]}\n", stdout);
     } else if (mode_ == "tsv") {
       if (rs.query) {
         if (headers_) write_row(rs.columns);
-        for (const auto &r : rs.rows) write_row(r);
+        for (const auto &r : rs.rows) write_values(r);
       }
     }
     std::fflush(stdout);
@@ -457,13 +630,193 @@ class Output {
     std::fputc('\n', stdout);
   }
 
+  void write_values(const std::vector<Value> &row) {
+    for (size_t i = 0; i < row.size(); ++i) {
+      if (i) std::fputc('\t', stdout);
+      std::string e = escape_field(value_to_string(row[i]));
+      std::fwrite(e.data(), 1, e.size(), stdout);
+    }
+    std::fputc('\n', stdout);
+  }
+
   std::string mode_;
   bool dml_status_ = true;
   bool headers_ = true;
 };
 
 std::string g_data_dir = "/data";
-std::string g_protocol = "framed";
+std::string g_protocol = "jsonl";
+std::string g_data_dir_arg;  // set when --data-dir was given explicitly
+
+// Read one line from stdin, honouring signals.  Returns false on EOF.
+bool read_protocol_line(std::string &pending, std::string &out) {
+  for (;;) {
+    size_t nl = pending.find('\n');
+    if (nl != std::string::npos) {
+      out = pending.substr(0, nl);
+      pending.erase(0, nl + 1);
+      return true;
+    }
+    struct pollfd fds[2];
+    fds[0].fd = 0;
+    fds[0].events = POLLIN;
+    fds[1].fd = g_signal_pipe[0];
+    fds[1].events = POLLIN;
+    int pr = ::poll(fds, 2, 1000);
+    if (pr < 0) {
+      if (errno == EINTR) continue;
+      return false;
+    }
+    if (g_stop) return false;
+    if (fds[1].revents & POLLIN) {
+      char tmp[64];
+      while (::read(g_signal_pipe[0], tmp, sizeof(tmp)) > 0) {
+      }
+      return false;
+    }
+    if (!(fds[0].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+    char chunk[65536];
+    ssize_t n = ::read(0, chunk, sizeof(chunk));
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      return false;
+    }
+    if (n == 0) {
+      if (!pending.empty()) {
+        out = pending;
+        pending.clear();
+        return true;
+      }
+      return false;
+    }
+    pending.append(chunk, static_cast<size_t>(n));
+    if (pending.size() > 64u * 1024u * 1024u) pending.clear();
+  }
+}
+
+// The JSON Lines request loop.  Exactly one response line per request, and
+// nothing else is ever written to stdout.
+int run_jsonl(Database &db) {
+  std::fputs("{\"type\":\"ready\"}\n", stdout);
+  std::fflush(stdout);
+
+  std::string pending, line;
+  while (!g_stop) {
+    if (!read_protocol_line(pending, line)) break;
+    if (trim(line).empty()) continue;
+
+    std::vector<JsonField> fields;
+    std::string id_raw = "0";
+    std::string op, sql, mode;
+    bool have_sql = false;
+    if (!json_parse_line(line, fields)) {
+      std::fputs(
+          "{\"id\":0,\"ok\":false,\"error\":{\"code\":\"invalid_request\","
+          "\"message\":\"malformed JSON request\"}}\n",
+          stdout);
+      std::fflush(stdout);
+      continue;
+    }
+    for (const auto &f : fields) {
+      if (f.key == "id") {
+        if (!f.raw.empty()) id_raw = f.raw;
+      } else if (f.key == "op" && f.is_string) {
+        op = f.str;
+      } else if (f.key == "sql" && f.is_string) {
+        sql = f.str;
+        have_sql = true;
+      } else if (f.key == "search_mode" && f.is_string) {
+        mode = f.str;
+      }
+    }
+
+    if (op == "shutdown") {
+      std::fprintf(stdout, "{\"id\":%s,\"ok\":true}\n", id_raw.c_str());
+      std::fflush(stdout);
+      return 0;
+    }
+    if (op != "execute") {
+      std::fprintf(stdout,
+                   "{\"id\":%s,\"ok\":false,\"error\":{\"code\":\"unsupported_op\","
+                   "\"message\":\"unsupported operation\"}}\n",
+                   id_raw.c_str());
+      std::fflush(stdout);
+      continue;
+    }
+    if (!have_sql) {
+      std::fprintf(stdout,
+                   "{\"id\":%s,\"ok\":false,\"error\":{\"code\":\"invalid_request\","
+                   "\"message\":\"missing sql field\"}}\n",
+                   id_raw.c_str());
+      std::fflush(stdout);
+      continue;
+    }
+    if (!mode.empty() && mode != "exact" && mode != "ann") {
+      std::fprintf(stderr, "ignoring unknown search_mode %s\n", mode.c_str());
+    }
+
+    try {
+      Parser parser(sql);
+      Statement s = parser.parse();
+      if (s.kind == StmtKind::QUIT) {
+        std::fprintf(stdout, "{\"id\":%s,\"ok\":true}\n", id_raw.c_str());
+        std::fflush(stdout);
+        return 0;
+      }
+      if (s.kind == StmtKind::EMPTY) {
+        std::fprintf(stdout, "{\"id\":%s,\"ok\":true}\n", id_raw.c_str());
+        std::fflush(stdout);
+        continue;
+      }
+      ResultSet rs = db.execute(s);
+      switch (s.kind) {
+        case StmtKind::SELECT:
+        case StmtKind::SHOW_TABLES:
+        case StmtKind::DESCRIBE: {
+          std::fprintf(stdout, "{\"id\":%s,\"ok\":true,\"columns\":[", id_raw.c_str());
+          for (size_t i = 0; i < rs.columns.size(); ++i) {
+            if (i) std::fputc(',', stdout);
+            json_write_string(rs.columns[i]);
+          }
+          std::fputs("],\"rows\":[", stdout);
+          for (size_t i = 0; i < rs.rows.size(); ++i) {
+            if (i) std::fputc(',', stdout);
+            std::fputc('[', stdout);
+            for (size_t j = 0; j < rs.rows[i].size(); ++j) {
+              if (j) std::fputc(',', stdout);
+              json_write_value(rs.rows[i][j]);
+            }
+            std::fputc(']', stdout);
+          }
+          std::fputs("]}\n", stdout);
+          break;
+        }
+        case StmtKind::INSERT:
+        case StmtKind::UPDATE:
+        case StmtKind::DELETE:
+          std::fprintf(stdout, "{\"id\":%s,\"ok\":true,\"affected_rows\":%lld}\n", id_raw.c_str(),
+                       static_cast<long long>(rs.affected));
+          break;
+        default:
+          std::fprintf(stdout, "{\"id\":%s,\"ok\":true}\n", id_raw.c_str());
+          break;
+      }
+    } catch (const Error &e) {
+      std::fprintf(stdout, "{\"id\":%s,\"ok\":false,\"error\":{\"code\":\"%s\",\"message\":", id_raw.c_str(),
+                   error_name(e.code));
+      json_write_string(e.message);
+      std::fputs("}}\n", stdout);
+    } catch (const std::exception &e) {
+      std::fprintf(stdout,
+                   "{\"id\":%s,\"ok\":false,\"error\":{\"code\":\"internal_error\","
+                   "\"message\":\"internal error\"}}\n",
+                   id_raw.c_str());
+      std::fprintf(stderr, "internal error: %s\n", e.what());
+    }
+    std::fflush(stdout);
+  }
+  return 0;
+}
 
 std::string arg_value(int argc, char **argv, const char *name, const std::string &def) {
   for (int i = 1; i + 1 < argc; ++i) {
@@ -484,24 +837,37 @@ int main(int argc, char **argv) {
       std::fprintf(stderr,
                    "MiniVectorDB\n"
                    "  --data-dir DIR   data directory (default /data)\n"
-                   "  --protocol P     framed|mysql|tsv|json (default framed)\n"
-                   "  statements are terminated by ';' or by end of line\n");
+                   "  --protocol P     jsonl|framed|mysql|tsv (default jsonl)\n"
+                   "  jsonl: {\"type\":\"ready\"} then one JSON request per line\n"
+                   "  framed/mysql/tsv: statements end with ';' or with a newline\n");
       return 0;
     }
   }
-  g_data_dir = arg_value(argc, argv, "--data-dir", "/data");
-  g_protocol = arg_value(argc, argv, "--protocol", "framed");
+  g_data_dir = arg_value(argc, argv, "--data-dir", "");
+  bool data_dir_from_arg = !g_data_dir.empty();
+  g_protocol = arg_value(argc, argv, "--protocol", "jsonl");
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
-    if (a.rfind("--data-dir=", 0) == 0) g_data_dir = a.substr(11);
-    else if (a.rfind("--protocol=", 0) == 0) g_protocol = a.substr(11);
+    if (a.rfind("--data-dir=", 0) == 0) {
+      g_data_dir = a.substr(11);
+      data_dir_from_arg = true;
+    } else if (a.rfind("--protocol=", 0) == 0) {
+      g_protocol = a.substr(11);
+    }
   }
   if (const char *p = std::getenv("MVDB_PROTOCOL")) g_protocol = p;
-  if (const char *d = std::getenv("MVDB_DATA_DIR")) g_data_dir = d;
+  // The judge passes the data directory as --data-dir (the container mounts
+  // it at /data) or through VECTORDB_DATA_DIR when it runs the program
+  // directly.  An explicit argument always wins.
+  if (!data_dir_from_arg) {
+    if (const char *d = std::getenv("MVDB_DATA_DIR")) g_data_dir = d;
+    else if (const char *d = std::getenv("VECTORDB_DATA_DIR")) g_data_dir = d;
+  }
+  if (g_data_dir.empty()) g_data_dir = "/data";
   if (g_protocol == "plain") g_protocol = "tsv";
   if (g_protocol != "framed" && g_protocol != "mysql" && g_protocol != "tsv" &&
-      g_protocol != "json")
-    g_protocol = "framed";
+      g_protocol != "jsonl")
+    g_protocol = "jsonl";
 
   if (::pipe(g_signal_pipe) != 0) {
     std::fprintf(stderr, "cannot create signal pipe: %s\n", std::strerror(errno));
@@ -532,6 +898,17 @@ int main(int argc, char **argv) {
   }
 
   out.ready();
+  if (g_protocol == "jsonl") {
+    int rc = run_jsonl(*db);
+    try {
+      db->close();
+    } catch (const Error &e) {
+      std::fprintf(stderr, "shutdown failed: %d %s\n", e.code, e.message.c_str());
+    } catch (const std::exception &e) {
+      std::fprintf(stderr, "shutdown failed: %s\n", e.what());
+    }
+    return rc;
+  }
   std::string buf;
   bool quitting = false;
   bool eof = false;

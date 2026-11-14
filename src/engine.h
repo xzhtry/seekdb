@@ -13,7 +13,9 @@ struct RowRef {
 struct ResultSet {
   bool query = false;
   std::vector<std::string> columns;
-  std::vector<std::vector<std::string>> rows;
+  // Rows keep the typed values: the JSON protocol has to emit BIGINT as an
+  // integer, strings as JSON strings and vectors as JSON arrays.
+  std::vector<std::vector<Value>> rows;
   i64 affected = 0;
 };
 

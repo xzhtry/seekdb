@@ -26,54 +26,54 @@ docker run --rm -i -v minivectordb-data:/data \
 
 ## 2. stdin/stdout 协议
 
-默认协议（`--protocol framed`，也可用环境变量 `MVDB_PROTOCOL` 覆盖）：
+官方判题器使用 **JSON Lines（JSONL）** 协议，详见题包根目录 `STDIO_PROTOCOL.md`。默认协议就是 `jsonl`（`--protocol jsonl`，也可用 `MVDB_PROTOCOL` 覆盖）。
 
-启动完成后输出一行：
+### 2.1 启动握手
 
-```
-READY
-```
+程序启动后先打开并恢复 `/data` 中的数据文件，然后主动输出**恰好一行**：
 
-之后每条 SQL 的响应：
-
-- 查询（SELECT/SHOW/DESCRIBE）：
-
-```
-RESULT <列数> <行数>
-<列名1>\t<列名2>...
-<值1>\t<值2>...
-...
+```json
+{"type":"ready"}
 ```
 
-- 非查询语句（CREATE/INSERT/UPDATE/DELETE/BEGIN/COMMIT/ROLLBACK/SET）：
+之后每行 flush 一次，不输出任何其它内容（没有提示符、空行、日志或心跳）。日志只写 stderr。
 
-```
-OK <影响行数>
-```
+### 2.2 请求与响应
 
-- 错误：
+判题器逐行写入 JSON 请求，程序逐行返回响应，响应原样回传请求 `id`（保持其 JSON 类型）：
 
-```
-ERROR <错误码> <错误信息>
+```json
+{"id":1,"op":"execute","sql":"SELECT id FROM docs ORDER BY id;","search_mode":"exact"}
 ```
 
-- 正常退出（EOF、`QUIT`、`EXIT`、`SHUTDOWN`、`\q`、SIGTERM、SIGINT）：
+| 语句类型 | 响应 |
+| --- | --- |
+| 查询（SELECT/SHOW/DESCRIBE） | `{"id":1,"ok":true,"columns":["id"],"rows":[[1],[2]]}` |
+| 修改（INSERT/UPDATE/DELETE） | `{"id":2,"ok":true,"affected_rows":1}` |
+| 建表、事务控制等 | `{"id":3,"ok":true}` |
+| 失败 | `{"id":4,"ok":false,"error":{"code":"duplicate_key","message":"..."}}` |
 
-```
-BYE
-```
+- `ok` 永远是 JSON 布尔值；`affected_rows` 是 JSON 整数。
+- BIGINT 按 JSON 整数输出（不转字符串、不经浮点），VARCHAR 是 JSON 字符串，向量投影是 JSON 数组，距离是 JSON 数值。
+- 错误 `code` 是非空字符串，取公开断言使用的语义名（`duplicate_key`、`unsupported_sql` 等）。
+- 空结果集仍然返回列名，`rows` 为 `[]`。
 
-字段中的制表符、换行、反斜杠按 `\t`、`\n`、`\\` 转义。所有输出在每条语句后立即 flush。
+### 2.3 正常关闭
 
-为了兼容不同的评测封装，程序还提供两种可选输出模式（不影响默认协议）：
+判题器发送 `{"id":4,"op":"shutdown"}`，程序回滚未提交事务、完成持久化，返回 `{"id":4,"ok":true}`，flush 后以退出码 0 结束；此后 stdout 不再有任何输出。
 
-- `--protocol mysql` / `MVDB_PROTOCOL=mysql`：SELECT 输出表头和数据行；非查询输出 `OK`；错误输出 `ERROR <code> (<sqlstate>): <message>`。
-- `--protocol tsv`（别名 `plain`）/ `MVDB_PROTOCOL=tsv`：只输出表头和数据行，非查询不输出。
+### 2.4 兼容的文本协议
 
-可用环境变量微调协议，便于适配不同的评测封装：
+早期版本按猜测实现了文本协议，现保留为备用（不影响默认协议）：
 
-- `MVDB_DML_STATUS=0`：非查询语句不输出 `OK`（framed/mysql 都适用）。
-- `MVDB_READY=none` 或自定义字符串：关闭/替换启动就绪行。
+- `--protocol framed`：启动行 `READY`，查询输出 `RESULT <列数> <行数>` + 表头 + 数据行，非查询输出 `OK <影响行数>`，错误输出 `ERROR <错误码> <信息>`，退出输出 `BYE`。
+- `--protocol mysql`：SELECT 输出表头和数据行；非查询输出 `OK`；错误输出 `ERROR <code> (<sqlstate>): <message>`。
+- `--protocol tsv`（别名 `plain`）：只输出表头和数据行，非查询不输出。
+
+这三种文本模式下，语句以 `;` 结束，也允许**一行一条**（驱动自己切分脚本时使用）。换行切分是保守的：`SELECT` 必须带 `FROM`、`INSERT` 必须带 `VALUES`/`SET`、`UPDATE` 必须带 `SET`、`DELETE` 必须带 `FROM`，以 `,` 结尾或括号未闭合时继续等待下一行。`--mode ann`、`--restart` 这类驱动指令以及 `--` / `#` 注释不会产生任何输出。
+
+可用环境变量微调文本协议：`MVDB_DML_STATUS=0` 关闭非查询状态行；`MVDB_READY=none` 或自定义字符串替换启动行；`MVDB_BYE` 同理替换退出行；`MVDB_HEADERS=0` 关闭结果集表头。
+
 - `MVDB_BYE=none` 或自定义字符串：关闭/替换退出行。
 
 输入以分号 `;` 作为语句边界；也接受 mysql 客户端的 `\g` / `\G` 终止符。字符串、反引号标识符、`--`/`#`/`/* ... */` 注释中的分号不会切断语句。EOF 时缓冲区里最后一条未以分号结束的语句会执行。
@@ -320,6 +320,20 @@ u32 payload_len | u32 crc32 | payload
 
 `tests/check_conversation.py` 校验 `agent/conversation.json`：UTF-8、合法 JSON、无重复键、≤128 KiB、每条证据引用的 JSON pointer 可定位且原文匹配、同一段原文不跨实例重复计分、文件中不含密钥。
 
+**官方协议自测**（题包自带 `protocol_check/`，不需要 Docker，用 `--command` 直接跑本地二进制）：
+
+> `protocol_check/` 是组织方随题包提供的自测工具，本实现直接使用它做本地验证；其中 `example_stdio.py` 是组织方的**通信骨架示例**（只演示报文收发、不含 SQL 实现），不是本项目的实现——本项目的实现在 `src/`，由 `build.sh` 编译成 `build/minivectordb`。
+
+```bash
+cd protocol_check
+python3 run.py --command '["../build/minivectordb","--data-dir","{data_dir}","--protocol","jsonl"]' \
+  --handshake-only --output "protocol-results/handshake-$(date +%Y%m%d-%H%M%S)"
+python3 run.py --command '["../build/minivectordb","--data-dir","{data_dir}","--protocol","jsonl"]' \
+  --output "protocol-results/public-$(date +%Y%m%d-%H%M%S)"
+```
+
+其余本地验证：
+
 ```bash
 ./build.sh
 python3 tests/selftest.py
@@ -331,7 +345,8 @@ python3 tests/check_conversation.py
 
 已验证的记录（本机 WSL Ubuntu 24.04，g++ 15）：
 
-- 官方公开题包 20/20 用例通过（95 条 SQL，包含 BIGINT 精度、float32、过滤后 TopK、事务原子性、正常关闭回滚、`--restart`、`--mode ann`）；同一套用例在"驱动自己切分语句、不带分号"的形态下同样 20/20；
+- **官方 `protocol_check` 全部通过**：握手 PASS；20 个公开用例全部 PASS（含 `--restart` 复用数据目录与 `--mode ann` 切换）；
+- 官方公开题包 20/20 用例通过（95 条 SQL，包含 BIGINT 精度、float32、过滤后 TopK、事务原子性、正常关闭回滚）；同一套用例在"驱动自己切分语句、不带分号"的形态下同样 20/20；
 - 协议冒烟 21 项全部通过；`ldd` 显示运行期只依赖 libc/libm（`build.sh` 静态链接 libstdc++/libgcc），运行镜像不再依赖基础镜像的 libstdc++ 版本；
 - GitHub Actions `.github/workflows/minivectordb-ci.yml` 在干净的 Ubuntu runner 上 `docker build` 成功，并用 `docker run --rm -i` 跑通建表/插入/事务回滚/重启后向量查询；
 - 10,000 行 × 128 维，100 行/批写入：约 0.36 s；1,000 次 TopK（一半带过滤）：约 0.70 s；

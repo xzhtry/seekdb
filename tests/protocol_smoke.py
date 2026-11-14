@@ -51,6 +51,11 @@ class DB:
         self.proc.stdin.flush()
         return self.read_line(timeout)
 
+    def send_raw(self, line, timeout=5.0):
+        self.proc.stdin.write(line + "\n")
+        self.proc.stdin.flush()
+        return self.read_line(timeout)
+
     def close(self):
         try:
             self.proc.stdin.close()
@@ -119,22 +124,33 @@ def case_c(tmp):
 
 
 def case_d(tmp):
+    """The official JSON Lines protocol: ready handshake and JSON responses."""
     d = os.path.join(tmp, "d")
     os.makedirs(d)
-    db = DB(d, protocol="json")
-    check("D.ready", db.ready == '{"status":"ready"}', repr(db.ready))
-    db.send("CREATE TABLE t (id BIGINT PRIMARY KEY);")
-    db.send("INSERT INTO t VALUES (42);")
-    r = db.send("SELECT id FROM t;")
-    try:
-        obj = json.loads(r)
-    except Exception as exc:
-        obj = None
-        check("D.json", False, "%r (%s)" % (r, exc))
-    else:
-        check("D.json", obj == {"status": "result", "columns": ["id"], "rows": [[42]]},
-              repr(obj))
-    db.close()
+    db = DB(d, protocol="jsonl")
+    check("D.ready", db.ready == '{"type":"ready"}', repr(db.ready))
+    resp = db.send_raw(json.dumps({"id": 1, "op": "execute",
+                                   "sql": "CREATE TABLE t (id BIGINT PRIMARY KEY);",
+                                   "search_mode": "exact"}))
+    check("D.create", resp == '{"id":1,"ok":true}', repr(resp))
+    resp = db.send_raw(json.dumps({"id": 2, "op": "execute",
+                                   "sql": "INSERT INTO t VALUES (7);",
+                                   "search_mode": "exact"}))
+    check("D.insert", resp == '{"id":2,"ok":true,"affected_rows":1}', repr(resp))
+    resp = db.send_raw(json.dumps({"id": 3, "op": "execute",
+                                   "sql": "SELECT id FROM t;",
+                                   "search_mode": "exact"}))
+    check("D.select", resp == '{"id":3,"ok":true,"columns":["id"],"rows":[[7]]}', repr(resp))
+    resp = db.send_raw(json.dumps({"id": 4, "op": "execute",
+                                   "sql": "INSERT INTO t VALUES (7);",
+                                   "search_mode": "exact"}))
+    check("D.error", '"ok":false' in resp and '"code":"duplicate_key"' in resp, repr(resp))
+    resp = db.send_raw(json.dumps({"id": "abc", "op": "execute",
+                                   "sql": "SELECT id FROM t;", "search_mode": "exact"}))
+    check("D.id-type", resp.startswith('{"id":"abc"'), repr(resp))
+    resp = db.send_raw(json.dumps({"id": 5, "op": "shutdown"}))
+    check("D.shutdown", resp == '{"id":5,"ok":true}', repr(resp))
+    check("D.exit", db.proc.wait(timeout=10) == 0)
 
 
 def case_e(tmp):
