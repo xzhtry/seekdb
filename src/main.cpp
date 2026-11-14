@@ -310,6 +310,39 @@ std::string json_escape(std::string_view s) {
   return out;
 }
 
+// Salvage the request id from a request we could not parse.  Echoing the id
+// keeps the failure an ordinary statement error instead of a protocol error
+// ("response id differs from request"), which the judge may treat as a broken
+// run.
+std::string salvage_id(const std::string &line) {
+  size_t p = line.find("\"id\"");
+  if (p == std::string::npos) return "0";
+  p = line.find(':', p + 4);
+  if (p == std::string::npos) return "0";
+  ++p;
+  while (p < line.size() && std::isspace(static_cast<unsigned char>(line[p]))) ++p;
+  if (p >= line.size()) return "0";
+  size_t start = p;
+  if (line[p] == '"') {
+    ++p;
+    while (p < line.size() && line[p] != '"') {
+      if (line[p] == '\\') ++p;
+      ++p;
+    }
+    if (p < line.size()) ++p;
+    return line.substr(start, p - start);
+  }
+  if (line[p] == '-' || std::isdigit(static_cast<unsigned char>(line[p]))) {
+    while (p < line.size() && (std::isdigit(static_cast<unsigned char>(line[p])) ||
+                              line[p] == '-' || line[p] == '+' || line[p] == '.' ||
+                              line[p] == 'e' || line[p] == 'E')) {
+      ++p;
+    }
+    return line.substr(start, p - start);
+  }
+  return "0";
+}
+
 // ---------------------------------------------------------------------------
 // JSON Lines protocol (the protocol the official judge speaks).
 //
@@ -387,11 +420,59 @@ bool json_read_string(const std::string &s, size_t &i, std::string &out) {
   return false;
 }
 
+// Skip over a JSON object or array and return its raw text.  The judge may
+// add fields we do not use ("params": [...], "extra": {...}); they must not
+// make the whole request unparseable.
+bool json_skip_container(const std::string &s, size_t &i) {
+  size_t start = i;
+  int depth = 0;
+  bool in_string = false;
+  while (i < s.size()) {
+    char c = s[i];
+    if (in_string) {
+      if (c == '\\') {
+        ++i;
+        if (i < s.size()) ++i;
+        continue;
+      }
+      if (c == '"') in_string = false;
+      ++i;
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+      ++i;
+      continue;
+    }
+    if (c == '{' || c == '[') {
+      ++depth;
+      ++i;
+      continue;
+    }
+    if (c == '}' || c == ']') {
+      --depth;
+      ++i;
+      if (depth == 0) return true;
+      continue;
+    }
+    ++i;
+  }
+  i = start;
+  return false;
+}
+
 bool json_read_value(const std::string &s, size_t &i, JsonField &f) {
   json_skip_ws(s, i);
   if (i >= s.size()) return false;
   size_t start = i;
   char c = s[i];
+  if (c == '{' || c == '[') {
+    size_t p = i;
+    if (!json_skip_container(s, p)) return false;
+    f.raw = s.substr(start, p - start);
+    i = p;
+    return true;
+  }
   if (c == '"') {
     std::string tmp;
     if (!json_read_string(s, i, tmp)) return false;
@@ -710,10 +791,10 @@ int run_jsonl(Database &db) {
     std::string op, sql, mode;
     bool have_sql = false;
     if (!json_parse_line(line, fields)) {
-      std::fputs(
-          "{\"id\":0,\"ok\":false,\"error\":{\"code\":\"invalid_request\","
-          "\"message\":\"malformed JSON request\"}}\n",
-          stdout);
+      std::fprintf(stdout,
+                   "{\"id\":%s,\"ok\":false,\"error\":{\"code\":\"invalid_request\","
+                   "\"message\":\"malformed JSON request\"}}\n",
+                   salvage_id(line).c_str());
       std::fflush(stdout);
       continue;
     }

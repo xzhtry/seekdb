@@ -73,3 +73,13 @@ jobs:
           set -euo pipefail
           python3 tests/hardened_cases.py --image minivectordb:ci \
             --workdir /tmp/hardened
+
+      # Request field variants and malformed requests: every one of them has
+      # to be answered, and the answer has to carry the request id.
+      - name: Protocol edge cases against the image
+        run: |
+          set -euo pipefail
+          python3 tests/probe_protocol_edges.py --image minivectordb:ci \
+            --workdir /tmp/proto
+          python3 tests/probe_malformed.py --image minivectordb:ci \
+            --workdir /tmp/proto2
