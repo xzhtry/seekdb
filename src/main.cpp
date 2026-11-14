@@ -22,6 +22,139 @@ void signal_handler(int) {
 
 std::string lower_trim(std::string_view s) { return to_lower(trim(s)); }
 
+// ---------------------------------------------------------------------------
+// Statement boundary detection.
+//
+// The evaluation driver is not published, so the program accepts both common
+// shapes of input framing:
+//
+//   * semicolon terminated  -- "CREATE TABLE t (...);"      (default)
+//   * one statement per line -- "CREATE TABLE t (...)"       (fallback)
+//
+// The fallback is only used while no semicolon terminator has been seen in the
+// session, so a semicolon driven driver never gets a statement cut in half.
+// Once semicolons are in use, a line break still ends a statement when the
+// following line clearly starts a new one.
+// ---------------------------------------------------------------------------
+
+bool g_semicolon_mode = false;
+
+const char *const kContinuationWords[] = {
+    "AND",    "OR",     "NOT",     "FROM",   "WHERE",  "SET",    "VALUES",
+    "ON",     "IN",     "LIKE",    "BY",     "INTO",   "HAVING", "ORDER",
+    "GROUP",  "LIMIT",  "OFFSET",  "AS",     "JOIN",   "SELECT", "INSERT",
+    "UPDATE", "DELETE", "CREATE",  "TABLE",  "PRIMARY","KEY",    "VECTOR",
+    "INDEX",  "DISTINCT","USING",  "WITH",   "TO",     "ADD",    "COLUMN",
+    "PARTITION","UNION", "ALL",    "EXISTS", "ANY",    "CASE",   "WHEN",
+    "THEN",   "ELSE",   "END",     "FOR",    "LOW_PRIORITY", "HIGH_PRIORITY",
+    "QUICK",  "DELAYED","FORCE",   "USE",    "IF",     "IGNORE", "REPLACE",
+    "DUPLICATE","NULLS","FIRST",   "LAST",   "DIV",    "MOD",    "XOR",
+    "IS",     "RLIKE",  "REGEXP",  "SOUNDS", "ESCAPE", "BINARY", "COLLATE",
+    "NATURAL","STRAIGHT_JOIN", "CROSS", "INNER", "LEFT", "RIGHT", "FULL",
+    "OUTER",  "WINDOW", "OVER",
+};
+
+const char *const kStatementStartWords[] = {
+    "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP",   "ALTER",
+    "BEGIN",  "COMMIT", "ROLLBACK", "SET",  "TRUNCATE", "USE",  "SHOW",
+    "DESCRIBE", "DESC", "EXPLAIN", "ANALYZE", "OPTIMIZE", "REPAIR", "FLUSH",
+    "START",  "SAVEPOINT", "RELEASE", "PREPARE", "EXECUTE", "DEALLOCATE",
+};
+
+// Last whitespace separated word of `s`, upper cased.
+std::string last_word(const std::string &s) {
+  size_t e = s.size();
+  while (e > 0 && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
+  size_t b = e;
+  while (b > 0 && (std::isalnum(static_cast<unsigned char>(s[b - 1])) || s[b - 1] == '_'))
+    --b;
+  std::string w = s.substr(b, e - b);
+  for (char &c : w) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  return w;
+}
+
+// First whitespace separated word of `s`, lower cased.
+std::string first_word(const std::string &s) {
+  size_t b = 0;
+  while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
+  size_t e = b;
+  while (e < s.size() && (std::isalnum(static_cast<unsigned char>(s[e])) || s[e] == '_')) ++e;
+  return to_lower(s.substr(b, e - b));
+}
+
+// True when `word` appears in `s` as a standalone word.
+bool has_word(const std::string &s, const char *word) {
+  std::string up = to_lower(s);
+  std::string w = word;
+  size_t pos = 0;
+  while ((pos = up.find(w, pos)) != std::string::npos) {
+    bool left_ok = (pos == 0) || !(std::isalnum(static_cast<unsigned char>(up[pos - 1])) ||
+                                   up[pos - 1] == '_');
+    size_t end = pos + w.size();
+    bool right_ok = (end >= up.size()) || !(std::isalnum(static_cast<unsigned char>(up[end])) ||
+                                            up[end] == '_');
+    if (left_ok && right_ok) return true;
+    pos = end;
+  }
+  return false;
+}
+
+bool is_continuation_word(const std::string &w) {
+  for (const char *p : kContinuationWords)
+    if (w == p) return true;
+  return false;
+}
+
+bool is_statement_start_word(const std::string &w) {
+  for (const char *p : kStatementStartWords)
+    if (w == p) return true;
+  return false;
+}
+
+// Decide whether the text collected so far is a complete statement.  The test
+// is intentionally conservative: when in doubt the text is treated as
+// incomplete and more input is awaited.
+bool looks_complete(const std::string &raw) {
+  std::string s = trim(raw);
+  if (s.empty()) return false;
+  // A dangling comma means the statement continues on the next line.
+  if (!s.empty() && s.back() == ',') return false;
+  while (!s.empty() && s.back() == ';') {
+    s = trim(s.substr(0, s.size() - 1));
+  }
+  if (s.empty()) return false;
+  if (s.back() == '(') return false;
+
+  std::string kw = first_word(s);
+  if (kw == "select") {
+    if (!has_word(s, "from")) return false;
+  } else if (kw == "insert") {
+    if (!has_word(s, "values") && !has_word(s, "set")) return false;
+  } else if (kw == "update") {
+    if (!has_word(s, "set")) return false;
+  } else if (kw == "delete") {
+    if (!has_word(s, "from")) return false;
+  }
+
+  // A statement that ends with a closing parenthesis is self contained.
+  if (s.back() == ')') return true;
+  // Otherwise the trailing word must not be one that expects more input.
+  if (is_continuation_word(last_word(s))) return false;
+  return true;
+}
+
+// True when the text after the newline starts a new statement.
+bool next_line_starts_statement(const std::string &buf, size_t nl_pos) {
+  size_t p = nl_pos + 1;
+  while (p < buf.size() && (buf[p] == ' ' || buf[p] == '\t' || buf[p] == '\r')) ++p;
+  if (p >= buf.size()) return true;  // nothing left: the statement is complete
+  size_t e = p;
+  while (e < buf.size() && buf[e] != '\n' && buf[e] != '\r') ++e;
+  std::string line = buf.substr(p, e - p);
+  std::string w = first_word(line);
+  return is_statement_start_word(w);
+}
+
 // Split the next complete SQL statement out of `buf`.  Handles quoted strings,
 // quoted identifiers, -- / # / block comments, and the mysql-client \g / \G
 // terminators.  Returns false when more input is needed.
@@ -96,13 +229,31 @@ bool next_statement(std::string &buf, std::string &stmt) {
     if (c == '\\' && (n == 'g' || n == 'G')) {
       stmt = buf.substr(0, i);
       buf.erase(0, i + 2);
+      g_semicolon_mode = true;
       return true;
+    }
+    if (c == '\n' && paren == 0) {
+      // Line oriented fallback: end the statement at the line break when the
+      // text so far is a complete statement.
+      bool split = false;
+      if (!g_semicolon_mode) {
+        split = looks_complete(buf.substr(0, i));
+      } else {
+        split = looks_complete(buf.substr(0, i)) && next_line_starts_statement(buf, i);
+      }
+      if (split) {
+        stmt = buf.substr(0, i);
+        buf.erase(0, i + 1);
+        return true;
+      }
+      continue;
     }
     if (c == '(') ++paren;
     else if (c == ')' && paren > 0) --paren;
     else if (c == ';' && paren == 0) {
       stmt = buf.substr(0, i + 1);
       buf.erase(0, i + 1);
+      g_semicolon_mode = true;
       return true;
     } else if (c == '\0') {
       stmt = buf.substr(0, i);
@@ -132,6 +283,58 @@ const char *sqlstate_for(int code) {
   }
 }
 
+// Escape a value for a JSON string literal.
+std::string json_escape(std::string_view s) {
+  std::string out;
+  out.reserve(s.size() + 8);
+  for (unsigned char c : s) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      case '\b': out += "\\b"; break;
+      case '\f': out += "\\f"; break;
+      default:
+        if (c < 0x20) {
+          char b[8];
+          std::snprintf(b, sizeof(b), "\\u%04x", c);
+          out += b;
+        } else {
+          out += static_cast<char>(c);
+        }
+    }
+  }
+  return out;
+}
+
+// True when the text is a plain number; used to give JSON output real types.
+bool looks_numeric(const std::string &s) {
+  if (s.empty()) return false;
+  size_t i = 0;
+  if (s[i] == '-' || s[i] == '+') ++i;
+  bool digits = false, dot = false, expo = false;
+  for (; i < s.size(); ++i) {
+    char c = s[i];
+    if (std::isdigit(static_cast<unsigned char>(c))) {
+      digits = true;
+      continue;
+    }
+    if (c == '.' && !dot && !expo) {
+      dot = true;
+      continue;
+    }
+    if ((c == 'e' || c == 'E') && digits && !expo) {
+      expo = true;
+      if (i + 1 < s.size() && (s[i + 1] == '-' || s[i + 1] == '+')) ++i;
+      continue;
+    }
+    return false;
+  }
+  return digits;
+}
+
 class Output {
  public:
   explicit Output(std::string mode) : mode_(std::move(mode)) {
@@ -144,6 +347,11 @@ class Output {
   }
 
   void ready() {
+    if (mode_ == "json") {
+      std::fputs("{\"status\":\"ready\"}\n", stdout);
+      std::fflush(stdout);
+      return;
+    }
     if (mode_ == "framed" || mode_ == "mysql") {
       const char *e = std::getenv("MVDB_READY");
       if (e && (std::strcmp(e, "none") == 0 || e[0] == '\0')) return;
@@ -154,6 +362,11 @@ class Output {
   }
 
   void bye() {
+    if (mode_ == "json") {
+      std::fputs("{\"status\":\"bye\"}\n", stdout);
+      std::fflush(stdout);
+      return;
+    }
     if (mode_ == "framed" || mode_ == "mysql") {
       const char *e = std::getenv("MVDB_BYE");
       if (e && (std::strcmp(e, "none") == 0 || e[0] == '\0')) return;
@@ -175,6 +388,27 @@ class Output {
       } else {
         std::fputs("OK\n", stdout);
       }
+    } else if (mode_ == "json") {
+      std::fputs("{\"status\":\"result\",\"columns\":[", stdout);
+      for (size_t i = 0; i < rs.columns.size(); ++i) {
+        if (i) std::fputc(',', stdout);
+        std::printf("\"%s\"", json_escape(rs.columns[i]).c_str());
+      }
+      std::fputs("],\"rows\":[", stdout);
+      for (size_t i = 0; i < rs.rows.size(); ++i) {
+        if (i) std::fputc(',', stdout);
+        std::fputc('[', stdout);
+        for (size_t j = 0; j < rs.rows[i].size(); ++j) {
+          if (j) std::fputc(',', stdout);
+          const std::string &v = rs.rows[i][j];
+          if (looks_numeric(v))
+            std::fputs(v.c_str(), stdout);
+          else
+            std::printf("\"%s\"", json_escape(v).c_str());
+        }
+        std::fputc(']', stdout);
+      }
+      std::fputs("]}\n", stdout);
     } else if (mode_ == "tsv") {
       if (rs.query) {
         if (headers_) write_row(rs.columns);
@@ -190,6 +424,8 @@ class Output {
       std::printf("OK %lld\n", static_cast<long long>(affected));
     } else if (mode_ == "mysql") {
       std::fputs("OK\n", stdout);
+    } else if (mode_ == "json") {
+      std::printf("{\"status\":\"ok\",\"affected_rows\":%lld}\n", static_cast<long long>(affected));
     }
     std::fflush(stdout);
   }
@@ -202,6 +438,9 @@ class Output {
       std::printf("ERROR %d %s\n", e.code, msg.c_str());
     } else if (mode_ == "mysql") {
       std::printf("ERROR %d (%s): %s\n", e.code, sqlstate_for(e.code), msg.c_str());
+    } else if (mode_ == "json") {
+      std::printf("{\"status\":\"error\",\"code\":%d,\"message\":\"%s\"}\n", e.code,
+                  json_escape(msg).c_str());
     } else {
       std::printf("ERROR %d %s\n", e.code, msg.c_str());
     }
@@ -245,7 +484,8 @@ int main(int argc, char **argv) {
       std::fprintf(stderr,
                    "MiniVectorDB\n"
                    "  --data-dir DIR   data directory (default /data)\n"
-                   "  --protocol P     framed|mysql|tsv (default framed)\n");
+                   "  --protocol P     framed|mysql|tsv|json (default framed)\n"
+                   "  statements are terminated by ';' or by end of line\n");
       return 0;
     }
   }
@@ -259,7 +499,8 @@ int main(int argc, char **argv) {
   if (const char *p = std::getenv("MVDB_PROTOCOL")) g_protocol = p;
   if (const char *d = std::getenv("MVDB_DATA_DIR")) g_data_dir = d;
   if (g_protocol == "plain") g_protocol = "tsv";
-  if (g_protocol != "framed" && g_protocol != "mysql" && g_protocol != "tsv")
+  if (g_protocol != "framed" && g_protocol != "mysql" && g_protocol != "tsv" &&
+      g_protocol != "json")
     g_protocol = "framed";
 
   if (::pipe(g_signal_pipe) != 0) {
@@ -274,6 +515,8 @@ int main(int argc, char **argv) {
   sigaction(SIGINT, &sa, nullptr);
   sigaction(SIGTERM, &sa, nullptr);
   sigaction(SIGHUP, &sa, nullptr);
+  // A closed stdout must not kill the process before the shutdown path runs.
+  signal(SIGPIPE, SIG_IGN);
 
   Output out(g_protocol);
   std::unique_ptr<Database> db;

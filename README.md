@@ -82,6 +82,28 @@ BYE
 
 `SET search_mode='ann'`、`SET search_mode='exact'`、`SET vector_search_mode=...`、`SET ann=1/0` 均可接受。实现始终返回精确 TopK（因此 ann 模式的 Recall@K 为 1.0）；`CREATE VECTOR INDEX` 的元数据会持久化，增删改后检索结果仍与当前可见记录一致。
 
+### 语句边界：分号与换行都算结束
+
+组织方的完整驱动未随题包发布，因此实现不假定驱动一定带分号：
+
+- 语句以 `;` 结束时按 `;` 切分；
+- 在整个会话还没有出现过分号终止符之前，**换行**也可以结束一条语句（`CREATE TABLE t (...)` 一行一条），用于适配"驱动自己切分脚本、逐行下发"的形态；
+- 换行切分是保守的：`SELECT` 必须带 `FROM`、`INSERT` 必须带 `VALUES`/`SET`、`UPDATE` 必须带 `SET`、`DELETE` 必须带 `FROM`，语句以 `,` 或未闭合的 `(` 结尾时一律继续等待下一行。因此跨行的一条 SQL 不会被提前切断；
+- 一旦出现过分号终止符，之后的换行只有在下一行明显是另一条语句（新语句关键字）时才切分。
+
+`--mode ann`、`--restart` 这类驱动指令以及 `--` / `#` 注释不会产生任何输出。
+
+### 协议变体
+
+| 协议 | 结果行 | 非查询 | 错误 |
+| --- | --- | --- | --- |
+| `framed`（默认） | `RESULT <列数> <行数>` + 表头 + 数据行 | `OK <影响行数>` | `ERROR <错误码> <信息>` |
+| `mysql` | 表头 + 数据行 | `OK` | `ERROR <code> (<sqlstate>): <message>` |
+| `tsv` | 表头 + 数据行 | 无输出 | `ERROR <code> <信息>` |
+| `json` | `{"status":"result","columns":[...],"rows":[...]}` | `{"status":"ok","affected_rows":N}` | `{"status":"error","code":N,"message":"..."}` |
+
+启动标识默认 `READY`，退出标识默认 `BYE`。可用 `MVDB_PROTOCOL` 切换协议；`MVDB_READY` / `MVDB_BYE` 可替换或关闭这两行；`MVDB_DML_STATUS=0` 关闭非查询语句的状态行；`MVDB_HEADERS=0` 关闭结果集表头。
+
 ## 3. SQL 支持范围
 
 ### DDL
@@ -294,20 +316,36 @@ u32 payload_len | u32 crc32 | payload
 
 `tests/run_public_cases.py` 直接读取官方公开题包 `mysqltest/manifest.json` 与 `cases/*.test|*.result`，按 `--restart` / `--mode ann` 驱动指令逐条执行并比较 JSON 断言（`{}`、`error`、`affected_rows`、`columns`、`rows`，浮点容差 1e-5）。
 
+`tests/protocol_smoke.py` 覆盖进程通信层的多种输入形态：分号结束、无分号逐行、跨行语句不提前切断、JSON 协议、注释与驱动指令保持静默。
+
+`tests/check_conversation.py` 校验 `agent/conversation.json`：UTF-8、合法 JSON、无重复键、≤128 KiB、每条证据引用的 JSON pointer 可定位且原文匹配、同一段原文不跨实例重复计分、文件中不含密钥。
+
 ```bash
 ./build.sh
 python3 tests/selftest.py
 python3 tests/run_public_cases.py
+MVDB_STRIP_SEMICOLON=1 python3 tests/run_public_cases.py   # 模拟驱动自己切分语句
+python3 tests/protocol_smoke.py
+python3 tests/check_conversation.py
 ```
 
-已验证的记录（本机 WSL Ubuntu，g++ 15，2026-11-09）：
+已验证的记录（本机 WSL Ubuntu 24.04，g++ 15）：
 
-- 官方公开题包 20/20 用例通过（95 条 SQL，包含 BIGINT 精度、float32、过滤后 TopK、事务原子性、正常关闭回滚、`--restart`、`--mode ann`）；
+- 官方公开题包 20/20 用例通过（95 条 SQL，包含 BIGINT 精度、float32、过滤后 TopK、事务原子性、正常关闭回滚、`--restart`、`--mode ann`）；同一套用例在"驱动自己切分语句、不带分号"的形态下同样 20/20；
+- 协议冒烟 21 项全部通过；`ldd` 显示运行期只依赖 libc/libm（`build.sh` 静态链接 libstdc++/libgcc），运行镜像不再依赖基础镜像的 libstdc++ 版本；
 - GitHub Actions `.github/workflows/minivectordb-ci.yml` 在干净的 Ubuntu runner 上 `docker build` 成功，并用 `docker run --rm -i` 跑通建表/插入/事务回滚/重启后向量查询；
 - 10,000 行 × 128 维，100 行/批写入：约 0.36 s；1,000 次 TopK（一半带过滤）：约 0.70 s；
 - 100,000 行 × 128 维（数据文件约 106 MiB，含 WAL），缓存限制 1 MiB：查询约 0.11 s，进程峰值 RSS 约 65 MiB；
 - 随机 20,000 行 × 64 维，与按存储后 float32 值计算的暴力 Top10 对比：ID 全部一致，距离误差 < 1e-7；
 - SIGKILL 后重启：已提交行保留，未提交事务的 INSERT/DELETE/UPDATE 不生效；恢复途中连续 5 次 SIGKILL 后仍可正常启动。
+
+### 2026-11-14 的复盘与加固
+
+11-09 的两次正式提测（`073cba57`、`12c24e46`）都返回"执行成功、成功 0 失败 1"，平台没有给失败日志。复核后发现两次提交都早于运行时库修复，且当时协议结论只是推测。本轮据此做了三件事：
+
+1. 把镜像运行时依赖收敛到只剩 libc，`/data` 改为 1777 以兼容非 root 用户；
+2. 把"驱动可能的行为形态"做成可回归测试（分号 / 无分号 / 跨行 / 注释与驱动指令 / JSON 协议），不再依赖平台日志；
+3. 重写 `agent/conversation.json`，补齐第二轮的真实提问、判断、实验与复盘。
 
 ## 7. 已知限制
 
@@ -321,4 +359,6 @@ python3 tests/run_public_cases.py
 
 ## 8. Agent Prompt 学习材料
 
-见仓库根目录 `conversation.json`（同一份材料也放在 `agent/conversation.json`）。材料只包含本次开发中的真实 prompt、工具输出、实验记录和复盘，未编造未执行的实验。
+见仓库根目录 `conversation.json`（同一份材料也放在 `agent/conversation.json`，两处内容完全一致：评测入口当前读取 `agent/conversation.json`，根目录副本用于兼容早期入口）。
+
+材料只包含本次开发中的真实 prompt、工具输出、实验记录和复盘，未编造未执行的实验；每条学生证据都带 JSON pointer 与原文片段，可用 `python3 tests/check_conversation.py` 自校验。

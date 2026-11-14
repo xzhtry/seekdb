@@ -114,6 +114,9 @@ def run_case(path, data_dir):
         lines = [ln.rstrip("\n") for ln in f if ln.strip()]
     with open(path + ".result", encoding="utf-8") as f:
         expected = json.load(f)
+    # MVDB_STRIP_SEMICOLON=1 emulates a driver that splits the script into
+    # statements itself and sends each one without the trailing semicolon.
+    strip = os.environ.get("MVDB_STRIP_SEMICOLON") == "1"
     db = DB(data_dir)
     ei = 0
     errors = []
@@ -126,6 +129,8 @@ def run_case(path, data_dir):
             if line.startswith("--mode"):
                 db.send("SET search_mode='%s';" % line.split()[-1])
                 continue
+            if strip and line.endswith(";"):
+                line = line[:-1].strip()
             if ei >= len(expected):
                 errors.append("too many assertions at %r" % line)
                 break

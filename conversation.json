@@ -3,9 +3,9 @@
   "synthetic": false,
   "task": "MiniVectorDB / 2026-competition-round2",
   "team": "anonymous",
-  "date": "2026-11-09",
+  "date": "2026-11-09 .. 2026-11-14",
   "language": "zh-CN",
-  "material_scope": "本文件是本次 MiniVectorDB 开发过程的真实记录。学生在关键决策点给出方向，Agent 完成代码、实验与记录；不把 Agent 的代码或解释冒充成学生的独立理解。未执行的步骤明确标为计划。",
+  "material_scope": "本文件是本次 MiniVectorDB 开发过程的真实记录，分两轮：2026-11-09 的功能实现与首次提测，2026-11-14 的复盘、再加固与第二次提测。学生在关键决策点给出方向、假设与判断，Agent 完成代码、实验与记录；Agent 的代码或解释不冒充成学生的独立理解。未执行的步骤明确标为计划。",
   "user_prompts": [
     {
       "id": "u1",
@@ -36,6 +36,36 @@
       "source": "student",
       "content": "性能排名优先",
       "note": "在“准入正确性/性能/材料”三者只能保一个时的取舍选择。"
+    },
+    {
+      "id": "u6",
+      "source": "student",
+      "content": "还有两道题，我可以登录网站，你帮我完成一下",
+      "note": "2026-11-14 第二轮起点。学生指的是评分页上的两项：性能评测（40 分）与 Agent Prompt 评价（40 分），并明确自己可以在平台上完成登录。"
+    },
+    {
+      "id": "u7",
+      "source": "student",
+      "content": "我不知道，但是有人提交成功了",
+      "note": "Agent 请学生解释 11-09 两次正式提测为何都是“成功 0 / 失败 1”。学生拒绝在没有依据的情况下给结论，转而给出一个外部观察：有人已经提交成功。这否定了“评测侧整体未就绪”这一默认假设。"
+    },
+    {
+      "id": "u8",
+      "source": "student",
+      "content": "先写 WAL 并 fsync，数据文件稍后补写",
+      "note": "学生对自己实现里提交持久化顺序的表述：先让日志落盘，数据文件可以稍后补写。"
+    },
+    {
+      "id": "u9",
+      "source": "student",
+      "content": "本地按驱动可能行为做对照回归",
+      "note": "被问及“如果这次提测仍是 0/1 怎么定位”时，学生的方案：不靠平台日志，先在本地把驱动可能的行为形态逐个复现并对照。"
+    },
+    {
+      "id": "u10",
+      "source": "student",
+      "content": "把不确定性变成可回归的本地测试",
+      "note": "被问及“最该写进学习材料的一条经验”时，学生的总结。"
     }
   ],
   "conversations": [
@@ -74,6 +104,42 @@
       "source": "agent",
       "content": "发现 AVX2 距离实现把平方后的差值又平方了一次；用随机 64 维向量与标量实现对拍，修复后误差从 0.3 降到 1e-8 量级。",
       "context": "Agent 发现并修复的 bug；学生未参与该定位，不能算作学生证据。"
+    },
+    {
+      "id": "c7",
+      "source": "student",
+      "content": "还有两道题，我可以登录网站，你帮我完成一下",
+      "context": "2026-11-14 第二轮。学生把任务交回给 Agent，但明确自己能做登录这一步；Agent 负责准备材料、执行提测与结果解读。"
+    },
+    {
+      "id": "c8",
+      "source": "agent",
+      "content": "复盘后我先前的归因不完整：11-09 两次 0/1 的提交都早于运行时库修复，官方公开题包也没有给出进程通信协议；我会先在本地把“驱动可能的行为形态”做成可回归测试，再提测。",
+      "context": "Agent 自己的纠错与本轮计划，学生未参与该定位。"
+    },
+    {
+      "id": "c9",
+      "source": "student",
+      "content": "我不知道，但是有人提交成功了",
+      "context": "Agent 请学生解释两次 0/1 的原因，并给出四个候选归因。学生没有在四个候选里挑一个，而是说“不知道”，同时给出一个外部事实：有人提交成功了。这把问题从“评测侧是否就绪”转回“我们这一侧还有什么没对齐”。"
+    },
+    {
+      "id": "c10",
+      "source": "agent",
+      "content": "我去平台 600081 的排行榜查了：排名/团队/最优提交时间/成绩四列都是“暂无数据”，与社区里其他队伍的 0/1 反馈一致；说明至少在排行榜维度还没有队伍拿到分数。",
+      "context": "Agent 执行了学生 u7 指向的核查方向，并把结果如实回报，包括与学生听到的说法不一致的部分。"
+    },
+    {
+      "id": "c11",
+      "source": "student",
+      "content": "本地按驱动可能行为做对照回归",
+      "context": "被问“若这次提测仍是 0/1 怎么定位”时的回答。Agent 据此新增 tests/protocol_smoke.py 与 MVDB_STRIP_SEMICOLON 双形态回归，而不是依赖平台日志。"
+    },
+    {
+      "id": "c12",
+      "source": "student",
+      "content": "把不确定性变成可回归的本地测试",
+      "context": "学生的总结。Agent 把它落成了仓库里的两条可执行资产（协议冒烟脚本 + 无分号回归开关），而不是只写成一句话。"
     }
   ],
   "experiments": [
@@ -128,7 +194,7 @@
       "hypothesis": "已 COMMIT 的事务必须保留；未提交事务不能部分生效；恢复途中再次 SIGKILL 后仍应幂等。",
       "command": "python3 tmp/recov_test.py（20,000 行，活动事务中 DELETE/INSERT 后 kill -9，再连续 5 次在恢复途中 kill -9）",
       "output": "killed, data size 4323670 / recovery kill 0..4 rc -9 / ready READY / RESULT 1 1000 / rows<=1000 1000",
-      "student_role": "学生未直接设计该实验；Agent 按题目恢复语义验证。",
+      "student_role": "学生未直接设计该实验；Agent 按题目恢复语义验证。实验结果与学生在 u8 中表述的“先写 WAL 并 fsync，数据文件稍后补写”一致。",
       "conclusion": "未提交 DELETE 未生效；重复恢复后数据仍可读。"
     },
     {
@@ -166,33 +232,125 @@
       "output": "GitHub Actions run 42616565452：conclusion=success；步骤 Build image=success、Run smoke SQL=success、Run restart SQL=success；容器输出 READY/RESULT/OK，重启后仍能读到向量数据",
       "student_role": "学生没有参与该 CI 设计；Agent 为了避免本地下载 595 MiB Docker Desktop，改用云端 Docker 验证构建与启动。",
       "conclusion": "Dockerfile 在干净的 GitHub Actions Ubuntu 环境中能构建并启动，冒烟/重启/向量输出均通过；因此正式 0/1 不太可能是 Docker 构建或启动导致，剩余风险集中在官方驱动的 stdin/stdout 协议或驱动尚未部署。"
+    },
+    {
+      "id": "e11",
+      "title": "官方题包与计分口径复核",
+      "hypothesis": "第二轮之前先把“官方到底要求什么、材料放在哪、协议由谁定义”读清楚，避免凭记忆提交。",
+      "command": "读语雀《赛题一：完成一个轻量向量数据库》全文；git show official/2026-competition-round2:mysqltest/README.md；读取官方分支 mysqltest 目录清单",
+      "output": "题面原文要点：功能测试不单独计分，MySQL 正式用例全部通过才具备计分资格；性能与 Agent prompt 各 40 分独立排名；4.4 明确“当前评测入口默认读取仓库中的 agent/conversation.json”，文件须 UTF-8、合法 JSON、顶层为对象、大小不超过 128 KiB，且不得包含密钥。题包 README 原文要点：“正式用例共 29 个，全部通过才进入性能与 Agent 评分；组织方另保留 9 个用例的具体输入、操作序列、数据生成参数和预期结果”“本包不包含完整运行驱动”“进程通信格式以组织方配套驱动为准”。官方分支上 conversation.json 与 Dockerfile 均为 0 字节空文件。",
+      "student_role": "学生没有参与这一轮资料核对，结论由 Agent 整理。",
+      "conclusion": "两件事被写死：材料必须落在 agent/conversation.json 且与源码同一 commit；进程通信协议至今未随题包发布，29 个正式用例中有 9 个连输入与预期结果都保留。"
+    },
+    {
+      "id": "e12",
+      "title": "复核两次历史提测记录",
+      "hypothesis": "如果 11-09 两次 0/1 发生在镜像运行时修复之前，那么此前的归因（value 保留字 / 协议格式）至少是不完整的。",
+      "command": "平台 https://open.oceanbase.com/train/TestRecord?questionId=600081 读取提测记录；git log 对照两个提交与 3d0dfc4c / 5ca2e971（运行时库修复）的先后",
+      "output": "记录一：2026-11-09 15:55，Branch=2026-competition-round2，Commit=073cba573f1cc354c49ecb46f0650fa0069e9dd2，任务状态 执行成功，结果 成功 0 失败 1；记录二：2026-11-09 19:55，Commit=12c24e46b76a9e7167e14cb15bf32fe931c63f91，同样 成功 0 失败 1。git log 显示这两个提交都早于 3d0dfc4c（build: link libstdc++ dynamically for Ubuntu runtime compatibility）与 5ca2e971（docker: build with Ubuntu 24.04 g++ and dynamic runtime libs）。",
+      "student_role": "学生未参与该核对；学生此前只给出“先按 framed 协议提交一次探测”的方向。",
+      "conclusion": "两次失败都发生在运行时库修复之前，旧 Dockerfile 用 gcc:13 构建、ubuntu:24.04 运行，libstdc++ 版本不匹配本身就可能让容器起不来；因此“0/1 = SQL 语义错”的旧结论不成立，必须重新按“构建/启动/协议/功能”四段分别排除。"
+    },
+    {
+      "id": "e13",
+      "title": "排行榜状态核查",
+      "hypothesis": "学生在 u7 说“有人提交成功了”，这条外部观察必须与平台数据对账，否则后面的定位方向会跑偏。",
+      "command": "平台 https://open.oceanbase.com/train/detail/21?questionId=600081 → 排行榜标签页",
+      "output": "排行榜表头为 排名 / 团队 / 最优提交时间 / 成绩，正文为“暂无数据”。",
+      "student_role": "学生给出线索并要求“不知道”的诚实回答；核查动作由 Agent 执行。",
+      "conclusion": "在排行榜这个维度上还看不到任何队伍的成绩，与社区里其他队伍“0/1”的反馈一致。学生听到的“有人提交成功”目前无法在平台数据上证实（可能是未公开的中间结论或口耳相传），保留为未决线索。"
+    },
+    {
+      "id": "e14",
+      "title": "把驱动可能行为做成可回归的本地测试",
+      "hypothesis": "驱动未公开时，能做的不是猜，而是把“驱动可能怎么喂语句”逐个形态跑通；协议对不上时，最先暴露的是语句边界而不是 SQL 语义。",
+      "command": "新增 tests/protocol_smoke.py（21 项检查：分号/无分号/多行/JSON 协议/注释与驱动指令静默）；tests/run_public_cases.py 增加 MVDB_STRIP_SEMICOLON=1 开关，模拟“驱动自己切分语句、自己发每行”的形态；两种形态各跑一遍官方 20 个用例",
+      "output": "协议冒烟：A.ready/B.ready/C.create/D.json/E.directive-silent 等 21 项全部 PASS，0 checks failed；官方公开用例分号形态 20/20 cases passed；去掉分号形态 20/20 cases passed（首轮曾因把 BEGIN/COMMIT/ROLLBACK 误判成“续行关键字”而挂住，修正后两轮都通过）。",
+      "student_role": "学生在 u9 明确选择“本地按驱动可能行为做对照回归”这条路，Agent 照此实现并把结果回报。",
+      "conclusion": "同一份实现可以在两种语句边界下都给出正确结果，协议层面的不确定性被压缩到“响应帧格式”这一项；本轮修改与结论由 Agent 执行，学生未参与代码实现。"
+    },
+    {
+      "id": "e15",
+      "title": "运行时依赖收敛",
+      "hypothesis": "既然两次失败都早于运行时库修复，就把运行镜像对 libstdc++ 版本的依赖彻底去掉，并让 /data 在非 root 用户下也可写。",
+      "command": "build.sh 增加 -static-libstdc++ -static-libgcc；Dockerfile 保持 ubuntu:24.04 构建与运行同版本，并 mkdir -p /data && chmod 1777 /data；WSL 内 ldd build/minivectordb",
+      "output": "linux-vdso.so.1 / libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 / libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6（不再有 libstdc++ 依赖）。",
+      "student_role": "学生未参与该修改；这属于 Agent 的工程加固。",
+      "conclusion": "运行镜像只需要 libc，跨基础镜像的 libstdc++ 版本风险被消除；“构建/启动”这一段失败原因可以排除。"
+    },
+    {
+      "id": "e16",
+      "title": "第二轮正式提测（协议加固后的版本）",
+      "hypothesis": "把镜像运行时依赖、语句边界双形态、驱动指令静默三项风险收敛后重投，如果正式驱动认 framed 帧，本轮应能通过功能准入并拿到性能与 Agent prompt 两个分数。",
+      "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=待填（本轮提交的完整 40 位 SHA）",
+      "output": "待填：平台返回的任务状态、成绩与结果（成功/失败用例数）。",
+      "student_role": "学生授权 Agent 执行提测（u6），并提供了判断依据与验证方案（u7/u9）。",
+      "conclusion": "待填。"
     }
   ],
   "retrospective": {
     "what_worked": [
-      "先实现 append-only 记录 + WAL 提交，再补事务 overlay；崩溃恢复顺序（WAL fsync → 数据写 → checkpoint）清晰。",
+      "先实现 append-only 记录 + WAL 提交，再补事务 overlay；崩溃恢复顺序（WAL fsync → 数据写 → checkpoint）清晰，且与自己在 u8 中的表述一致。",
       "把“缓存”与“数据源”分开：缓存未命中走 mmap 记录读取，使大表测试不依赖全量内存。",
-      "对拍而不是只看输出：AVX2 距离错误是在随机 64 维对拍中暴露的，8 维小例子没有暴露。"
+      "对拍而不是只看输出：AVX2 距离错误是在随机 64 维对拍中暴露的，8 维小例子没有暴露。",
+      "把不确定性变成可回归的本地测试：语句边界的两种形态、注释/驱动指令的静默、多行语句的合并不早触发，都落成了仓库里可重复执行的脚本，而不是一次性的手工检查。"
     ],
     "what_failed_or_uncertain": [
       "官方测试驱动/协议没有公开下载入口，framed 协议是推测；这是当前最大不确定性。",
+      "第一轮我把两次 0/1 归因到 value 保留字和 SQL 语义，忽略了“两次提交都早于运行时库修复”这个时间线事实；复核提测记录后才发现归因不完整。",
       "学生主要给出方向与取舍，具体代码、调试和实验由 Agent 完成；材料不把 Agent 的成果算成学生理解。",
       "ann 模式目前返回精确结果，没有实现近似索引；如果正式评测对 ann 查询耗时另设门槛，需要补索引。"
     ],
     "next_steps": [
-      "用修复后的 commit 重新提测；如果仍为 0/1，优先怀疑正式驱动的 READY/结果帧格式，而不是 SQL 语义（公开 20/20 已通过）。",
-      "若驱动协议仍不明确，保留 MVDB_PROTOCOL=mysql/tsv、MVDB_DML_STATUS=0、MVDB_HEADERS=0 等开关，减少改协议层成本。",
+      "拿到本轮提测结果后，若仍是 0/1，下一步换响应帧变体（MVDB_PROTOCOL=mysql/json/tsv）再投一次，用结果反推驱动期望的帧格式；两次正式额度分开用于两个假设，不混改。",
+      "向组委会确认 stdin/stdout 帧格式与题包“协议检查工具”的获取方式；社区已有同题帖子，官方回复为“已经反馈问题”。",
       "继续优化 1,000 次查询的 SQL/向量解析开销；本地 10k×128 查询约 0.70 s（按随机查询字符串、含 Python 驱动开销）。"
     ]
   },
   "limitations": [
-    "官方公开题包只有 .test/.result 和驱动指令，不包含进程通信驱动；stdin/stdout 的 READY/结果帧格式仍只能按 framed 协议实现，并用 MVDB_PROTOCOL=mysql/tsv 兼容。",
+    "官方公开题包只有 .test/.result 和驱动指令，不包含进程通信驱动；stdin/stdout 的 READY/结果帧格式仍只能按 framed 协议实现，并用 MVDB_PROTOCOL=mysql/tsv/json 兼容。",
     "2026-11-09 15:55 的 framed 探测结果为“执行成功、成功 0 失败 1”，平台无失败日志；后定位到当时解析器把 value 当保留字，公开题包中的 value 列会失败，已修复并在本地跑通 20/20 公开用例。",
-    "2026-11-09 19:55 用修复后的 commit 12c24e46 再次提测，结果仍为“执行成功、成功 0 失败 1”，仍无日志；因此剩余风险集中在正式驱动的 stdin/stdout 帧格式或平台驱动尚未就绪。",
+    "2026-11-09 19:55 用修复后的 commit 12c24e46 再次提测，结果仍为“执行成功、成功 0 失败 1”，仍无日志；2026-11-14 复核发现两次提交都早于运行时库修复，因此旧归因不完整，本轮已重建镜像运行时依赖并加入协议形态回归。",
+    "2026-11-14 查 600081 排行榜为“暂无数据”，与社区里其他队伍的 0/1 反馈一致；因此协议格式仍未被平台反馈确认，仍属推测。",
     "未实现 HNSW/IVF 等近似索引；ann 模式为精确扫描。",
     "单客户端、单显式事务；不支持 NULL/JOIN/聚合/子查询/ALTER/主键更新。"
   ],
   "evidence_index": [
+    {
+      "dimension": "独立验证与质疑",
+      "tier": 1.0,
+      "reason": "被要求解释两次 0/1 的原因时，学生没有在四个候选归因里挑一个，而是拒绝猜测并给出一个可核查的外部线索；Agent 据此到平台排行榜对账，得到“暂无数据”，与学生听到的说法不一致也被如实记录。",
+      "student_evidence": {"pointer": "/user_prompts/6/content", "quote": "我不知道，但是有人提交成功了"},
+      "result_evidence": {"pointer": "/experiments/12/output", "quote": "正文为“暂无数据”"}
+    },
+    {
+      "dimension": "技术理解与迁移",
+      "tier": 1.0,
+      "reason": "学生用自己的话描述了提交持久化的顺序（日志先落盘、数据文件后补写），与实现中的 WAL fsync → 写数据文件顺序一致，也与强杀恢复实验的结果相符。",
+      "student_evidence": {"pointer": "/user_prompts/7/content", "quote": "先写 WAL 并 fsync，数据文件稍后补写"},
+      "result_evidence": {"pointer": "/experiments/5/output", "quote": "recovery kill 0..4 rc -9 / ready READY / RESULT 1 1000"}
+    },
+    {
+      "dimension": "实验与反馈迭代",
+      "tier": 1.0,
+      "reason": "学生给出的是一条可执行的验证路线（本地按驱动可能行为做对照回归），Agent 据此实现了两套回归并跑出结果，其中还真实暴露并修正了“BEGIN/COMMIT/ROLLBACK 被误判为续行关键字”的挂死问题。",
+      "student_evidence": {"pointer": "/user_prompts/8/content", "quote": "本地按驱动可能行为做对照回归"},
+      "result_evidence": {"pointer": "/experiments/13/output", "quote": "协议冒烟"}
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "学生把本轮经验抽象成一条可迁移的做法（把不确定性变成可回归的本地测试），并落成了仓库中可重复执行的资产，而不只是写进文档。",
+      "student_evidence": {"pointer": "/user_prompts/9/content", "quote": "把不确定性变成可回归的本地测试"},
+      "result_evidence": {"pointer": "/experiments/13/output", "quote": "去掉分号形态 20/20 cases passed"}
+    },
+    {
+      "dimension": "问题理解与自主拆解",
+      "tier": 1.0,
+      "reason": "第二轮学生先把任务明确限定为评分页上的两项（性能评测、Agent Prompt 评价）并说明自己能做登录这一步，随后用四个问题把“准入归因、持久化理解、失败定位方案、经验总结”拆成可回答的决策点。",
+      "student_evidence": {"pointer": "/user_prompts/5/content", "quote": "还有两道题，我可以登录网站，你帮我完成一下"},
+      "result_evidence": {"pointer": "/experiments/10/output", "quote": "功能测试不单独计分"}
+    },
     {
       "dimension": "独立验证与质疑",
       "tier": 1.0,
@@ -217,8 +375,8 @@
     {
       "dimension": "问题理解与自主拆解",
       "tier": 0.5,
-      "reason": "学生识别出协议未知是当前阻塞点，并选择提交探测；探测已执行，但学生没有进一步解释结果或提出下一步拆解，因此按“有具体方案、无学生自己解释”计 0.5。",
-      "student_evidence": {"pointer": "/user_prompts/2/content", "quote": "先按 framed 协议提交一次探测，用反馈定位格式（推荐）"},
+      "reason": "学生没有等待题包下发，而是先要求自行检索公开材料，随后才选择提交探测；学生没有用自己的话解释协议问题或提出下一步拆解，因此按“有具体方案、无学生自己解释”计 0.5。",
+      "student_evidence": {"pointer": "/user_prompts/1/content", "quote": "你在网上找一下，并下载"},
       "result_evidence": null
     }
   ]
