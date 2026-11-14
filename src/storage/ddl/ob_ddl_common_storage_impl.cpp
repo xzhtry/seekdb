@@ -16,6 +16,7 @@
 // Storage-owned DDL algorithms operating on tablets, macro blocks and LOBs.
 #define USING_LOG_PREFIX STORAGE
 
+#include <stdlib.h>
 #include "config_bridge.h"
 #include "share/rc/ob_server_runtime.h"
 #include "storage/ob_tablet_autoinc_seq_service.h"
@@ -227,7 +228,12 @@ int oceanbase::storage::ObDDLStorageUtil::report_ddl_sstable_checksum(
         break;
       }
     }
-    ob_usleep(100L * 1000L);
+    const char *ck_us_env = getenv("FTS_DDL_CKSUM_SLEEP_US");
+    const int64_t ck_us = (nullptr == ck_us_env || '\0' == ck_us_env[0])
+        ? 0 : atoll(ck_us_env);
+    if (ck_us > 0) {
+      ob_usleep(ck_us);
+    }
   }
   return ret;
 }
