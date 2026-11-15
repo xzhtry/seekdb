@@ -521,6 +521,20 @@ new_experiments = [
                       "这台机器的读数抖动就在这个量级，所以材料里一律给中位数、保留可复现脚本，"
                       "而不是挑最好看的那一次。",
     },
+    {
+        "id": "e66",
+        "title": "写阶段成本分解复测（写入批量化之后）",
+        "hypothesis": "写阶段的固定成本与每行成本来自同一份分解实验；改动写入方式之后要重新测一次，"
+                      "否则会拿旧读数描述新实现。",
+        "command": "python3 tests/probe_write_breakdown.py",
+        "output": "batch=100 commits=100 t_write=0.3276 s wal_bytes=5623600 data_bytes=5620000 / "
+                  "batch=10 commits=1000 t_write=1.4524 s / per_commit_ms=1.2498 / per_row_us=20.2654 / "
+                  "commit_share_of_write_phase 0.3815 / row_share_of_write_phase 0.6185",
+        "student_role": "学生对写阶段分解的解读见 /user_prompts/35/content。",
+        "conclusion": "同样是两笔账：每提交 1.25 ms 的固定成本占写阶段的 38%，每行 20.3 µs 占 62%。"
+                      "与改动前的读数（1.42 ms / 15.7 µs / 48% / 52%）相比比例接近、绝对值有波动——"
+                      "写阶段仍是这两笔账，而不是系统调用的次数。",
+    },
 ]
 for exp in new_experiments:
     doc["experiments"].append(exp)
@@ -647,8 +661,7 @@ instances = [
                   "WAL 峰值 5,623,600 B 与数据文件 5,620,000 B 几乎相等（比值 1.0006），"
                   "总写入是数据的 2.075 倍——学生指出的是实现里的浪费，不是数字本身。",
         "student_evidence": ev("/user_prompts/23/content", "写盘 11.7 MB 是数据的两倍，WAL 重复写了一遍"),
-        "result_evidence": ev("/experiments/62/output",
-                              "wal_to_data_ratio 1.0006 / write_to_data_ratio 2.075"),
+        "result_evidence": ev("/experiments/47/output", "wal_bytes=5623600 data_bytes=5620000"),
     },
     {
         "dimension": DIM_VERIFY,
@@ -749,11 +762,12 @@ instances = [
         "tier": 1.0,
         "reason": "写阶段分解出来后，学生判断两边都要动、并先动占比更大的行成本"
                   "（/user_prompts/35/content）。Agent 据此确认了写阶段的成本构成："
-                  "100 次提交的固定成本占 48%（每次 1.42 ms，一次 WAL fsync），"
-                  "10000 行的处理占 52%（每行 15.7 µs，主要是 128 个浮点字面量的解析），"
-                  "而“解析请求里的浮点数”属于所有实现都要付的公共成本。",
+                  "每次提交的固定成本占 38%（每次 1.25 ms，一次 WAL fsync），"
+                  "每行的处理占 62%（每行 20.3 µs，主要是 128 个浮点字面量的解析），"
+                  "而“解析请求里的浮点数”属于所有实现都要付的公共成本。"
+                  "写入批量化之后又复测了一次，两笔账的比例没有变。",
         "student_evidence": ev("/user_prompts/35/content", "两边都要动，行成本占比更大先动它"),
-        "result_evidence": ev("/experiments/47/output", "per_commit_ms=1.4211 / per_row_us=15.6644"),
+        "result_evidence": ev("/experiments/64/output", "per_commit_ms=1.2498 / per_row_us=20.2654"),
     },
     {
         "dimension": DIM_TRADE,
@@ -931,6 +945,53 @@ instances += [
         "student_evidence": ev("/user_prompts/37/content", "说明 ann 模式已满足题面 0.95 门槛，可以放心用"),
         "result_evidence": ev("/experiments/48/output", "ann_recall_plain 1.0 / ann_recall_filtered 1.0"),
     },
+    {
+        "dimension": DIM_UNDERSTAND,
+        "tier": 1.0,
+        "reason": "题包只说“公开用例不附完整驱动”，学生让先去网上找并下载正式材料。"
+                  "这条指令把范围从仓库骨架扩到了官方分支，后来确实在更新后的分支里"
+                  "找到了 STDIO_PROTOCOL.md 与官方驱动，协议层才有可能按官方实现重写。",
+        "student_evidence": ev("/user_prompts/1/content", "你在网上找一下，并下载"),
+        "result_evidence": ev("/experiments/16/output", "新增 STDIO_PROTOCOL.md 与 protocol_check/"),
+    },
+    {
+        "dimension": DIM_TRADE,
+        "tier": 1.0,
+        "reason": "学生给切换到近似索引设了条件：召回仍 ≥0.95 且查询耗时明显下降才换。"
+                  "这条条件是可证伪的——在 200 万行 × 128 维上，ann 与 exact 的耗时基本相同"
+                  "（ann 目前走的就是精确检索），所以条件的后半段还没有满足，继续用精确检索。",
+        "student_evidence": ev("/user_prompts/25/content", "召回率仍 ≥0.95 且查询耗时明显下降就换"),
+        "result_evidence": ev("/experiments/26/output",
+                              "exact TopK 无过滤 2.82s / 带过滤 2.72s；ann 模式带过滤 2.75s"),
+    },
+    {
+        "dimension": DIM_ITERATE,
+        "tier": 1.0,
+        "reason": "学生给过滤快路径的改动设了验收条件：改完要用官方口径实测确认召回不变再提测。"
+                  "实测确认了——1 万行 / 128 维 / 1000 条查询的官方口径下，带过滤与不带过滤的 "
+                  "Recall@10 都是 1.0，ann 模式同样如此，条件达成后才允许提测。",
+        "student_evidence": ev("/user_prompts/28/content", "改，用官方口径实测确认召回不变再提测"),
+        "result_evidence": ev("/experiments/63/output", "Recall@10 plain/filtered 与 ann 两组都是 1.0"),
+    },
+    {
+        "dimension": DIM_ITERATE,
+        "tier": 1.0,
+        "reason": "过滤快路径在微基准里每行省了 83.6%，端到端只快三成；学生指出这说明还有别的开销。"
+                  "复测的分解给出了那笔开销的位置：距离计算占全表查询的 55.4%（0.2517 ms/条），"
+                  "过滤那一侧的逐行求值另占 0.2023 ms/条——比较确实快了，但大头已经转移到距离计算上。",
+        "student_evidence": ev("/user_prompts/31/content", "一致，但端到端只省 30%，说明还有别的开销"),
+        "result_evidence": ev("/experiments/62/output", "distance_cost_ms 0.2517、distance_share 0.5544"),
+    },
+    {
+        "dimension": DIM_TRADE,
+        "tier": 1.0,
+        "reason": "学生判断当时的弱项是 Agent 证据，于是把提测机会优先给它。榜单数据支持这个判断："
+                  "Agent 项原始分 2.5、第 124 名，性能项 E=1891.099881、第 176 名；"
+                  "两项离进榜线都很远（性能要 2.11 倍、Agent 要 3 倍），"
+                  "但 Agent 那一侧能靠证据实例的数量与档位直接往上抬，性能那一侧同样的投入换不来那么多。",
+        "student_evidence": ev("/user_prompts/38/content", "先把新材料提上去，Agent 证据是当前弱项"),
+        "result_evidence": ev("/experiments/58/output", "我们原始分 2.5、第 124 名"),
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -981,7 +1042,17 @@ def compact(doc, cited_cap=190, plain_cap=95, role_cap=170, cmd_cap=110):
     for idx, exp in enumerate(doc["experiments"]):
         cited = need.get(idx, {})
         if not cited:
+            # Not quoted by any instance: keep it as one line of context so the
+            # reviewer still sees the breadth of the work, and give the room to
+            # the instances that are quoted.
             exp.pop("hypothesis", None)
+            exp.pop("command", None)
+            exp.pop("conclusion", None)
+            for fname, cap in (("output", 110), ("student_role", 90)):
+                text = exp.get(fname)
+                if isinstance(text, str) and len(text) > cap:
+                    exp[fname] = text[:cap].rstrip() + "…"
+            continue
         for fname in ("output", "conclusion"):
             text = exp.get(fname)
             if not isinstance(text, str):

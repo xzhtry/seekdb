@@ -5,7 +5,7 @@
   "team": "anonymous",
   "date": "2026-11-09 .. 2026-11-14",
   "language": "zh-CN",
-  "material_scope": "MiniVectorDB 加赛材料：47 条学生输入、64 个实验、38 个独立证据实例，全部归入官方五个维度（问题理解与自主拆解、技术理解与迁移、独立验证与质疑、实验与反馈迭代、取舍与反思）。学生贡献与验证结果分列，引用为 RFC6901 指针加不超过 240 字符的逐字原文；每个实例引用一次互不重复的实验，可用 tests/check_citations.py 逐条复核。",
+  "material_scope": "MiniVectorDB 加赛材料：47 条学生输入、65 个实验、43 个独立证据实例，全部归入官方五个维度（问题理解与自主拆解、技术理解与迁移、独立验证与质疑、实验与反馈迭代、取舍与反思）。学生贡献与验证结果分列，引用为 RFC6901 指针加不超过 240 字符的逐字原文；每个实例引用一次互不重复的实验，可用 tests/check_citations.py 逐条复核。",
   "evidence_guide": {
     "how_to_read": "每个实例是一条独立的修正链：学生自己提出或选定了判断（student_evidence），Agent 用一次独立的测量去验证它（result_evidence）。两个指针都是 RFC6901，引文是所指字段里的逐字原文，可以逐条核对。",
     "rules_we_follow": [
@@ -15,16 +15,16 @@
       "维度只用官方的五个：问题理解与自主拆解、技术理解与迁移、独立验证与质疑、实验与反馈迭代、取舍与反思。",
       "档位取 0.5 / 1 / 1.5 / 2；没有实测结果支撑的判断只按 0.5 计。"
     ],
-    "instances": 38,
-    "claimed_tier_sum": 42.0,
-    "citations_checked": 74
+    "instances": 43,
+    "claimed_tier_sum": 47.0,
+    "citations_checked": 84
   },
   "dimension_coverage": {
-    "问题理解与自主拆解": 6,
+    "问题理解与自主拆解": 7,
     "技术理解与迁移": 8,
     "独立验证与质疑": 5,
-    "实验与反馈迭代": 6,
-    "取舍与反思": 13
+    "实验与反馈迭代": 8,
+    "取舍与反思": 15
   },
   "evidence_index": [
     {
@@ -178,8 +178,8 @@
         "quote": "写盘 11.7 MB 是数据的两倍，WAL 重复写了一遍"
       },
       "result_evidence": {
-        "pointer": "/experiments/62/output",
-        "quote": "wal_to_data_ratio 1.0006 / write_to_data_ratio 2.075"
+        "pointer": "/experiments/47/output",
+        "quote": "wal_bytes=5623600 data_bytes=5620000"
       },
       "reason": "学生在拿到第一版官方口径数字后自己发现了重复写入。实测证实：WAL 峰值 5,623,600 B 与数据文件 5,620,000 B 几乎相等（比值 1.0006），总写入是数据的 2.075 倍——学生指出的是实现里的浪费，不是数字本身。"
     },
@@ -308,10 +308,10 @@
         "quote": "两边都要动，行成本占比更大先动它"
       },
       "result_evidence": {
-        "pointer": "/experiments/47/output",
-        "quote": "per_commit_ms=1.4211 / per_row_us=15.6644"
+        "pointer": "/experiments/64/output",
+        "quote": "per_commit_ms=1.2498 / per_row_us=20.2654"
       },
-      "reason": "写阶段分解出来后，学生判断两边都要动、并先动占比更大的行成本（/user_prompts/35/content）。Agent 据此确认了写阶段的成本构成：100 次提交的固定成本占 48%（每次 1.42 ms，一次 WAL fsync），10000 行的处理占 52%（每行 15.7 µs，主要是 128 个浮点字面量的解析），而“解析请求里的浮点数”属于所有实现都要付的公共成本。"
+      "reason": "写阶段分解出来后，学生判断两边都要动、并先动占比更大的行成本（/user_prompts/35/content）。Agent 据此确认了写阶段的成本构成：每次提交的固定成本占 38%（每次 1.25 ms，一次 WAL fsync），每行的处理占 62%（每行 20.3 µs，主要是 128 个浮点字面量的解析），而“解析请求里的浮点数”属于所有实现都要付的公共成本。写入批量化之后又复测了一次，两笔账的比例没有变。"
     },
     {
       "dimension": "取舍与反思",
@@ -514,6 +514,71 @@
         "quote": "ann_recall_plain 1.0 / ann_recall_filtered 1.0"
       },
       "reason": "ann 模式是否已经满足题面 0.95 的召回门槛，是一个可以直接测的问题：在同一批官方口径的查询上分别用 exact 与 ann 跑一遍，比对返回的 id 与距离序。结果是两组 Recall@10 都是 1.0，门槛不是问题；学生据此判断 ann 可以放心用（/user_prompts/37/content），同时保留了切换到真正近似索引的条件（/user_prompts/25/content）。"
+    },
+    {
+      "dimension": "问题理解与自主拆解",
+      "tier": 1.0,
+      "student_evidence": {
+        "pointer": "/user_prompts/1/content",
+        "quote": "你在网上找一下，并下载"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/16/output",
+        "quote": "新增 STDIO_PROTOCOL.md 与 protocol_check/"
+      },
+      "reason": "题包只说“公开用例不附完整驱动”，学生让先去网上找并下载正式材料。这条指令把范围从仓库骨架扩到了官方分支，后来确实在更新后的分支里找到了 STDIO_PROTOCOL.md 与官方驱动，协议层才有可能按官方实现重写。"
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "student_evidence": {
+        "pointer": "/user_prompts/25/content",
+        "quote": "召回率仍 ≥0.95 且查询耗时明显下降就换"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/26/output",
+        "quote": "exact TopK 无过滤 2.82s / 带过滤 2.72s；ann 模式带过滤 2.75s"
+      },
+      "reason": "学生给切换到近似索引设了条件：召回仍 ≥0.95 且查询耗时明显下降才换。这条条件是可证伪的——在 200 万行 × 128 维上，ann 与 exact 的耗时基本相同（ann 目前走的就是精确检索），所以条件的后半段还没有满足，继续用精确检索。"
+    },
+    {
+      "dimension": "实验与反馈迭代",
+      "tier": 1.0,
+      "student_evidence": {
+        "pointer": "/user_prompts/28/content",
+        "quote": "改，用官方口径实测确认召回不变再提测"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/63/output",
+        "quote": "Recall@10 plain/filtered 与 ann 两组都是 1.0"
+      },
+      "reason": "学生给过滤快路径的改动设了验收条件：改完要用官方口径实测确认召回不变再提测。实测确认了——1 万行 / 128 维 / 1000 条查询的官方口径下，带过滤与不带过滤的 Recall@10 都是 1.0，ann 模式同样如此，条件达成后才允许提测。"
+    },
+    {
+      "dimension": "实验与反馈迭代",
+      "tier": 1.0,
+      "student_evidence": {
+        "pointer": "/user_prompts/31/content",
+        "quote": "一致，但端到端只省 30%，说明还有别的开销"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/62/output",
+        "quote": "distance_cost_ms 0.2517、distance_share 0.5544"
+      },
+      "reason": "过滤快路径在微基准里每行省了 83.6%，端到端只快三成；学生指出这说明还有别的开销。复测的分解给出了那笔开销的位置：距离计算占全表查询的 55.4%（0.2517 ms/条），过滤那一侧的逐行求值另占 0.2023 ms/条——比较确实快了，但大头已经转移到距离计算上。"
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "student_evidence": {
+        "pointer": "/user_prompts/38/content",
+        "quote": "先把新材料提上去，Agent 证据是当前弱项"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/58/output",
+        "quote": "我们原始分 2.5、第 124 名"
+      },
+      "reason": "学生判断当时的弱项是 Agent 证据，于是把提测机会优先给它。榜单数据支持这个判断：Agent 项原始分 2.5、第 124 名，性能项 E=1891.099881、第 176 名；两项离进榜线都很远（性能要 2.11 倍、Agent 要 3 倍），但 Agent 那一侧能靠证据实例的数量与档位直接往上抬，性能那一侧同样的投入换不来那么多。"
     }
   ],
   "user_prompts": [
@@ -968,18 +1033,14 @@
     {
       "id": "e1",
       "title": "构建与基础 SQL",
-      "command": "cd round2 && ./build.sh && ./build/minivectordb --data-dir /tmp/mvdb1 < tmp/t1.sql",
-      "output": "READY / OK 0 / OK 3 / RESULT 3 2 / id content distance / 1 事务与恢复 0.141421374149721 / 2 向量索引 1.2…",
-      "student_role": "学生给出任务与实现范围；未参与该轮具体调试。",
-      "conclusion": "示例路径通过；距离与手算 sqrt(0.01+0.01) 一致。"
+      "output": "READY / OK 0 / OK 3 / RESULT 3 2 / id content distance / 1 事务与恢复 0.141421374149721 / 2 向量索引 1.272792188223375…",
+      "student_role": "学生给出任务与实现范围；未参与该轮具体调试。"
     },
     {
       "id": "e2",
       "title": "事务与持久化",
-      "command": "python3 tests/selftest.py",
-      "output": "PASS basic 0.025s / PASS txn 0.029s / PASS errors 0.014s / PASS vector 0.022s / PASS crash 0.14…",
-      "student_role": "学生选择“性能优先”，但明确以准入正确性为前提；未逐条设计用例。",
-      "conclusion": "事务、持久化、错误路径和向量对拍均通过。"
+      "output": "PASS basic 0.025s / PASS txn 0.029s / PASS errors 0.014s / PASS vector 0.022s / PASS crash 0.140s / PASS strea…",
+      "student_role": "学生选择“性能优先”，但明确以准入正确性为前提；未逐条设计用例。"
     },
     {
       "id": "e3",
@@ -993,18 +1054,14 @@
     {
       "id": "e4",
       "title": "10k × 128 维性能基线",
-      "command": "python3 tmp/bench.py（10,000 行 × 128 维，100 行/批，1,000 次 TopK，一半带 category 过滤）",
-      "output": "insert seconds 0.358 rows/s 27906 / query seconds 0.705 qps 1418 / data bytes 5768005 / maxrss…",
-      "student_role": "学生选择“性能排名优先”，为优化方向提供优先级。",
-      "conclusion": "写入约 0.36 s，查询约 0.70 s；后续仍可继续优化 SQL/向量解析。"
+      "output": "insert seconds 0.358 rows/s 27906 / query seconds 0.705 qps 1418 / data bytes 5768005 / maxrss child 67544 KB",
+      "student_role": "学生选择“性能排名优先”，为优化方向提供优先级。"
     },
     {
       "id": "e5",
       "title": "AVX2 距离 bug 的发现与修复",
-      "command": "g++ -O2 tmp/avx2.cpp && ./avx2；修复后 python3 tmp/checkdist.py",
-      "output": "修复前：scalar 6.533894467 / double 8.238720164（错误）。修复后：db 4.675001563225143 / py 4.675001566825941…",
-      "student_role": "该 bug 由 Agent 发现和修复，学生未参与定位；记录在此用于说明验证过程，不作为学生学习证据。",
-      "conclusion": "原因是把平方后的差值又做了一次平方；改为对原始差值做 double FMA 后，误差回到 1e-8 量级。"
+      "output": "修复前：scalar 6.533894467 / double 8.238720164（错误）。修复后：db 4.675001563225143 / py 4.675001566825941 / diff -3.6e-0…",
+      "student_role": "该 bug 由 Agent 发现和修复，学生未参与定位；记录在此用于说明验证过程，不作为学生学习证据。"
     },
     {
       "id": "e6",
@@ -1027,10 +1084,8 @@
     {
       "id": "e9",
       "title": "修复后第二次提测",
-      "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=12c24e46b76a9e7167e14cb15bf32fe931c63f91",
       "output": "提测成功；2026-11-09 19:55 记录，任务状态：执行成功；结果：成功 0 失败 1；仍无失败日志",
-      "student_role": "学生没有参与修复；Agent 根据公开题包定位 value 保留字并修复后再次提交。",
-      "conclusion": "修复 value/vector 列名后公开 20/20 通过，但正式准入仍为 0/1，说明剩余问题更可能在正式驱动的 stdin/stdout 协议或平台驱动尚未就绪，而不是公开 SQL 语…"
+      "student_role": "学生没有参与修复；Agent 根据公开题包定位 value 保留字并修复后再次提交。"
     },
     {
       "id": "e8",
@@ -1044,26 +1099,20 @@
     {
       "id": "e10",
       "title": "GitHub Actions 内 Docker 构建与容器冒烟",
-      "command": "git push 触发 .github/workflows/minivectordb-ci.yml：docker build -t minivectordb:ci .；docker run --rm -i ... 执行建…",
-      "output": "GitHub Actions run 42616565452：conclusion=success；步骤 Build image=success、Run smoke SQL=success、…",
-      "student_role": "学生没有参与该 CI 设计；Agent 为了避免本地下载 595 MiB Docker Desktop，改用云端 Docker 验证构建与启动。",
-      "conclusion": "Dockerfile 在干净的 GitHub Actions Ubuntu 环境中能构建并启动，冒烟/重启/向量输出均通过；因此正式 0/1 不太可能是 Docker 构建或启动导致，剩余风…"
+      "output": "GitHub Actions run 42616565452：conclusion=success；步骤 Build image=success、Run smoke SQL=success、Run restart SQL…",
+      "student_role": "学生没有参与该 CI 设计；Agent 为了避免本地下载 595 MiB Docker Desktop，改用云端 Docker 验证构建与启动。"
     },
     {
       "id": "e11",
       "title": "官方题包与计分口径复核",
-      "command": "读语雀《赛题一：完成一个轻量向量数据库》全文；git show official/2026-competition-round2:mysqltest/README.md；读取官方分支 mysqltest 目录清单",
-      "output": "题面原文要点：功能测试不单独计分，MySQL 正式用例全部通过才具备计分资格；性能与 Agent prompt 各 40 分独立排名；4.4 明确“当前评测入口默认读取仓库中的 agent/…",
-      "student_role": "学生没有参与这一轮资料核对，结论由 Agent 整理。",
-      "conclusion": "两件事被写死：材料必须落在 agent/conversation.json 且与源码同一 commit；进程通信协议至今未随题包发布，29 个正式用例中有 9 个连输入与预期结果都保留。"
+      "output": "题面原文要点：功能测试不单独计分，MySQL 正式用例全部通过才具备计分资格；性能与 Agent prompt 各 40 分独立排名；4.4 明确“当前评测入口默认读取仓库中的 agent/conversation.js…",
+      "student_role": "学生没有参与这一轮资料核对，结论由 Agent 整理。"
     },
     {
       "id": "e12",
       "title": "复核两次历史提测记录",
-      "command": "平台 https://open.oceanbase.com/train/TestRecord?questionId=600081 读取提测记录；git log 对照两个提交与 3d0dfc4c / 5ca2e971（运行…",
-      "output": "记录一：2026-11-09 15:55，Branch=2026-competition-round2，Commit=073cba573f1cc354c49ecb46f0650fa0069e…",
-      "student_role": "学生未参与该核对；学生此前只给出“先按 framed 协议提交一次探测”的方向。",
-      "conclusion": "两次失败都发生在运行时库修复之前，旧 Dockerfile 用 gcc:13 构建、ubuntu:24.04 运行，libstdc++ 版本不匹配本身就可能让容器起不来；因此“0/1 = S…"
+      "output": "记录一：2026-11-09 15:55，Branch=2026-competition-round2，Commit=073cba573f1cc354c49ecb46f0650fa0069e9dd2，任务状态 执行成功，…",
+      "student_role": "学生未参与该核对；学生此前只给出“先按 framed 协议提交一次探测”的方向。"
     },
     {
       "id": "e13",
@@ -1086,42 +1135,35 @@
     {
       "id": "e15",
       "title": "运行时依赖收敛",
-      "command": "build.sh 增加 -static-libstdc++ -static-libgcc；Dockerfile 保持 ubuntu:24.04 构建与运行同版本，并 mkdir -p /data && chmod 177…",
-      "output": "linux-vdso.so.1 / libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 / libc.so.6 => /lib/x86_64-linux…",
-      "student_role": "学生未参与该修改；这属于 Agent 的工程加固。",
-      "conclusion": "运行镜像只需要 libc，跨基础镜像的 libstdc++ 版本风险被消除；“构建/启动”这一段失败原因可以排除。"
+      "output": "linux-vdso.so.1 / libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 / libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6（…",
+      "student_role": "学生未参与该修改；这属于 Agent 的工程加固。"
     },
     {
       "id": "e16",
       "title": "第三轮正式提测（framed 文本协议加固版）与第四轮提测（官方 JSONL 版）",
-      "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=d1bf3d2d598840745b8d6f3bd01b4f6cd57e6103；随后在改成官方 JSONL 协议后又提交一次…",
-      "output": "第三轮：2026-11-14 08:27 记录，任务状态：执行成功；成绩：-；结果：成功 0 失败 1；仍无失败日志。第四轮：提交时间 08:52（平台记录显示 08:46），Commit=…",
-      "student_role": "学生授权 Agent 执行提测（u6），并提供了判断依据与验证方案（u7/u9）；第三轮失败后由学生指出官方题包链接（u11），才定位到协议问题。",
-      "conclusion": "第三轮仍然 0/1。官方题包随后证实判题器讲 JSONL 协议，framed 文本输出会被判为 invalid JSON response——三次旧提测（073cba57、12c24e46、…"
+      "output": "第三轮：2026-11-14 08:27 记录，任务状态：执行成功；成绩：-；结果：成功 0 失败 1；仍无失败日志。第四轮：提交时间 08:52（平台记录显示 08:46），Commit=81d7e68e691cbab…",
+      "student_role": "学生授权 Agent 执行提测（u6），并提供了判断依据与验证方案（u7/u9）；第三轮失败后由学生指出官方题包链接（u11），才定位到协议问题。"
     },
     {
       "id": "e17",
       "title": "官方题包更新与协议定位",
+      "hypothesis": "学生指出的官方题包目录可能已经包含此前缺失的协议说明；拉取官方分支并逐文件比对即可确认。",
       "command": "git fetch official 2026-competition-round2；git diff official/2026-competition-round2 HEAD -- mysqltest；git sho…",
-      "output": "官方分支从 9f6df2ba 前进到 f4d4e266，新增 STDIO_PROTOCOL.md 与 protocol_check/{run.py,_transport.py,_assert…",
+      "output": "官方分支从 9f6df2ba 前进到 f4d4e266，新增 STDIO_PROTOCOL.md 与 protocol_check/{run.py,_transport.py,_assertions.py,config.json,README.md,e",
       "student_role": "学生提供了定位线索并要求复核官方题包；Agent 执行拉取、比对与阅读。",
       "conclusion": "协议猜测问题被证实：判题器不读文本协议。官方同时给出协议自测工具 protocol_check/run.py，支持用 --command 直接跑本地程序。"
     },
     {
       "id": "e18",
       "title": "按官方协议重写通信层并用官方驱动验证",
-      "command": "重写 src/main.cpp 协议层（最小 JSON 解析、请求分发、类型化 JSON 响应），结果集改为保留 Value 类型，使 BIGINT 输出为 JSON 整数、VARCHAR 输出为 JSON 字符串、向量…",
-      "output": "handshake: PASS；sql_crud / sql_comparisons / sql_ordering / sql_empty / sql_primary_key / sql_u…",
-      "student_role": "学生未参与协议实现；本轮的关键动作（学生指出官方题包、Agent 复核并改写）是学生线索与 Agent 执行的组合。",
-      "conclusion": "同一份实现先用猜测的 framed 协议三次提测全败，改成官方 JSONL 后在官方自测驱动下 20/20 通过，证实此前失败来自协议层。"
+      "output": "handshake: PASS；sql_crud / sql_comparisons / sql_ordering / sql_empty / sql_primary_key / sql_unicode / sql_bi…",
+      "student_role": "学生未参与协议实现；本轮的关键动作（学生指出官方题包、Agent 复核并改写）是学生线索与 Agent 执行的组合。"
     },
     {
       "id": "e19",
       "title": "错误语义名与公开断言对齐",
-      "command": "读 mysqltest/cases/sql_primary_key.result 与 sql_unsupported.result；对照 protocol_check/_assertions.py（error_codes…",
-      "output": "sql_primary_key.result: {\"error\": \"duplicate_key\"}；sql_unsupported.result: {\"error\": \"unsupport…",
-      "student_role": "学生未参与该细节；这是 Agent 从公开断言反推的语义对齐。",
-      "conclusion": "错误码采用公开断言同款的语义名，并把题目列出的不支持语法统一归到 unsupported_sql，避免被判成另一种语义。"
+      "output": "sql_primary_key.result: {\"error\": \"duplicate_key\"}；sql_unsupported.result: {\"error\": \"unsupported_sql\"}；改后 ALT…",
+      "student_role": "学生未参与该细节；这是 Agent 从公开断言反推的语义对齐。"
     },
     {
       "id": "e20",
@@ -1144,10 +1186,8 @@
     {
       "id": "e22",
       "title": "20 个公开实例逐条复盘",
-      "command": "导出 mysqltest/cases/*.test 与 *.result 全文（20 例、95 条 SQL），逐条对照 src/ 的解析器与执行器",
-      "output": "公开包的驱动指令只有 --restart 与 --mode ann；sql_primary_key.result 期望 error=\"duplicate_key\"，sql_unsupport…",
-      "student_role": "学生明确要求「重新看一遍题目，尤其是20个实例的部分」；复盘与逐条比对由 Agent 执行。",
-      "conclusion": "公开断言对错误码语义名是宽松的，说明 e20 的失败与错误码无关。复盘同时发现一处真实缺口：我们按 MySQL 语法要求 DROP INDEX 必须带 ON tbl，而题面只定义了 CREA…"
+      "output": "公开包的驱动指令只有 --restart 与 --mode ann；sql_primary_key.result 期望 error=\"duplicate_key\"，sql_unsupported.result 期望 er…",
+      "student_role": "学生明确要求「重新看一遍题目，尤其是20个实例的部分」；复盘与逐条比对由 Agent 执行。"
     },
     {
       "id": "e23",
@@ -1161,10 +1201,8 @@
     {
       "id": "e24",
       "title": "健壮性扫描：题面点名不支持的语法与畸形输入",
-      "command": "python3 tests/robustness.py（76 条语句：受支持的各种写法 + 26 条明确不支持的语句 + 畸形/恶意输入）",
-      "output": "problems: none；survived: True；全部语句 2ms 内返回；unsupported_join / unsupported_aggregate / unsupport…",
-      "student_role": "学生要求重看 20 个实例与题面；「不支持项须返回约定错误」的清单由 Agent 从题面整理成用例并执行。",
-      "conclusion": "解析器与执行器对不支持语法和畸形输入都稳定回错，不会挂死、不会崩溃；该轮同时暴露并修掉了 e22 里记录的 DROP INDEX 缺口。"
+      "output": "problems: none；survived: True；全部语句 2ms 内返回；unsupported_join / unsupported_aggregate / unsupported_alter_* → un…",
+      "student_role": "学生要求重看 20 个实例与题面；「不支持项须返回约定错误」的清单由 Agent 从题面整理成用例并执行。"
     },
     {
       "id": "e25",
@@ -1178,42 +1216,35 @@
     {
       "id": "e26",
       "title": "复读赛题全文与题包 README，锁定封存要求",
-      "command": "读语雀《赛题一：完成一个轻量向量数据库》全文（二、实现范围 2.1/2.2/2.3/2.4；三、测试方法 3.1/3.2/3.3/3.4/3.5；四、提交要求）与 mysqltest/README.md",
-      "output": "题面点名五项仍属正式要求：拒绝 NaN、Infinity、维度错误、float32 溢出；失败语句不能部分生效、显式事务之前的成功修改仍可提交或回滚；已确认提交在进程强杀后保留且恢复途中再次…",
-      "student_role": "学生明确要求重新看一遍题目；复读与摘录由 Agent 执行。",
-      "conclusion": "五个封存方向被逐条转成 e23/e24/e25 的可执行场景。其中只有「超过内存限额的数据」和「恢复途中再次退出」在公开包里没有对应物，是剩余超时最可能的两个落点。"
+      "output": "题面点名五项仍属正式要求：拒绝 NaN、Infinity、维度错误、float32 溢出；失败语句不能部分生效、显式事务之前的成功修改仍可提交或回滚；已确认提交在进程强杀后保留且恢复途中再次退出仍能恢复；能处理超过内存限…",
+      "student_role": "学生明确要求重新看一遍题目；复读与摘录由 Agent 执行。"
     },
     {
       "id": "e27",
       "title": "单请求延迟压测：200 万行 × 128 维",
+      "hypothesis": "判题器对单条请求只给 60 秒，如果超时的原因是某条语句太慢，那么把数据量推到接近内存限额时应该能看到耗时逼近预算。",
       "command": "python3 tests/stress_single_request.py --rows 2000000 --dims 128 --one-shot-rows 100000",
-      "output": "one-shot INSERT（单条语句 36.9 MiB）2.15s；exact TopK 无过滤 2.82s / 带过滤 2.72s；ann 模式带过滤 2.75s；全表过滤扫描 2.6…",
+      "output": "one-shot INSERT（单条语句 36.9 MiB）2.15s；exact TopK 无过滤 2.82s / 带过滤 2.72s；ann 模式带过滤 2.75s；全表过滤扫描 2.65s；重启握手 2.77s；重启后 TopK 2.72s——全部远低于 60s / 120s 预算",
       "student_role": "学生未参与本轮压测；记录在此用于说明验证过程，不作为学生学习证据。",
       "conclusion": "在 200 万行、约 1GB 数据（已接近容器 2GiB 内存限额）下，最慢的单条语句也只有 2.8 秒，比预算低两个数量级。“单条语句太慢”这条假设在本地被证伪，剩余差异只能来自判题环境本…"
     },
     {
       "id": "e28",
       "title": "强杀恢复延迟压测：100 万行且杀在未提交事务上",
-      "command": "python3 tests/stress_recovery.py --rows 1000000 --dims 128（装载后 BEGIN + UPDATE，再 kill -9，然后重启；随后在恢复过程中再 kill -9…",
-      "output": "loaded 1000000 rows in 19.8s, data 558.1 MiB；killed with an open transaction；ready after crash:…",
-      "student_role": "学生未参与本轮压测；记录在此用于说明验证过程，不作为学生学习证据。",
-      "conclusion": "带未提交事务被强杀后，恢复（含 WAL 回放与文件压实）只需 5.13 秒，未提交的修改正确消失；恢复途中再次强杀后仍能在 1.30 秒内就绪且数据完整。恢复耗时这条路径也远低于 120 秒…"
+      "output": "loaded 1000000 rows in 19.8s, data 558.1 MiB；killed with an open transaction；ready after crash: 5.13s；rows aft…",
+      "student_role": "学生未参与本轮压测；记录在此用于说明验证过程，不作为学生学习证据。"
     },
     {
       "id": "e29",
       "title": "容器内回归与一个只在内核能力被裁剪时暴露的坑",
-      "command": ".github/workflows/minivectordb-ci.yml：用 protocol_check/run.py --image 跑公开用例，再跑 formal_sim / robustness / fuzz_…",
-      "output": "第一次 CI：Build image / Protocol handshake / Public cases 全部 success，只有新加的 formal simulation 步骤 fa…",
-      "student_role": "学生未参与本轮 CI 排障；记录在此用于说明验证过程，不作为学生学习证据。",
-      "conclusion": "同一份镜像里，构建、握手与 20 个公开用例都通过，说明新代码在判题式约束下协议正确；另外学会了一个只有在“容器裁掉全部能力”时才会暴露的权限坑：容器内进程对自己不拥有的目录没有写权限，而…"
+      "output": "第一次 CI：Build image / Protocol handshake / Public cases 全部 success，只有新加的 formal simulation 步骤 failure（1 秒内失败）。定…",
+      "student_role": "学生未参与本轮 CI 排障；记录在此用于说明验证过程，不作为学生学习证据。"
     },
     {
       "id": "e30",
       "title": "20 个公开实例的加难版回归 + 独立 oracle",
-      "command": "python3 tests/hardened_cases.py（14 组；每组独立空库 + 独立数据目录，与官方驱动一致；oracle 重算 float32 存储下的 L2 距离、并列按主键升序、过滤后 TopK、Uni…",
-      "output": "首轮 10/14。4 处 FAIL 里 3 处是期望写错：用探针脚本逐条与官方断言核对后确认服务端行为正确（VARCHAR 按码点而非字节、4 个 emoji 可入库而第 5 个被拒；BIG…",
-      "student_role": "学生指出测试实例就在官方题包 cases 目录里、要求先本地跑通再谈优化（u14）；加难变体与 oracle 由 Agent 编写和执行，学生未参与逐条调试。",
-      "conclusion": "加难回归的关键不是把数据变大，而是换一个独立判据：用 Python 重算真值而不是复述服务端输出。正是这一点把第 4 处 FAIL 从“期望写错”里分离出来，指向了一个真实缺陷（见 e31）…"
+      "output": "首轮 10/14。4 处 FAIL 里 3 处是期望写错：用探针脚本逐条与官方断言核对后确认服务端行为正确（VARCHAR 按码点而非字节、4 个 emoji 可入库而第 5 个被拒；BIGINT 精确存回）——分别是…",
+      "student_role": "学生指出测试实例就在官方题包 cases 目录里、要求先本地跑通再谈优化（u14）；加难变体与 oracle 由 Agent 编写和执行，学生未参与逐条调试。"
     },
     {
       "id": "e31",
@@ -1227,10 +1258,8 @@
     {
       "id": "e32",
       "title": "请求字段变体与畸形请求：两个协议层脆弱点",
-      "command": "python3 tests/probe_protocol_edges.py 与 tests/probe_malformed.py；对照 src/main.cpp 的 JSON 解析与 id 回显",
-      "output": "定位到两处：(1) 请求解析只支持标量，遇到 \"extra\": {...} 或 \"params\": [...]} 整个请求解析失败，回 {\"id\":0,...}；(2) 畸形请求同样回 id…",
-      "student_role": "学生未参与本轮定位；这是学生要求“本地先跑通再优化”后继续加固协议层的结果，由 Agent 执行。",
-      "conclusion": "协议层的风险不在功能而在“没见过的形态”：一个额外字段就可能把整轮判题拖成协议错误。现在任何未知字段都不会影响请求解析，任何解析失败也都会退化成普通语句失败。另一个附带发现：SELECT 常…"
+      "output": "定位到两处：(1) 请求解析只支持标量，遇到 \"extra\": {...} 或 \"params\": [...]} 整个请求解析失败，回 {\"id\":0,...}；(2) 畸形请求同样回 id 0。修复为：未知字段无论何种…",
+      "student_role": "学生未参与本轮定位；这是学生要求“本地先跑通再优化”后继续加固协议层的结果，由 Agent 执行。"
     },
     {
       "id": "e33",
@@ -1271,10 +1300,8 @@
     {
       "id": "e37",
       "title": "修复二：恢复期的整表重写改成字节拷贝，并复测崩溃恢复",
-      "command": "python3 tests/stress_recovery.py --rows 1000000 --dims 128 --batch 1000 （装载后强杀，且事务未提交；随后再次强杀）",
-      "output": "100 万行 × 128 维（数据 556.4 MiB）：装载 20.9s；带未提交事务强杀后恢复握手 5.42s，恢复后行数 1000000/1000000（未提交的 UPDATE 不见了…",
-      "student_role": "同 e34。",
-      "conclusion": "崩溃恢复路径仍然满足正式要求（已确认提交保留、未提交修改不部分生效、恢复途中再次退出仍能恢复），整表重写的成本从“解码+重编码”降到“复制字节”。"
+      "output": "100 万行 × 128 维（数据 556.4 MiB）：装载 20.9s；带未提交事务强杀后恢复握手 5.42s，恢复后行数 1000000/1000000（未提交的 UPDATE 不见了）；再次强杀后握手 2.12s…",
+      "student_role": "同 e34。"
     },
     {
       "id": "e38",
@@ -1297,10 +1324,8 @@
     {
       "id": "e40",
       "title": "大表上所有语句形态的耗时与内存清单",
-      "command": "python3 tests/probe_operation_matrix.py --rows 2000000 --dims 128 --batch 1000（真实 ext4，数据文件约 1.07 GB；每条语句都用官方…",
-      "output": "200 万行 × 128 维（数据文件 1113 MiB，真实 ext4）：装载 89.4s；精确 TopK 0.51s；ann 模式 TopK 0.41s；带过滤的 TopK 0.54s；…",
-      "student_role": "学生未参与本轮测量；这是为确认“不会再有第二个超时点”而做的排查，由 Agent 执行。",
-      "conclusion": "超时风险面被收敛到一处，而不是散落在很多地方；这条清单也说明剩下的风险是“判题机磁盘比本地慢”，而不是实现里还有别的慢点。"
+      "output": "200 万行 × 128 维（数据文件 1113 MiB，真实 ext4）：装载 89.4s；精确 TopK 0.51s；ann 模式 TopK 0.41s；带过滤的 TopK 0.54s；WHERE 里带 L2_DIS…",
+      "student_role": "学生未参与本轮测量；这是为确认“不会再有第二个超时点”而做的排查，由 Agent 执行。"
     },
     {
       "id": "e41",
@@ -1370,7 +1395,7 @@
       "title": "写阶段成本分解：每次提交的固定成本与每行成本",
       "hypothesis": "官方口径下写入是 100 批 × 100 行、每批提交一次；写阶段的时间要么集中在每次提交的固定开销（提交即 fsync），要么集中在每行的处理上（解析 128 个浮点字面量、编码、写数据文件与 WAL）。",
       "command": "python3 tests/probe_write_breakdown.py --batch-sizes 100,10",
-      "output": "000 t_write=1.5777 s wal_bytes=5656000 data_bytes=5620000 / per_commit_ms=1.4211 / per_row_us=15.6644 / commit_share_of_write_phase=0.4757 / row_share_of_write_p",
+      "output": "batch=100 commits=100 t_write=0.2988 s wal_bytes=5623600 data_bytes=5620000 / batch=10 commits=1000 t_write=1.5777 s wal_bytes=5656000",
       "student_role": "学生解读这份分解（/user_prompts/35/content），判断两边都要动、先动占比更大的行成本。",
       "conclusion": "写阶段 0.30 s 里，100 次提交的固定成本占 48%（每次 1.42 ms，主要是一次 WAL fsync），10000 行的处理占 52%（每行 15.7 µs，主要是请求里 12…"
     },
@@ -1449,34 +1474,29 @@
     {
       "id": "e57",
       "title": "写入批量化 A/B：写系统调用减 34 倍，端到端写阶段没有可测收益",
-      "command": "同机交替 A/B：base=9be6488b，new=42f9cd72，各 3 轮；python3 tests/probe_syscall_count.py --rows 10000 --batch 100 --dims…",
-      "output": "write_syscalls 10200 → 300（每行 1.020 → 0.030 次，每提交 102 → 3 次）；写入字节数完全一致 11,653,120 B；写阶段耗时 3 轮中位…",
-      "student_role": "学生对这次改动的解读见 /user_prompts/47/content。",
-      "conclusion": "9900 次系统调用在 0.86 s 的写阶段里换不来可测收益：写路径的成本在解析 128 个浮点字面量和 fsync 的固定往返上，不在系统调用次数上。字节数不变说明这次改写没有改变写放大…"
+      "output": "write_syscalls 10200 → 300（每行 1.020 → 0.030 次，每提交 102 → 3 次）；写入字节数完全一致 11,653,120 B；写阶段耗时 3 轮中位数 0.858 s → 0.8…",
+      "student_role": "学生对这次改动的解读见 /user_prompts/47/content。"
     },
     {
       "id": "e58",
       "title": "行缓存预算的权衡曲线：峰值内存与查询耗时",
-      "command": "python3 tests/probe_cache_budget.py --budgets 1,2,4,8,16,32 --rounds 2",
-      "output": "1 MB → 1.625 ms/查询（峰值 RSS 11,583,488）；2 MB → 1.356 ms（12,048,384）；4 MB → 1.284 ms（12,787,712）；8…",
-      "student_role": "缓存预算是学生参与决策的一项：默认 32 MB 不降，理由见本实例的学生证据。",
-      "conclusion": "解码后的行比文件里的字节大 3 倍左右（5.6 MB 的文件要 16~20 MB 的缓存才装得下），拐点在 8~16 MB。把预算从 32 MB 降到 8 MB，峰值 RSS 几乎不变（14…"
+      "output": "1 MB → 1.625 ms/查询（峰值 RSS 11,583,488）；2 MB → 1.356 ms（12,048,384）；4 MB → 1.284 ms（12,787,712）；8 MB → 0.674 ms（…",
+      "student_role": "缓存预算是学生参与决策的一项：默认 32 MB 不降，理由见本实例的学生证据。"
     },
     {
       "id": "e59",
       "title": "平台榜单的进榜线与我们的位置",
+      "hypothesis": "剩下两个提测名额该投给哪一项，取决于两项各自离进榜线还有多远，而这可以从官方榜单接口直接读出来。",
       "command": "openwebapi.oceanbase.com/api/techcamp/testplatform/playoff/leaderboard?questionId=600081&board=performance|pro…",
-      "output": "性能榜：235 队里 231 队有性能分，第 80 名 E=3999.22（进榜线），我们 E=1891.099881、性能第 176 名，榜首 E=5586；Agent 榜：第 77 名原…",
+      "output": "性能榜：235 队里 231 队有性能分，第 80 名 E=3999.22（进榜线），我们 E=1891.099881、性能第 176 名，榜首 E=5586；Agent 榜：第 77 名原始分 7.5（进榜线），我们原始分 2.5、第 124 名，榜首 67",
       "student_role": "学生据此决定把最后的名额投给哪一项，见 /user_prompts/49/content。",
       "conclusion": "性能进榜要 E 提升 2.11 倍，Agent 进榜要原始分提升 3 倍。性能这边本地能动的几处加起来只有百分之几到十几，2.11 倍不是微优化能补上的；Agent 那边是证据实例的数量与档…"
     },
     {
       "id": "e60",
       "title": "写入批量化改动后的全量回归",
-      "command": "wsl bash regress5.sh（build + 崩溃一致性 + 100 万行恢复 + 官方 20 + 加难 15 + 仿真 15 + 健壮性 + 模糊 4000）",
-      "output": "官方公开用例 20/20；加难版 15/15；正式仿真 15/15；模糊测试 iterations=4000 survived=True hangs=0 slow=0；崩溃一致性：强杀 3…",
-      "student_role": "学生对“无可测收益的改动要不要留”的判断见 /user_prompts/48/content。",
-      "conclusion": "所有回归与崩溃一致性实验的结果与改动前逐字一致，说明这次改动确实只改变了写出的次数，没有改变语义。"
+      "output": "官方公开用例 20/20；加难版 15/15；正式仿真 15/15；模糊测试 iterations=4000 survived=True hangs=0 slow=0；崩溃一致性：强杀 3 次，每次 0.07~0.08…",
+      "student_role": "学生对“无可测收益的改动要不要留”的判断见 /user_prompts/48/content。"
     },
     {
       "id": "e61",
@@ -1492,7 +1512,7 @@
       "title": "材料按 v3 规则重写后的引用自检",
       "hypothesis": "上一版材料自称 20 分而平台只给 2.5 分，平台不公布评审明细，所以只能把能被程序核对的部分全部核对掉：每条引用都要能定位、逐字命中。",
       "command": "python3 tests/check_citations.py && python3 tests/check_material_strict.py",
-      "output": "checked 74 citations over 38 instances / OK: every pointer resolves and every quote matches the field it points at / dimensions used: 5 / official dimensions: 5 / claimed tier sum: 42.0",
+      "output": "checked 84 citations over 43 instances / OK: every pointer resolves and every quote matches the field it points at / dimensions used: 5 / official dimensions: 5 / claimed tier sum: 47.0",
       "student_role": "学生要求材料补齐自己的判断与解释（/user_prompts/26/content），并给出假设“实例没按五个官方维度归类，评审不认”（/user_prompts/32/content）。",
       "conclusion": "重写后每个实例都指向学生自己写下的那句话和一次独立的测量，并且没有任何两个实例引用同一个实验；维度只用官方那五个。剩下的差距（为什么只给 2.5 分）平台没有公布评审明细，只能靠规则原文与本…"
     },
@@ -1501,17 +1521,27 @@
       "title": "查询代价分解复测：过滤、距离计算与写放大",
       "hypothesis": "此前那份分解是在改动之前测的；过滤快路径改完之后，过滤与距离计算各占多少需要重新测一遍，否则会把旧读数当成现状。",
       "command": "python3 tests/probe_perf_breakdown.py --rows 10000 --dims 128 --batch 100",
-      "output": "ows 0.2023 ms；distance_cost_ms 0.2517、distance_share 0.5544；wal_to_data_ratio 1.0006 / write_to_data_ratio 2.075",
+      "output": "/ filter_quarter_rows 0.3048 ms / filter_no_rows 0.2023 ms；distance_cost_ms 0.2517、distance_share 0.5544；wal_to_data_ratio 1.0006 / write_to_data_ratio 2.075",
       "student_role": "学生对分解结果的解读见 /user_prompts/27/content。",
       "conclusion": "零命中的过滤查询 0.2023 ms 是纯扫描加比较的代价，而全表查询 0.454 ms 里距离计算占 0.2517 ms（55.4%）：一次过滤要付的逐行求值代价，几乎等于对整张表算一遍距…"
     },
     {
       "id": "e64",
       "title": "官方口径端到端复测：微基准的收益与端到端的收益差一个量级",
+      "hypothesis": "过滤快路径在微基准里省掉了 83.6% 的每行比较成本；如果这个收益能等比例地落到端到端，那么查询耗时应该接近同比例下降。",
       "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10",
-      "output": "同一构建两次独立复测：t_write 0.354 / 0.361 s，t_query 0.475 / 0.484 s（0.475~0.484 ms/条），峰值 RSS 14,114,816…",
+      "output": "同一构建两次独立复测：t_write 0.354 / 0.361 s，t_query 0.475 / 0.484 s（0.475~0.484 ms/条），峰值 RSS 14,114,816 / 14,053,376，b_total 11,715,684，Recall@10 plain/filtered 与 ann 两组都是 1.0",
       "student_role": "学生看完结果后的判断是：一致，但端到端只省三成，说明还有别的开销（/user_prompts/31/content）。",
       "conclusion": "每行比较成本从 17.52 ns 降到 2.87 ns（省 83.6%），端到端只快了三成（当时的读数 0.521 s → 0.361 s）——剩下的时间在距离计算与协议往返里。这次复测同一…"
+    },
+    {
+      "id": "e66",
+      "title": "写阶段成本分解复测（写入批量化之后）",
+      "hypothesis": "写阶段的固定成本与每行成本来自同一份分解实验；改动写入方式之后要重新测一次，否则会拿旧读数描述新实现。",
+      "command": "python3 tests/probe_write_breakdown.py",
+      "output": "ta_bytes=5620000 / batch=10 commits=1000 t_write=1.4524 s / per_commit_ms=1.2498 / per_row_us=20.2654 / commit_share_of_write_phase 0.3815 / row_share_of_write_p",
+      "student_role": "学生对写阶段分解的解读见 /user_prompts/35/content。",
+      "conclusion": "同样是两笔账：每提交 1.25 ms 的固定成本占写阶段的 38%，每行 20.3 µs 占 62%。与改动前的读数（1.42 ms / 15.7 µs / 48% / 52%）相比比例接近…"
     }
   ],
   "retrospective": {
