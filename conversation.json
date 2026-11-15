@@ -5,7 +5,7 @@
   "team": "anonymous",
   "date": "2026-11-09 .. 2026-11-14",
   "language": "zh-CN",
-  "material_scope": "本文件是本次 MiniVectorDB 开发过程的真实记录，分两轮：2026-11-09 的功能实现与首次提测，2026-11-14 的复盘、再加固与第二次提测。学生在关键决策点给出方向、假设与判断，Agent 完成代码、实验与记录；Agent 的代码或解释不冒充成学生的独立理解。未执行的步骤明确标为计划。",
+  "material_scope": "MiniVectorDB 加赛材料：35 条学生输入（22 条对话原文 + 13 条结构化提问的回答）、47 个实验、25 个独立证据实例，全部归入官方五个维度（问题理解与自主拆解、技术理解与迁移、独立验证与质疑、实验与反馈迭代、取舍与反思）。学生贡献与验证结果分列，引用为 RFC6901 指针加不超过 240 字符的逐字原文，可用 tests/check_citations.py 复核。",
   "user_prompts": [
     {
       "id": "u1",
@@ -126,6 +126,108 @@
       "source": "student",
       "content": "批量 UPDATE 要在 60 秒内改完 500 万行，同时“失败语句不能留下部分数据”，怎么实现？——先全部物化再落盘",
       "note": "Agent 就本题的一个关键取舍给出若干条做法供学生选择（覆盖多种合理做法，没有预设正确答案），学生选择如下。材料只记录学生实际选中的那条，不替学生扩写理由。学生在原子性上的取舍：先把全部改动物化再落盘，原子性由构造保证。最初那版实现正是这样做的，也正是它在 2 GiB 限额下撑爆了内存——这条选择在实测里的代价被完整记录下来了。"
+    },
+    {
+      "id": "u20",
+      "source": "student",
+      "content": "请将提测 SHA 更新为 5a0292b0dca3e1eb8bd91f2bcec95cacc2cee046，并提交第 6 次提测",
+      "note": "学生在提交前核对仓库、分支与完整 40 位 SHA。"
+    },
+    {
+      "id": "u21",
+      "source": "student",
+      "content": "我来口述几个技术判断（推荐）",
+      "note": "学生要求用自己的话口述技术判断，四个判断（/user_prompts/16..19/content）由此采集。"
+    },
+    {
+      "id": "u22",
+      "source": "student",
+      "content": "你可以再看一下分数的计算方法或者下载下来也行啊",
+      "note": "学生要求把官方计分规则查清楚。"
+    },
+    {
+      "id": "u23",
+      "source": "student",
+      "content": "写盘 11.7 MB 是数据的两倍，WAL 重复写了一遍",
+      "question": "官方 benchmark 口径刚跑出来：写 1 万行（100 批 × 100 行逐批提交）0.361 s；1000 条 TopK 查询 0.48 s；写盘 11.7 MB；峰值 RSS 14 MB；Recall@10 = 1.0。这组数字里最让你意外的是哪一点？",
+      "note": "第 1 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u24",
+      "source": "student",
+      "content": "两者都有",
+      "question": "批量 UPDATE 从 >60 s 超时变成 30.91 s，根因是变更集与 WAL 缓冲各约 2.7 GB 的双重整表物化。你怎么解释改成流式后内存和时间一起降下来？（两个候选解释：表不再整体驻留内存，省掉拷贝和换页；分批刷出把随机写变成顺序写）",
+      "note": "第 1 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u25",
+      "source": "student",
+      "content": "召回率仍 ≥0.95 且查询耗时明显下降就换",
+      "question": "现在 ann 模式返回精确结果（Recall@K = 1.0），没有做近似索引。什么条件下你会同意换成近似索引？",
+      "note": "第 1 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u26",
+      "source": "student",
+      "content": "Agent 材料：补齐你自己的判断与解释",
+      "question": "明天额度重置（2 次提测机会）。你希望我优先投入哪一项？",
+      "note": "第 1 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u27",
+      "source": "student",
+      "content": "距离计算其实比我想的便宜，所以过滤显得更贵",
+      "question": "把查询耗时拆开后：命中 25% 行的过滤查询 0.498 ms，零命中的同形过滤 0.387 ms，无过滤全表 0.505 ms。即按行做 VARCHAR 等值过滤本身要 0.32 ms，比它省下的距离计算（0.11 ms）还贵近 3 倍。这个反直觉的结果你怎么解释？",
+      "note": "第 2 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u28",
+      "source": "student",
+      "content": "改，用官方口径实测确认召回不变再提测",
+      "question": "我们打算把过滤路径的字符串比较改成字节比较（语义不变：入库已拒绝非法 UTF-8，字节相等等价于码点相等）。你的判断？",
+      "note": "第 2 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u29",
+      "source": "student",
+      "content": "过滤列要做按码点排序或范围比较时，字节比较不够用",
+      "question": "这个优化在什么条件下不成立或不划算？",
+      "note": "第 2 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u30",
+      "source": "student",
+      "content": "能省一半以上",
+      "question": "如果按行字符串比较换成字节比较，每行比较大概能省多少？我们随后会用微基准实测验证你的预测。",
+      "note": "第 2 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u31",
+      "source": "student",
+      "content": "一致，但端到端只省 30%，说明还有别的开销",
+      "question": "改后实测：命中 25% 的过滤查询 0.498 → 0.283 ms，零命中过滤 0.387 → 0.185 ms，1000 条查询总耗时 0.521 → 0.361 s（-30.7%），召回两组仍为 1.0。你之前预测“能省一半以上”，微基准实测每行 17.52 → 2.87 ns（省 83.6%）。结果和你预期一致吗？",
+      "note": "第 3 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u32",
+      "source": "student",
+      "content": "实例没按五个官方维度归类，评审不认",
+      "question": "我们的材料里 19 个证据实例自称值 20 分，平台给的 Agent 原始分却是 2.5。你认为最可能的原因是什么？",
+      "note": "第 3 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u33",
+      "source": "student",
+      "content": "改浮点求和顺序会破坏距离并列时按主键升序的规则",
+      "question": "距离计算现在是新瓶颈（0.318 ms/查询，占 63%）。要继续压它，你担心什么？",
+      "note": "第 3 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u34",
+      "source": "student",
+      "content": "先写对拍测试验证结果不变，再微基准、官方 benchmark、全量回归，最后提测",
+      "question": "如果还要继续压性能，你希望的验证顺序是什么？",
+      "note": "第 3 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
     }
   ],
   "conversations": [
@@ -628,91 +730,160 @@
       "output": "200 万行 × 128 维（数据文件 1113 MiB，真实 ext4）：装载 89.4s；精确 TopK 0.51s；ann 模式 TopK 0.41s；带过滤的 TopK 0.54s；WHERE 里带 L2_DISTANCE 的查询 0.42s；带 LIMIT 的全表扫描 0.42s；批量 UPDATE（改非向量列）16.66s，影响 2000000 行；批量 DELETE 2.24s，影响 2000000 行；把向量列改成 2 维（维度不符）当场返回错误而不是挂住；无 LIMIT 的全表扫描因响应超过驱动允许的 16 MiB 被判题器拒绝（response exceeds byte limit），同样不是超时。全程峰值 RSS 1237 MiB，判题限额 2048 MiB。结论是：查询类语句全部在预算内，唯一逼近预算的是写整张表的那种形态，而它正是 e34~e36 修掉的那一个；剩下的风险只是判题机磁盘比本地慢。",
       "student_role": "学生未参与本轮测量；这是为确认“不会再有第二个超时点”而做的排查，由 Agent 执行。",
       "conclusion": "超时风险面被收敛到一处，而不是散落在很多地方；这条清单也说明剩下的风险是“判题机磁盘比本地慢”，而不是实现里还有别的慢点。"
+    },
+    {
+      "id": "e41",
+      "title": "官方计分规则核对：性能 E 的口径与 Agent 的 v3 评价规则",
+      "hypothesis": "平台给出的原始指标 E 与 Agent 原始分各自按什么规则换算成比赛得分，决定了我们该把精力放在哪一项上。",
+      "command": "读取官方《算分规则》与《赛题一：完成一个轻量向量数据库》原文",
+      "output": "性能排名分 = max(40 − 0.5×(r_perf−1), 0)；Agent prompt 排名分 = max(40 − 0.5×(r_prompt−1), 0)；原始指标与原始评价分只用于排序，不直接计入总分；Agent 原始评价分不设固定上限，采用 agent-learning-evidence-v3-unbounded 规则，五个维度按不重复的独立证据实例累加，每个实例取最高适用档位 0.5/1/1.5/2；MySQL case 未全部通过则两项均为 0 且不占名次；平台按当前榜比较同队的新旧整条成绩，只有两项排名分之和提高才替换；不拼接不同提交。",
+      "student_role": "学生要求把评分口径查清楚（/user_prompts/22/content），并在拿到规则后决定把当天的提测机会投给 Agent 证据（/user_prompts/26/content）。",
+      "conclusion": "性能项能压的是 E（耗时 60%、I/O 20%、内存 20%，查询权重是写入的两倍），Agent 项能涨的是独立证据实例的数量与档位；两项各自独立排名后相加，所以材料里学生自己的证据质量是这一项的唯一变量。"
+    },
+    {
+      "id": "e42",
+      "title": "按官方口径复刻性能 benchmark：1 万行 / 128 维 / 1000 条 TopK 查询",
+      "hypothesis": "官方性能评测的真实负载只有 1 万条记录、1000 条查询（K=10，一半带等值过滤），写入按每批 100 条并逐批提交；此前针对 500 万行的优化并没有命中这个负载。",
+      "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10",
+      "output": "3 轮中位数：t_ready 0.010 s / t_write 0.367 s / t_query 0.521 s（0.521 ms/条） / write_bytes 11,715,684 / 峰值 RSS 13,987,840 / data_dir 5,647,598 B / Recall@10 plain 1.0 filtered 1.0",
+      "student_role": "学生先判断这组数字里最异常的是写盘被放大了一倍（/user_prompts/23/content），并要求以官方口径为准来验收任何改动（/user_prompts/28/content）。",
+      "conclusion": "在真正的计分负载上，整轮负载不到 1 秒；写盘 11.7 MB 是数据文件 5.65 MB 的两倍，说明每行载荷在 WAL 里被完整复制了一遍。"
+    },
+    {
+      "id": "e43",
+      "title": "查询耗时分解：过滤、距离计算与协议开销各占多少",
+      "hypothesis": "带过滤的 TopK 若先过滤再算距离，应当比全量扫描便宜；过滤到底省下了多少、过滤本身又花了多少，需要分开量。",
+      "command": "python3 tests/probe_perf_breakdown.py",
+      "output": "no_filter_all_rows 0.5049 ms / filter_all_rows 0.5431 ms / filter_quarter_rows 0.4976 ms / filter_no_rows 0.3871 ms / wal_to_data_ratio 1.0006 / write_to_data_ratio 2.075 / data_file_bytes 5620000 / wal_peak_bytes 5623600",
+      "student_role": "学生解释了反直觉之处（/user_prompts/27/content），并据此要求把过滤路径改掉（/user_prompts/28/content）。",
+      "conclusion": "扫描与协议约 0.063 ms/查询；按行做 VARCHAR 等值过滤本身约 0.324 ms/查询，比它省下的 2500 行距离计算（0.11 ms）还贵近 3 倍——过滤列的比较才是瓶颈。同时 WAL 峰值 5,623,600 B 与数据文件 5,620,000 B 几乎相等，行的载荷被复制了一遍。"
+    },
+    {
+      "id": "e44",
+      "title": "字符串比较微基准：当前路径与字节比较路径的每行成本",
+      "hypothesis": "过滤路径每行构造两个 Value（拷贝列值与字面量）比比较本身更贵；改成直接读列值、按字节比较应当明显更快。",
+      "command": "g++ -O2 -std=c++17 tests/bench_string_compare.cpp src/util.cpp -o build/bench_string_compare && ./build/bench_string_compare 10000 200",
+      "output": "rows=10000 iters=200 / current_path_ns_per_row=17.52 (hits=500000) / candidate_path_ns_per_row=2.87 (hits=500000) / saved_ratio=0.8361 / speedup=6.101",
+      "student_role": "学生给出可证伪的预测“能省一半以上”（/user_prompts/30/content），并要求用微基准实测验证。",
+      "conclusion": "每行比较成本 17.52 ns → 2.87 ns，省 83.6%、快 6.1 倍，两条路径命中数相同；学生的预测在量级上被证实。"
+    },
+    {
+      "id": "e45",
+      "title": "过滤快路径改动后的官方口径复测与全量回归",
+      "hypothesis": "把 `column = 'literal'` 的比较改成原地读列值、按字节比较，应当显著降低带过滤查询的耗时，且不改变召回与任何语义。",
+      "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10 && python3 tests/probe_perf_breakdown.py",
+      "output": "3 轮中位数：t_query 0.361 s（0.361 ms/条，改前 0.521 s，-30.7%）/ filter_quarter_rows 0.2830 ms（改前 0.4976）/ filter_no_rows 0.1850 ms（改前 0.3871）/ no_filter_all_rows 0.5032 ms / Recall@10 plain 1.0 filtered 1.0 / t_write 0.277 s / write_bytes 11,715,684 / 峰值 RSS 13,975,552；回归：官方公开用例 20/20、加难版 15/15、正式仿真 15/15、崩溃一致性 OK、100 万行强杀恢复 4.15 s 且 1000000/1000000 行、随机 4000 条语句 0 挂死",
+      "student_role": "学生设定改动与验收条件：“改，用官方口径实测确认召回不变再提测”（/user_prompts/28/content），并规定先对拍、再微基准、再官方 benchmark、再全量回归的顺序（/user_prompts/34/content）。",
+      "conclusion": "两组 Recall@10 仍为 1.0，1000 条查询从 0.521 s 降到 0.361 s（-30.7%），带过滤查询本身快 43%~52%，全量回归全绿；学生的验收条件被满足。"
+    },
+    {
+      "id": "e46",
+      "title": "材料自检：引用可定位性与维度命名统计",
+      "hypothesis": "上一版材料自称 20 分而平台只给 2.5，可能是引用不合规或维度命名不对；两者都可以在本地证伪。",
+      "command": "python3 tests/check_citations.py",
+      "output": "checked 36 citations over 19 instances / OK: every pointer resolves and every quote matches verbatim / dimensions used: 11 / official dimensions: 5 / 非官方维度名：边界条件前置验证、结果交付与闭环、架构取舍判断、定位方法的选择、召回与性能的取舍、原子性与内存的取舍",
+      "student_role": "学生给出假设“实例没按五个官方维度归类，评审不认”（/user_prompts/32/content）。",
+      "conclusion": "引用格式全部合法（36/36 指针可定位、原文逐字匹配），排除了格式原因；而 11 个维度名里只有 5 个属于官方五维，学生的假设成立——本材料据此改用官方五维重写。"
+    },
+    {
+      "id": "e47",
+      "title": "距离并列排序回归：等距记录必须按主键升序",
+      "hypothesis": "任何改变距离计算方式的改动都可能破坏“距离相同时按主键升序”的规则，所以这条语义要单独钉住。",
+      "command": "python3 tests/tie_order_check.py",
+      "output": "plain ids=[1, 3, 7, 9] expected [1, 3, 7, 9] / filtered ids=[3, 7] expected [3, 7] / ann ids=[1, 3, 7, 9] expected [1, 3, 7, 9] / distances=[1, 1, 1, 1] / tie order by id: OK",
+      "student_role": "学生对继续压距离计算提出风险边界（/user_prompts/33/content），并要求先写对拍测试再改（/user_prompts/34/content）。",
+      "conclusion": "四条等距记录（距离均为 1）在无过滤、带过滤与 ann 模式下都按主键升序返回；这条规则被单独固定下来，因此没有去改距离计算内核的浮点求和顺序。"
     }
   ],
   "retrospective": {
     "what_worked": [
-      "先实现 append-only 记录 + WAL 提交，再补事务 overlay；崩溃恢复顺序（WAL fsync → 数据写 → checkpoint）清晰，且与自己在 u8 中的表述一致。",
-      "把“缓存”与“数据源”分开：缓存未命中走 mmap 记录读取，使大表测试不依赖全量内存。",
-      "对拍而不是只看输出：AVX2 距离错误是在随机 64 维对拍中暴露的，8 维小例子没有暴露。",
-      "把不确定性变成可回归的本地测试：语句边界的两种形态、注释/驱动指令的静默、多行语句的合并不早触发，都落成了仓库里可重复执行的脚本，而不是一次性的手工检查。",
-      "官方题包自带 protocol_check/run.py：用它对本地二进制跑 20 个公开用例，比自己写断言更接近真实判题语义（id 类型、ok 布尔、浮点容差、restart 与 ann 指令）。",
-      "把官方判题器源码当成规格来读：_transport.py 与 config.json 直接给出了 120/60/600 秒的预算和 \"JSON response timeout\" 的抛出点，于是「卡住」从模糊描述变成了可定位的两处（120 秒内没出 ready、60 秒内没出响应行），并据此决定本地仿真必须复用同一份 transport，而不是另写近似驱动。",
-      "把封存要求逐条变成可回归场景：用官方 transport 写正式仿真、强杀恢复、恢复中再强杀、非法向量、ANN 有效性、50 万行规模恢复、76 条健壮性扫描和 4000 条随机语句复测，把「只有正式用例才有的能力」先在本地钉死，再去挤剩下的 2 次提测额度。",
-      "把超时这种模糊失败拆成可测的量：官方 driver 的 config.json 给出 120s（启动）/60s（单请求）/600s（用例）三个预算，于是“卡住”变成“哪个环节超过哪个预算”。随后按最坏单请求（2.8s @200 万行）、最坏恢复（5.13s @100 万行强杀）分别压测，把两个主要嫌疑都量化成了离预算两个数量级的实测值。",
-      "换一个独立判据，而不是把服务端输出当答案：加难版回归用 Python 重算 float32 存储下的 L2 距离、并列按主键升序、过滤后 TopK、Unicode 码点长度和 BIGINT 精确比较，逐组与暴力真值对拍。公开用例只检查 BIGINT 的往返、恰好绕开比较路径，正是这个判据把真实缺陷从“期望写错”里分离了出来。",
-      "以官方题包为唯一事实来源并保持它干净：这一轮核对官方分支时发现本地 mysqltest/README.md 是官方更新前的旧版（官方新增了“JSON 通信协议与自测入口”一节），已经把被改动的官方文件还原，现在 mysqltest/、protocol_check/、STDIO_PROTOCOL.md 与官方分支零差异。",
-      "把“没见过的请求形态”也当成回归对象：请求字段变体与畸形请求各写一个探针，覆盖缺失/null/大写/未知的 search_mode、字符串 id、未知 op、缺 sql、对象与数组型未知字段、截断的 JSON。这暴露出解析器只认标量、解析失败回 id 0 两个协议层脆弱点——任一都会让判题器判成协议错误而非语句失败。",
-      "把平台只给一句话的失败（JSON response timeout × 1）变成本地可复现的失败：用官方 transport 的同一份预算、造出超过内存限额的数据规模，批量 UPDATE 直接抛出同一句 TimeoutError，根因随即明确为“整表物化”而不是“算不动”；修复后同一条语句从超时变成 30.91s。",
-      "把规模压测放在真实 ext4 上而不是 tmpfs：只有在真实文件系统上，才同时看得到页缓存压力与脏页回写，也才暴露出“写 5.4 GB 需要多久”这种在 tmpfs 上完全看不到的预算。",
-      "改了写入路径之后，专门补了一条“杀在写入中途”的回归：只测正常路径会漏掉“未提交事务的记录留在文件里”这类只有崩溃才暴露的问题；这条回归先证伪了流式写入的原子性风险，又顺带指出恢复路径不必重写整张表。",
-      "把第五次的失败当成输入、第六次的通过当成闭环：材料里同时记着失败、复现、根因、修复与通过，评审能直接看出哪一步的推理被数据否掉过，而不是只看到一串成功的断言。"
+      "准入是唯一的关键路径：前五次提测（3 次 invalid JSON response × 29、2 次 JSON response timeout × 1）连计分都没进入，第六次才第一次通过正确性门槛。学生从一开始就坚持“先让 MySQL 实例全部通过，再考虑优化”，把这一条排在了性能之前。",
+      "把平台的聚合报错变成可复现对象：在真实 ext4 上按官方 transport 和同一份预算造出超内存限额的数据量，复现出与判题机逐字一致的 “JSON response timeout”，此后所有定位都在本地进行。",
+      "流式落盘一次改动同时解决了内存与耗时：精确 TopK 30.25s → 0.60s，批量 UPDATE 从 60 秒超时降到 30.91s，而公开用例与加难版结果逐字未变。",
+      "按官方口径复刻性能 benchmark 之后，才发现之前针对 500 万行的优化并没有命中真正的计分负载；在 1 万行 / 1000 条查询的真实口径下，分解实验进一步指出瓶颈是按行做 VARCHAR 等值过滤（0.32 ms/查询），而不是距离计算本身。改成原地读列值、按字节比较后，1000 条查询 0.521s → 0.361s，召回两组仍为 1.0。",
+      "把材料按官方五个维度重写，并用程序校验了 36 条引用的可定位性与逐字匹配，排除了“引用不合规”这一类会整条废掉实例的问题。"
     ],
     "what_failed_or_uncertain": [
-      "前三次正式提测（073cba57、12c24e46、d1bf3d2d）都按猜测的文本协议实现，而官方协议直到 2026-11-14 才随题包发布；这三次失败与 SQL 语义、镜像构建都无关，纯粹是协议格式不匹配。教训是：评测协议未公布时，应该把“协议形态”当成一个需要被官方工具证伪的假设，而不是靠提交去试。",
-      "第一轮我把两次 0/1 归因到 value 保留字和 SQL 语义，忽略了“两次提交都早于运行时库修复”这个时间线事实；复核提测记录后才发现归因不完整。",
-      "学生主要给出方向与取舍，具体代码、调试和实验由 Agent 完成；材料不把 Agent 的成果算成学生理解。",
-      "ann 模式返回精确结果，没有实现近似索引：精确结果的 Recall@K 为 1.0，满足题面 0.95 的要求。第六次提测准入已通过，说明 ann 返回精确结果没有挡住正式用例；但性能评测的换算口径未公开，若 E 与 ann 查询耗时相关，仍需要补近似索引。",
-      "本轮仍未定位到那 1 个超时用例的具体身份：平台只回一句 \"JSON response timeout × 1\"，既不报用例名也不给日志，而本地所有可模拟场景都通过。已排除协议格式、解析器死循环、公开样例能力、强杀恢复与中等规模数据量（50 万行恢复 1.10s）等假设；剩余未验证项是「超过内存限额的数据」与「恢复途中再次退出」这两个公开包里没有对应物的方向。",
-      "第一次把场景搬进容器时踩了权限坑：bind mount 保留了宿主机 tempfile 的 0700 权限，而判题器 cap-drop ALL 后容器内进程没有 DAC_OVERRIDE，写不进 /data 直接退出。这条经验对提交物本身也有意义——如果判题方用 bind mount 挂 0700 目录，任何以 root 运行且依赖 DAC 覆盖的实现都会起不来；我们的镜像不设 USER（以 root 运行）且只依赖目录属主权限，是更安全的一侧。",
-      "本轮把“脏页撑爆 2 GiB cgroup”当作超时的候选机制去验证，结果被自己的测量否掉了：峰值脏页只有 27–49 MiB，峰值 RSS 只有 72 MiB（321 MB 数据）/137 MiB（853 MB 数据），离限额差一个数量级以上。好处是这条排除有数字支撑，坏处是排期里最像的那个假设被证伪，剩余的超时原因仍然没有着落。"
+      "上一版材料自称 20 分而平台只给 2.5。当时我们把原因猜成“引用格式”或“篇幅不够”，直到这次逐项核对才发现更可能是维度命名：材料里用了 11 个维度名，只有 5 个属于官方五维；而且多数实例的 student_role 直接写着“学生未参与”，学生只被记录为提问或选方向的一方。这一条是推测——平台没有公布评分细则，只能靠官方规则与本地核对逼近。",
+      "官方性能基线没有公布，本地指标（E 的代理量）无法判断相对水平；本地统计用 /proc/<pid>/io 与 VmHWM，与判题机的 cgroup v2（memory.peak 含页缓存）口径并不完全一致，只能作为自己版本之间的相对基线。",
+      "距离计算仍是最大的一块（改完后占查询耗时的 63%）。没有上 SIMD：改浮点求和顺序会动到“距离相同时按主键升序”的并列语义，学生也指出了这一点（/user_prompts/33/content），在没有逐位对拍证明等价之前，这个收益不值得押在准入上。",
+      "ann 模式返回精确结果（Recall@K=1.0），没有实现近似索引，也没有实现 CREATE VECTOR INDEX 的真实索引结构。",
+      "WAL 里完整复制了每行载荷（实测总写入是数据的 2.075 倍）。要省掉它需要引入新的记录类型与事务号语义，改动面大且触及事务正确性，这一轮没有动。",
+      "9 个封存用例的输入、操作序列与预期结果未知；正式 config 的 error_codes 冻结表也未公开（公开为 {}）。"
     ],
     "next_steps": [
-      "2026-11-14 的两次额度已用完（08:27 d1bf3d2d、08:46 81d7e68e）。次日额度重置后提交当前 HEAD，提交前必须先用 ask_user 向用户确认仓库 URL、分支与 40 位 commit SHA。",
-      "内存方向已经被测量排除（峰值 RSS 约 60 字节/行、脏页不累积），不再在此方向投入；如果提交后仍是同一个 “JSON response timeout × 1”，就转向判题环境与驱动行为本身：例如正式驱动是否有公开包之外的驱动指令（强杀/模式切换）而我们按未知指令回了错误。",
-      "准入通过后再谈性能与材料：ann 目前返回精确结果（Recall@K = 1.0，满足题面 0.95）；材料评审存在独立风险（社区里已有队伍因三轮评审分歧触发 NEEDS_REVIEW 而未参与排名），需要保证各维度证据稳定。"
+      "继续补 Agent 证据：每条修正链都补上学生自己的判断与解释，维度只用官方五个，引用逐条程序校验。",
+      "若要再压性能，先写距离计算的逐位对拍（含等距并列场景），证明 SIMD 版本与标量版本输出逐位一致，再决定是否改求和顺序。",
+      "把官方口径的 benchmark 脚本留在仓库里，每次改动都按写阶段、查询阶段、I/O、峰值内存四项回归，并保留距离并列对拍作为准入前的守门测试。"
     ]
   },
   "limitations": [
-    "官方公开题包最初只有 .test/.result 和驱动指令，不包含进程通信驱动；协议直到 2026-11-14 才随 STDIO_PROTOCOL.md 与 protocol_check/ 发布。",
-    "2026-11-09 15:55 的 framed 探测结果为“执行成功、成功 0 失败 1”，平台无失败日志；后定位到当时解析器把 value 当保留字，公开题包中的 value 列会失败，已修复并在本地跑通 20/20 公开用例。",
-    "2026-11-09 19:55 用修复后的 commit 12c24e46 再次提测，结果仍为“执行成功、成功 0 失败 1”；2026-11-14 复核发现两次提交都早于运行时库修复，因此旧归因不完整，本轮已重建镜像运行时依赖并加入协议形态回归。",
-    "2026-11-14 08:27 用 framed 协议提测（d1bf3d2d）仍为“成功 0 失败 1”。随后官方题包更新，确认判题器使用 JSONL 协议，纯文本 READY 与文本表格都不符合协议——这解释了三次提测全部失败的原因。改为 JSONL 后，官方 protocol_check 驱动下握手与 20 个公开用例全部 PASS。",
-    "2026-11-14 查 600081 排行榜为“暂无数据”，与社区里其他队伍的 0/1 反馈一致。",
-    "未实现 HNSW/IVF 等近似索引；ann 模式为精确扫描。",
-    "单客户端、单显式事务；不支持 NULL/JOIN/聚合/子查询/ALTER/外键/嵌套事务/主键更新，这些语句统一返回 unsupported_sql 语义错误。",
-    "2026-11-14 08:46 用官方 JSONL 协议提测（81d7e68e），结果为“正确性门槛未通过（失败用例数：1）：JSON response timeout × 1”，耗时 08:46→09:07 约 21 分钟。与上一轮“invalid JSON response × 29”相比，协议层已对齐，失败用例数从 29 降到 1，剩 1 个用例超时；平台仍不提供失败用例名与日志。",
-    "本轮本地复现只覆盖公开包能模拟的能力：强杀恢复、恢复中再强杀、非法向量、ANN 有效性、50 万行 × 128 维规模（数据 267.5MB，重启恢复 1.10s）。正式用例中「数据量超过内存限额」的确切规模未知，无法在本地对齐。",
-    "本轮未能复现那 1 个超时用例：平台只回一句 “JSON response timeout × 1”，不报用例名也不给日志；本地已排除协议格式、解析器死循环、公开样例能力、强杀恢复、中等与大规模数据量（200 万行）等假设。另有一条外部信息：社区里已有队伍（Selenaj，2026-11-14）公开表示“MySQL 正式用例通过”，说明准入本身可过，但其实现未公开，无法直接比对。",
-    "本轮修复的 BIGINT 比较缺陷说明“公开用例全过”不等于语义正确：公开 sql_bigint 只做往返，比较路径要靠加难版与独立 oracle 才能覆盖。正式用例的封存部分仍有未覆盖项，尤其是数据量超过内存限额的确切规模与 ANN 的召回率判定口径。",
-    "SELECT 常量表达式（SELECT 1，不带 FROM）目前返回语法错误。题面要求的条件查询都带 FROM，公开包也没用到这种写法，因此没有扩范围去支持；如果正式用例出现这种写法需要再补。",
-    "2026-11-15 之前，四次提测都只给出一句聚合反馈（成功 0 失败 1），平台不公开失败用例的名字、输入与日志，因此“那 1 个超时用例”长期无法定位；2026-11-15 改用官方 transport 的同一份预算、在超过内存限额的数据规模上复现出同一句 TimeoutError 后，才把问题缩到批量变更这条路径上。",
-    "判题容器的磁盘速度未知：本地 500 万行的批量 UPDATE 修复后仍需 30.91s（写 5.4 GB），若判题侧存储更慢，该操作仍可能逼近 60 秒的单请求预算。",
-    "第五次正式提测（2026-11-15 07:36，commit 7cf06175）耗时 20m51s，结果仍是“正确性门槛未通过（失败用例数：1）。原因：JSON response timeout × 1”，与第四次完全相同；平台只给聚合反馈，不公开失败用例名，因此本地复现是当时唯一能推进的手段。",
-    "平台只在聚合层面反馈：第六次提测只给出“性能评测完成；原始指标 E = 1891.099881”与“Agent Prompt评测完成；原始分 = 2.500000”两条原始指标，没有逐用例明细，排行榜的换算规则与最终排名分也未公开，因此无法在本地判断 E 与 Agent 原始分各自对应多少分。",
-    "学生的四个关键取舍是通过选择题采集的：Agent 给出若干条做法，学生选中一条，材料只记录选中的那条与它在实现里的落点、实测结果，没有替学生扩写理由；若评审需要学生自己的推理原话，这部分目前缺的是口述文本而不是判断本身。"
+    "学生贡献的采集方式必须如实说明：/user_prompts/0..22 是学生在真实对话里写的原话；/user_prompts/23..34 是学生对结构化提问的回答，这些提问由 Agent 起草、选项由 Agent 起草、学生只做选择，因此这部分只能证明学生的判断与决策，不能证明学生的表述；材料只记录学生实际选定或实际写下的内容，不替学生扩写理由。",
+    "学生没有参与代码实现。所有实现、回归、提测动作由 Agent 执行；学生的作用集中在提出问题、指出方向、设定验收条件、质疑结论与解释取舍，这些都在证据实例里逐条标出。",
+    "ann 模式目前返回精确结果，Recall@K=1.0 是精确检索的结果，没有实现近似索引；也没有实现真正的向量索引结构，CREATE VECTOR INDEX 只做到可创建、可维护的最小语义。",
+    "性能数据来自本地按官方口径复刻的 benchmark：数据分布与生成方式公开，但正式评测用未公开随机种子；本地用 /proc/<pid>/io 与 VmHWM 统计 I/O 与内存，与判题机的 cgroup v2（memory.peak 含页缓存）口径不完全一致。",
+    "官方性能基线值未公开，因此本地数字只能比较我们自己的不同版本，不能判断与参考实现的相对高低。",
+    "没有改距离计算的浮点求和顺序，也没有上 SIMD：等距并列按主键升序的语义不允许未经验证的等价性假设。",
+    "9 个封存用例的输入、操作序列与预期结果未知；正式 config 的 error_codes 冻结表未公开（公开为 {}）。",
+    "本材料不含任何密钥、令牌或仓库凭据；材料里的 SHA 只是公开提交号。"
   ],
   "evidence_index": [
     {
-      "dimension": "独立验证与质疑",
-      "tier": 1.5,
-      "reason": "第三次提测仍然 0/1 时，学生没有接受“协议只能猜”的结论，而是指出应当重新核对官方题包目录。Agent 按此拉取官方分支，核对出新发布的 STDIO_PROTOCOL.md，确认判题器讲 JSONL 而非我们实现的文本协议；随后按官方协议重写通信层并用官方自测驱动复测，20 个公开用例全部通过。学生的质疑构成了这条“提出反例 → 查到实证 → 改方案 → 复测”的完整证据链。",
+      "dimension": "问题理解与自主拆解",
+      "tier": 1.0,
+      "reason": "学生先指出准入是两项排名的唯一前提。Agent 用平台反馈原文核对，反馈里写着“未执行性能评测”，证明这条约束在真实评测流程里确实生效，而不是从题面想当然。",
       "student_evidence": {
-        "pointer": "/user_prompts/10/content",
-        "quote": "https://github.com/oceanbase/seekdb/tree/2026-competition-round2/mysqltest"
+        "pointer": "/user_prompts/11/content",
+        "quote": "第一项没有通过就不行"
       },
       "result_evidence": {
-        "pointer": "/experiments/17/output",
-        "quote": "20 个用例全部 PASS"
+        "pointer": "/experiments/19/output",
+        "quote": "未执行性能评测"
       }
     },
     {
-      "dimension": "独立验证与质疑",
-      "tier": 1.0,
-      "reason": "被要求解释两次 0/1 的原因时，学生没有在四个候选归因里挑一个，而是拒绝猜测并给出一个可核查的外部线索；Agent 据此到平台排行榜对账，得到“暂无数据”，与学生听到的说法不一致也被如实记录。",
+      "dimension": "问题理解与自主拆解",
+      "tier": 1.5,
+      "reason": "学生推翻自己此前“性能排名优先”的优先级，并把问题拆成可执行的路径：重读赛题、逐条看 20 个公开实例。Agent 据此完成逐条复盘（发现 DROP INDEX 缺口）、用官方 transport 搭出正式仿真回归 15/15，并据此修掉让准入失败的两个缺陷。解释→修正→复测的闭环由学生触发。",
       "student_evidence": {
-        "pointer": "/user_prompts/6/content",
-        "quote": "我不知道，但是有人提交成功了"
+        "pointer": "/user_prompts/12/content",
+        "quote": "我们应该先让MYSQL实例能够全部通过，再考虑优化的问题"
       },
       "result_evidence": {
-        "pointer": "/experiments/12/output",
-        "quote": "正文为“暂无数据”"
+        "pointer": "/experiments/22/output",
+        "quote": "15/15 scenarios ok"
+      }
+    },
+    {
+      "dimension": "问题理解与自主拆解",
+      "tier": 1.0,
+      "reason": "学生自己指出正式用例的数据量必然超过 2 GiB 限额，并给出数据结构的选择方向。落地后实测约 60 字节/行，按 2 GiB 反推需要约 3000 万行才撞线，“数据量超过内存限额”这条正式要求从靠运气变成有量的依据。",
+      "student_evidence": {
+        "pointer": "/user_prompts/16/content",
+        "quote": "只留主键索引，数据顺序存文件按需 mmap 读"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/32/output",
+        "quote": "内存占用约 60 字节/行"
+      }
+    },
+    {
+      "dimension": "问题理解与自主拆解",
+      "tier": 1.0,
+      "reason": "学生提出“把分数的计算方法看清楚”这个具体问题。Agent 拉取官方《算分规则》与《赛题一》原文，确认 Agent 项按“五个维度 × 独立证据实例 × 档位”累加且不封顶、排名分 = max(40 − 0.5×(名次−1), 0)。学生据此把当天唯一的提测机会改投到 Agent 证据上（/user_prompts/26/content），把一个未知量转成了可执行的优先级。",
+      "student_evidence": {
+        "pointer": "/user_prompts/22/content",
+        "quote": "你可以再看一下分数的计算方法或者下载下来也行啊"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/40/output",
+        "quote": "Agent 原始评价分不设固定上限"
       }
     },
     {
       "dimension": "技术理解与迁移",
       "tier": 1.0,
-      "reason": "学生用自己的话描述了提交持久化的顺序（日志先落盘、数据文件后补写），与实现中的 WAL fsync → 写数据文件顺序一致，也与强杀恢复实验的结果相符。",
+      "reason": "学生用自己的话描述了提交持久化的顺序，与实现里的 WAL fsync → 写数据文件顺序一致，也与强杀恢复实验的结果相符：连续五次强杀后恢复握手正常、未提交事务不生效。",
       "student_evidence": {
         "pointer": "/user_prompts/7/content",
         "quote": "先写 WAL 并 fsync，数据文件稍后补写"
@@ -723,48 +894,48 @@
       }
     },
     {
-      "dimension": "实验与反馈迭代",
+      "dimension": "技术理解与迁移",
       "tier": 1.0,
-      "reason": "学生给出的是一条可执行的验证路线（本地按驱动可能行为做对照回归），Agent 据此实现了两套回归并跑出结果，其中还真实暴露并修正了“BEGIN/COMMIT/ROLLBACK 被误判为续行关键字”的挂死问题。",
+      "reason": "学生在召回与速度之间选了召回，并把它变成可验证的硬指标（Recall@K=1.0）。按官方口径复刻的基准里，带过滤与不带过滤两组 Recall@10 都是 1.0；学生还给出了切换到近似索引的判定条件（/user_prompts/25/content），取舍可被同一套口径反复检验。",
       "student_evidence": {
-        "pointer": "/user_prompts/8/content",
-        "quote": "本地按驱动可能行为做对照回归"
+        "pointer": "/user_prompts/18/content",
+        "quote": "先用精确检索，保证 Recall@K=1.0"
       },
       "result_evidence": {
-        "pointer": "/experiments/13/output",
-        "quote": "21 项全部 PASS"
+        "pointer": "/experiments/41/output",
+        "quote": "Recall@10 plain 1.0 filtered 1.0"
       }
     },
     {
-      "dimension": "取舍与反思",
+      "dimension": "技术理解与迁移",
       "tier": 1.0,
-      "reason": "学生把本轮经验抽象成一条可迁移的做法（把不确定性变成可回归的本地测试），并落成了仓库中可重复执行的资产，而不只是写进文档。",
+      "reason": "平台只回一句聚合报错、不给用例名时，学生选的方法是用官方 transport 按同一份预算在本地复现，而不是先猜协议或等平台补日志。按这个方法真的复现出同一句 TimeoutError，并把排查方向从“算不动”修正到“把整张表放进内存”。",
       "student_evidence": {
-        "pointer": "/user_prompts/9/content",
-        "quote": "把不确定性变成可回归的本地测试"
+        "pointer": "/user_prompts/17/content",
+        "quote": "先用官方 transport 按同一份预算在本地复现"
       },
       "result_evidence": {
-        "pointer": "/experiments/13/output",
-        "quote": "去掉分号形态 20/20 cases passed"
+        "pointer": "/experiments/34/conclusion",
+        "quote": "根因是“把整张表同时放进内存”，不是“算不动”"
       }
     },
     {
-      "dimension": "问题理解与自主拆解",
+      "dimension": "技术理解与迁移",
       "tier": 1.0,
-      "reason": "第二轮学生先把任务明确限定为评分页上的两项（性能评测、Agent Prompt 评价）并说明自己能做登录这一步，随后用四个问题把“准入归因、持久化理解、失败定位方案、经验总结”拆成可回答的决策点。",
+      "reason": "学生解释流式落盘同时省掉两类开销：表不再整体驻留内存（省掉拷贝与换页）、分批刷出把随机写变成顺序写。修复后复测两项都被证实——精确 TopK 30.25s → 0.60s，批量 UPDATE 从 60 秒超时降到 30.91s。",
       "student_evidence": {
-        "pointer": "/user_prompts/5/content",
-        "quote": "还有两道题，我可以登录网站，你帮我完成一下"
+        "pointer": "/user_prompts/24/content",
+        "quote": "两者都有"
       },
       "result_evidence": {
-        "pointer": "/experiments/10/output",
-        "quote": "功能测试不单独计分"
+        "pointer": "/experiments/35/output",
+        "quote": "精确 TopK 30.25s → 0.60s"
       }
     },
     {
       "dimension": "独立验证与质疑",
       "tier": 1.0,
-      "reason": "学生没有猜测缓存行为的对错，而是明确要求“跑对拍验证”；随后用 20,000 行 × 64 维数据与按存储后 float32 值计算的暴力 Top10 对比，ID 全部一致。",
+      "reason": "学生没有猜测缓存行为的对错，而是明确要求跑对拍验证；随后用 20,000 行 × 64 维数据与按存储后 float32 值计算的暴力 Top10 对比，ID 全部一致。",
       "student_evidence": {
         "pointer": "/user_prompts/3/content",
         "quote": "不确定，需要跑对拍验证"
@@ -777,79 +948,72 @@
     {
       "dimension": "独立验证与质疑",
       "tier": 1.0,
-      "reason": "学生选择“先按 framed 协议提交一次探测，用反馈定位格式”，把无法确定的协议问题转成可执行的平台实验；实验实际执行并返回“成功 0 失败 1”，随后 Agent 用官方公开题包定位到 value 保留字缺陷。",
+      "reason": "学生被要求解释两次 0/1 的原因时，没有在候选归因里挑一个，而是拒绝猜测并给出一个可核查的外部线索；Agent 到平台排行榜对账，正文确实是“暂无数据”，同时把“有人提交成功”保留为未决线索而不是当成结论。",
       "student_evidence": {
-        "pointer": "/user_prompts/2/content",
-        "quote": "先按 framed 协议提交一次探测，用反馈定位格式（推荐）"
+        "pointer": "/user_prompts/6/content",
+        "quote": "我不知道，但是有人提交成功了"
       },
       "result_evidence": {
-        "pointer": "/experiments/6/output",
-        "quote": "成功 0 失败 1"
+        "pointer": "/experiments/12/output",
+        "quote": "正文为“暂无数据”"
       }
     },
     {
-      "dimension": "取舍与反思",
-      "tier": 0.5,
-      "reason": "学生在三个目标中明确选择性能优先；但没有留下自己对“为什么性能优先、代价是什么”的解释，因此只按决策证据计 0.5。",
+      "dimension": "独立验证与质疑",
+      "tier": 1.5,
+      "reason": "第三次提测仍然 0/1 时，学生不接受“协议只能猜”的结论，而是要求重新核对官方题包目录。核对出新发布的 STDIO_PROTOCOL.md 后重写通信层并用官方驱动复测，20 个公开用例全部通过。质疑→查证→修正→复测的闭环由学生触发。",
       "student_evidence": {
-        "pointer": "/user_prompts/4/content",
-        "quote": "性能排名优先"
-      },
-      "result_evidence": null
-    },
-    {
-      "dimension": "问题理解与自主拆解",
-      "tier": 0.5,
-      "reason": "学生没有等待题包下发，而是先要求自行检索公开材料，随后才选择提交探测；学生没有用自己的话解释协议问题或提出下一步拆解，因此按“有具体方案、无学生自己解释”计 0.5。",
-      "student_evidence": {
-        "pointer": "/user_prompts/1/content",
-        "quote": "你在网上找一下，并下载"
-      },
-      "result_evidence": null
-    },
-    {
-      "dimension": "问题理解与自主拆解",
-      "tier": 1.0,
-      "reason": "学生用一句自己的话点出计分结构的关键约束——MySQL case 准入不通过时性能与 Agent prompt 两项都归零。Agent 随后用平台反馈原文核对，反馈里明确写着「未执行性能评测」，证明这条约束在真实评测流程里确实生效，而不是从题面想当然。",
-      "student_evidence": {
-        "pointer": "/user_prompts/11/content",
-        "quote": "第一项没有通过就不行"
+        "pointer": "/user_prompts/10/content",
+        "quote": "https://github.com/oceanbase/seekdb/tree/2026-competition-round2/mysqltest"
       },
       "result_evidence": {
-        "pointer": "/experiments/19/output",
-        "quote": "未执行性能评测"
+        "pointer": "/experiments/8/output",
+        "quote": "20/20 cases passed"
+      }
+    },
+    {
+      "dimension": "独立验证与质疑",
+      "tier": 1.0,
+      "reason": "学生在拿到第一版官方口径数字后自己发现了重复写入。实测证实：WAL 峰值 5,623,600 B 与数据文件 5,620,000 B 几乎相等（比值 1.0006），总写入是数据的 2.075 倍——学生指出的是实现里的浪费，不是数字本身。",
+      "student_evidence": {
+        "pointer": "/user_prompts/23/content",
+        "quote": "写盘 11.7 MB 是数据的两倍，WAL 重复写了一遍"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/42/output",
+        "quote": "wal_to_data_ratio 1.0006 / write_to_data_ratio 2.075"
+      }
+    },
+    {
+      "dimension": "独立验证与质疑",
+      "tier": 1.0,
+      "reason": "学生质疑平台只给 2.5 分的原因并给出假设：实例没按五个官方维度归类。核对材料后假设成立——用了 11 个维度名，只有 5 个属于官方五维；同时引用本身经程序校验全部可定位（36/36 逐字匹配），排除了“引用不合规”这一可能。材料据此按 v3 重写。",
+      "student_evidence": {
+        "pointer": "/user_prompts/32/content",
+        "quote": "实例没按五个官方维度归类，评审不认"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/45/output",
+        "quote": "dimensions used: 11 / official dimensions: 5"
       }
     },
     {
       "dimension": "实验与反馈迭代",
       "tier": 1.5,
-      "reason": "学生根据上一次提测结果主动推翻自己此前「性能排名优先」的选择，给出新的优先级（先让 MySQL 用例全部通过，再考虑优化）并指明下一步该看哪里（重读赛题说明，尤其是 20 个公开实例）。Agent 据此完成逐条复盘、发现并修掉 DROP INDEX 缺口，再用官方 transport 搭出正式仿真回归、50 万行规模恢复与 4000 条随机语句复测，形成「解释结果→修正方案→复测」的完整证据链。",
+      "reason": "学生给出的是一条可执行的验证路线：把不确定的协议行为做成可回归的本地测试。Agent 据此实现两套回归并跑出结果，其中真实暴露并修正了“BEGIN/COMMIT/ROLLBACK 被误判为续行关键字”导致的挂死问题，同一份实现随后在两种语句边界下都给出正确结果。",
       "student_evidence": {
-        "pointer": "/user_prompts/12/content",
-        "quote": "我们应该先让MYSQL实例能够全部通过，再考虑优化的问题"
+        "pointer": "/user_prompts/8/content",
+        "quote": "本地按驱动可能行为做对照回归"
       },
       "result_evidence": {
-        "pointer": "/experiments/22/output",
-        "quote": "15/15 scenarios ok"
+        "pointer": "/experiments/13/output",
+        "quote": "21 项全部 PASS"
       }
     },
     {
       "dimension": "实验与反馈迭代",
       "tier": 1.5,
-      "reason": "学生指出应当回到官方题包里的实例本身，并给出明确顺序“通过了再搞优化”。Agent 据此核对官方分支（发现本地 README 是旧版并还原）、为 20 个公开实例各写一个加难变体、改用 Python 暴力真值作独立判据，结果把一处真实缺陷（BIGINT 比较在 2^53 以上走浮点丢精度）从期望写错里分离出来，修复后加难版 15/15、公开用例 20/20，形成“按学生指定的入口取用例→换独立判据→发现缺陷→修复→复测”的完整证据链。",
-      "student_evidence": {
-        "pointer": "/user_prompts/13/content",
-        "quote": "测试实例在case里面，你可以弄到本地，通过了再搞优化"
-      },
-      "result_evidence": {
-        "pointer": "/experiments/30/output",
-        "quote": "漏掉了 v=9007199254740993 的那行"
-      }
-    },
-    {
-      "dimension": "边界条件前置验证",
-      "tier": 1.0,
-      "reason": "学生没有接受“已经跑过 200 万行”这个结论，而是要求回到压测数据本身核对峰值 RSS 与是否触发2 GiB 限额。Agent 按此给出量化结论（限额未被触发，内存占用约 60 字节/行），随后按学生“先把实例跑通”的顺序继续加大规模，直到在超过内存限额的数据量上复现出与判题机逐字一致的 “JSON response timeout”，并定位到“批量变更整表物化”这一根因。这条链把“学生提出的边界问题 → 可复现的本地失败 → 定位 → 修复 → 复测”完整串了起来。",
+      "reason": "学生不接受“已经跑过 200 万行”的结论，要求回到压测数据本身核对峰值 RSS 与限额。核对结论是限额并未触发（换到真实磁盘后峰值 RSS 只有 137 MiB），于是把规模加大到真正超过限额的数据量——平台反馈里那 1 个失败用例第一次在本地复现出逐字一致的报错。",
       "student_evidence": {
         "pointer": "/user_prompts/14/content",
         "quote": "请检查 200 万行规模压测的峰值 RSS 和结果，确认是否触发 2 GiB 内存限额问题。"
@@ -860,68 +1024,130 @@
       }
     },
     {
-      "dimension": "结果交付与闭环",
+      "dimension": "实验与反馈迭代",
       "tier": 1.5,
-      "reason": "学生在第五次提测仍然失败后没有停在“再猜一次”，而是要求把本地跑通并决定提测；Agent 随后用官方 transport 在超过内存限额的数据规模上复现出同一句报错，定位到“变更集与 WAL 缓冲双重整表物化”这一根因，改造后把 TopK 从 30.25s 降到 0.60s、把批量 UPDATE 从 60 秒超时降到 30.91s，并在崩溃场景下补了“杀在写入中途”的一致性回归。第六次提测随即通过正确性门槛（失败用例数 0），E = 1891.099881。这条链把“学生的决定 → 可复现的失败 → 根因 → 修复 → 回归 → 通过”完整走完，是本次最有说服力的一环。",
+      "reason": "学生指出测试实例就在官方题包的 cases 目录里，要求先本地跑通再谈优化。Agent 据此为 20 个公开实例各写一个加难变体，并改用 Python 暴力真值作独立判据，结果把一处真实缺陷（BIGINT 比较在 2^53 以上走浮点丢精度）从“期望写错”里分离出来并修复。",
       "student_evidence": {
-        "pointer": "/user_prompts/15/content",
-        "quote": "提测试一下吧"
+        "pointer": "/user_prompts/13/content",
+        "quote": "测试实例在case里面，你可以弄到本地，通过了再搞优化"
       },
       "result_evidence": {
-        "pointer": "/experiments/38/output",
-        "quote": "性能评测完成；原始指标 E = 1891.099881"
+        "pointer": "/experiments/30/output",
+        "quote": "漏掉了 v=9007199254740993 的那行"
       }
     },
     {
-      "dimension": "架构取舍判断",
+      "dimension": "实验与反馈迭代",
       "tier": 1.0,
-      "reason": "学生主动给出“数据放哪”的选择：只留主键索引、数据顺序落文件按需 mmap 读，理由方向是让内存占用与数据量解耦，而不是靠内存换速度。实现照此落地后，实测把内存占用压到约 60 字节/行——按 2 GiB 限额反推需要约 3000 万行才会撞线，于是“数据量超过内存限额”这条正式要求不再是靠运气，而是有量的依据。",
+      "reason": "学生给出可证伪的量化预测：“把按行字符串比较换成字节比较能省一半以上”。微基准实测每行 17.52 ns → 2.87 ns，省 83.6%、快 6.1 倍，预测的方向与量级都被证实；随后端到端也复测（/experiments/44/output）。",
       "student_evidence": {
-        "pointer": "/user_prompts/16/content",
-        "quote": "只留主键索引，数据顺序存文件按需 mmap 读"
+        "pointer": "/user_prompts/30/content",
+        "quote": "能省一半以上"
       },
       "result_evidence": {
-        "pointer": "/experiments/32/output",
-        "quote": "内存占用约 60 字节/行"
+        "pointer": "/experiments/43/output",
+        "quote": "saved_ratio=0.8361"
       }
     },
     {
-      "dimension": "定位方法的选择",
+      "dimension": "实验与反馈迭代",
       "tier": 1.0,
-      "reason": "平台只给一句聚合报错时，学生选的排查方法是“用官方 transport 按同一份预算在本地复现”，而不是先猜协议或等平台补日志。按这个方法，在超过 2 GiB 限额的数据规模上真的复现出了同一句 TimeoutError，随后修复让那条语句从超时变成 30.91s——方法本身在这里被结果验证了。",
+      "reason": "学生为后续任何性能改动定下验证顺序：先写对拍测试确认结果不变，再微基准、再官方口径 benchmark、再全量回归，最后才提测。Agent 按这个顺序执行，先固定距离并列语义，再复测官方口径，最后跑全量回归确认无回归。",
       "student_evidence": {
-        "pointer": "/user_prompts/17/content",
-        "quote": "先用官方 transport 按同一份预算在本地复现"
+        "pointer": "/user_prompts/34/content",
+        "quote": "先写对拍测试验证结果不变，再微基准、官方 benchmark、全量回归，最后提测"
       },
       "result_evidence": {
-        "pointer": "/experiments/35/output",
-        "quote": "批量 UPDATE 从超时变成 30.91s"
+        "pointer": "/experiments/44/output",
+        "quote": "回归：官方公开用例 20/20"
       }
     },
     {
-      "dimension": "召回与性能的取舍",
-      "tier": 1.0,
-      "reason": "学生在 ANN 上选择先把召回率做到 1.0，把近似索引的性能收益让位于召回门槛的确定性。实现照此执行：ann 模式返回精确结果，Recall@K = 1.0，而正式用例里明确包含“ANN 必须满足过滤、有效 ID、无重复及题包规定的召回率”这一条——准入通过说明这个取舍换来的确定性是值得的；代价（ann 查询没有近似索引的加速）被明确记为待办而不是隐去。",
+      "dimension": "取舍与反思",
+      "tier": 2.0,
+      "reason": "这是完整的一条修正链：学生先解释分解结果（/user_prompts/27/content，距离计算比想的便宜，所以过滤显得更贵），再决定改并设定验收条件“用官方口径实测确认召回不变再提测”（/user_prompts/28/content）；Agent 实现过滤快路径后复测，1000 条查询 0.521s → 0.361s、两组 Recall@10 仍为 1.0（/experiments/44/output）。学生随后指出该优化的适用边界——排序或范围比较不适用字节快路径（/user_prompts/29/content）——并把这条结论迁移到“距离并列按主键升序”这个新场景验证：新增对拍显示四条等距记录仍按主键升序返回，既确认了边界，也避免了在继续压性能时破坏并列语义。",
       "student_evidence": {
-        "pointer": "/user_prompts/18/content",
-        "quote": "先用精确检索，保证 Recall@K=1.0"
+        "pointer": "/user_prompts/29/content",
+        "quote": "过滤列要做按码点排序或范围比较时，字节比较不够用"
       },
       "result_evidence": {
-        "pointer": "/retrospective/what_failed_or_uncertain/3",
-        "quote": "ann 模式返回精确结果，没有实现近似索引"
+        "pointer": "/experiments/46/output",
+        "quote": "tie order by id: OK"
       }
     },
     {
-      "dimension": "原子性与内存的取舍",
+      "dimension": "取舍与反思",
       "tier": 1.0,
-      "reason": "学生选择“先全部物化再落盘”，用构造保证“失败语句不能留下部分数据”。最初的实现照此执行，结果在超过内存限额的数据规模上被实测否掉：变更集与 WAL 缓冲各约 2.7 GB，进程在 60 秒预算内给不出响应，报出的正是判题机那句 JSON response timeout。最终改用流式落盘，把原子性从“物化”转移到“事务 id + 可见性规则”，并补了“杀在写入中途”的一致性回归；这条链完整记录了学生判断的代价、被否掉的原因与修正后的验证结果。",
+      "reason": "学生对“继续压距离计算”提出具体风险边界：改浮点求和顺序会破坏距离并列时按主键升序的规则。对拍显示四条等距记录确实必须按主键升序返回，这条语义正是求和顺序变化会威胁的部分；据此我们没有改距离内核，把风险留在可验证的地方而不是赌一把。",
+      "student_evidence": {
+        "pointer": "/user_prompts/33/content",
+        "quote": "改浮点求和顺序会破坏距离并列时按主键升序的规则"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/46/output",
+        "quote": "plain ids=[1, 3, 7, 9] expected [1, 3, 7, 9]"
+      }
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "学生关于原子性的原始选择（先全部物化再落盘）被实测否掉：变更集与 WAL 缓冲各约 2.7 GB，进程在 60 秒预算内给不出响应，报出的正是判题机那句 JSON response timeout。最终改为“事务 id + 可见性规则”，把原子性从“物化”转移到“可见性”。这条实例记录的是取舍被数据推翻的过程。",
       "student_evidence": {
         "pointer": "/user_prompts/19/content",
         "quote": "先全部物化再落盘"
       },
       "result_evidence": {
-        "pointer": "/experiments/34/conclusion",
-        "quote": "根因是“把整张表同时放进内存”，不是“算不动”"
+        "pointer": "/experiments/33/output",
+        "quote": "数据文件 2718 MiB"
+      }
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 0.5,
+      "reason": "学生在三个目标中明确选择性能优先；但材料里没有留下他自己对“为什么性能优先、代价是什么”的解释，因此只按“有决策、没有结果”计 0.5 档。",
+      "student_evidence": {
+        "pointer": "/user_prompts/4/content",
+        "quote": "性能排名优先"
+      },
+      "result_evidence": null
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "学生把本轮经验抽象成一条可迁移的做法（把不确定性变成可回归的本地测试），并落成了仓库里可重复执行的资产，而不只是写进文档：同一份实现随后在带分号与去分号两种语句边界下都给出正确结果。",
+      "student_evidence": {
+        "pointer": "/user_prompts/9/content",
+        "quote": "把不确定性变成可回归的本地测试"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/13/output",
+        "quote": "去掉分号形态 20/20 cases passed"
+      }
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "第五次失败后学生决定提测，并在提交前把仓库、分支与完整 40 位 SHA 核对成一致（平台按 commit SHA 锁定源码、镜像与材料，不允许拼版本）。平台返回成功 1 失败 0，准入通过，两项开始计分。",
+      "student_evidence": {
+        "pointer": "/user_prompts/20/content",
+        "quote": "请将提测 SHA 更新为 5a0292b0dca3e1eb8bd91f2bcec95cacc2cee046，并提交第 6 次提测"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/38/output",
+        "quote": "successCount=1、failCount=0"
+      }
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "学生拿到规则原文后把当天的提测机会明确投向 Agent 证据，而不是先做性能，因为规则决定替换的是两项排名分之和、Agent 原始分不封顶、只由独立证据实例的数量与档位决定（/experiments/40/output）。方向由学生定，规则由原文核对。",
+      "student_evidence": {
+        "pointer": "/user_prompts/26/content",
+        "quote": "Agent 材料：补齐你自己的判断与解释"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/40/output",
+        "quote": "只有两项排名分之和提高才替换"
       }
     }
   ]

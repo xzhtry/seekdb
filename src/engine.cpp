@@ -1341,6 +1341,35 @@ bool eval_cond(const Cond &c, const EvalContext &ctx) {
       return false;
     case CondKind::NOT: return !eval_cond(*c.children[0], ctx);
     case CondKind::COMPARE: {
+      // Fast path for `column = 'literal'` and `column <> 'literal'`: read the
+      // column value in place and compare the bytes.  The generic path below
+      // copies the column value and the literal into two Value objects for
+      // every row, which is what dominates the filter cost of a scan.
+      // utf8_compare is byte-wise for valid UTF-8 and the VARCHAR column
+      // rejects invalid UTF-8 on write, so byte equality and code point
+      // equality are the same thing here.
+      if (c.op == CmpOp::EQ || c.op == CmpOp::NE) {
+        const Expr *col = nullptr;
+        const Expr *lit = nullptr;
+        if (c.left->kind == ExprKind::COLUMN && c.right->kind == ExprKind::STRING_LITERAL) {
+          col = c.left.get();
+          lit = c.right.get();
+        } else if (c.right->kind == ExprKind::COLUMN && c.left->kind == ExprKind::STRING_LITERAL) {
+          col = c.right.get();
+          lit = c.left.get();
+        }
+        if (col && lit && ctx.schema && ctx.row) {
+          int idx = col->col_index;
+          if (idx < 0) idx = ctx.schema->find_column(col->s);
+          if (idx >= 0 && idx < static_cast<int>(ctx.row->values.size())) {
+            const Value &v = ctx.row->values[idx];
+            if (v.type == ValueType::STRING) {
+              bool eq = utf8_equal(v.s, lit->s);
+              return c.op == CmpOp::EQ ? eq : !eq;
+            }
+          }
+        }
+      }
       Value a = eval_expr(*c.left, ctx);
       Value b = eval_expr(*c.right, ctx);
       auto string_to_vector = [](const std::string &s) {
