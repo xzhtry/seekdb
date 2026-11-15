@@ -198,6 +198,19 @@ optimize<IdxT>(res, knn_graph->view(), cagra_graph.view(), params.guarantee_conn
 
 实测证实：第 17 轮查询比不降反升（1.583x → **1.699x**），召回门槛全过。
 
+### 备选方案（如果你的 cuVS 不接受 `itopk=2048`）
+
+`itopk=2048` 在本轮的 hipVS（`f96a663d`）上是**被接受的**，但 cuVS 的 MULTI_CTA kernel 上限随版本而变，
+源码里没有硬校验。如果你的环境拒绝了 2048，有一个**不依赖大候选表**的等效配置：
+
+| 配置 | recall@100 | 构建比（估算） | 说明 |
+|---|---|---|---|
+| `gd=64 / igd=64 / it=20 / itopk=2048` | ≈0.99 | **3.22x**（实测） | 本轮采用的配置，召回余量最大 |
+| `gd=64 / igd=64 / it=100 / itopk=1024` | 0.9633 | ≈3.03x | **不依赖 itopk>1024**；代价是多 80 次迭代（≈0.45 s），召回余量只有 0.003 |
+
+第二条路线的召回余量很薄（0.9633 vs 门槛 0.9601），只有在 2048 确实被拒时才用。
+**优先按第一条走。**
+
 ---
 
 ## 7. 已证伪的方向（别再花轮次）
@@ -210,7 +223,7 @@ optimize<IdxT>(res, knn_graph->view(), cagra_graph.view(), params.guarantee_conn
 | `IVF_PQ` 建图 | ❌ 快 5.4× 但召回只有 0.877 | 云端 sweep |
 | `ITERATIVE_CAGRA_SEARCH` | ❌ 比 nn-descent 还慢 | 云端 sweep |
 | 「降 NN-descent 内部图度、保留 gd=128」 | ❌ **不存在**。cuVS C API 没有 `graph_build_params`，只有 `intermediate_graph_degree` | `hipvs_cpp_include_cuvs_neighbors_cagra.h` |
-| 降 `nn_iter` 换召回 | ❌ 评测机只值 ~11 ms/次，最多也就 0.3 s，且 it=50 会让构建比掉到 2.93 | 平台实测 |
+| 降 `nn_iter` 换召回 | ❌ 换不回来。评测机只值 ~11 ms/次（igd=128），30 次才 0.34 s；而 gd=64 时 `it=50 / itopk=1024` 的 recall@100 只有 **0.9542**，仍低于门槛 0.960 | 云端 sweep + 平台实测 |
 
 ---
 
