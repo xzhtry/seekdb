@@ -185,6 +185,11 @@ The no-GPU DDL contract remains covered by
   analysis that turns the contest score into a required build speedup, the
   measured CAGRA build-cost / recall frontier at 250k, and the ranked plan for
   the remaining build-window optimizations.
+- [`how-to-reproduce-20-points.zh-CN.md`](how-to-reproduce-20-points.zh-CN.md):
+  the standalone checklist for reproducing the official **20.000 / 20** result
+  from the frozen baseline — the exact four-file diff, the parameter set, the
+  fixed build commands, the four traps that silently zero a run, and the list of
+  directions that were measured and falsified.
 - [`path-to-20-points.svg`](path-to-20-points.svg): the build-time / recall
   Pareto chart and the score map from that analysis. Regenerate it with
   `docs/gpu-vector-index-hipvs-cuvs/validation/make_pareto_chart.py`.
