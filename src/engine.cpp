@@ -1341,6 +1341,40 @@ bool eval_cond(const Cond &c, const EvalContext &ctx) {
       return false;
     case CondKind::NOT: return !eval_cond(*c.children[0], ctx);
     case CondKind::COMPARE: {
+      // Fast path for `column <op> literal`: read the column value in place.
+      // The generic path evaluates both sides into Values, and a Value owns a
+      // std::vector<float> for the vector column, so every compared row would
+      // copy its whole 512 byte vector.  That copy costs more than the
+      // comparison itself and dominated the filtered scans.
+      {
+        const Expr *col = nullptr;
+        const Expr *lit = nullptr;
+        if (c.left->kind == ExprKind::COLUMN && c.right->kind == ExprKind::INT_LITERAL) {
+          col = c.left.get();
+          lit = c.right.get();
+        } else if (c.right->kind == ExprKind::COLUMN && c.left->kind == ExprKind::INT_LITERAL) {
+          col = c.right.get();
+          lit = c.left.get();
+        }
+        if (col && lit && ctx.schema && ctx.row) {
+          int idx = col->col_index;
+          if (idx < 0) idx = ctx.schema->find_column(col->s);
+          if (idx >= 0 && idx < static_cast<int>(ctx.row->values.size())) {
+            const Value &v = ctx.row->values[idx];
+            if (v.type == ValueType::INT) {
+              int cmp = v.i < lit->i ? -1 : (v.i > lit->i ? 1 : 0);
+              switch (c.op) {
+                case CmpOp::EQ: return cmp == 0;
+                case CmpOp::NE: return cmp != 0;
+                case CmpOp::LT: return cmp < 0;
+                case CmpOp::LE: return cmp <= 0;
+                case CmpOp::GT: return cmp > 0;
+                case CmpOp::GE: return cmp >= 0;
+              }
+            }
+          }
+        }
+      }
       // Fast path for `column = 'literal'` and `column <> 'literal'`: read the
       // column value in place and compare the bytes.  The generic path below
       // copies the column value and the literal into two Value objects for
