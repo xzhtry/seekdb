@@ -404,10 +404,15 @@ new_experiments = [
                    "python3 tests/probe_syscall_count.py --rows 10000 --batch 100 --dims 128",
         "output": "write_syscalls 10200 → 300（每行 1.020 → 0.030 次，每提交 102 → 3 次）；"
                   "写入字节数完全一致 11,653,120 B；写阶段耗时 3 轮中位数 0.858 s → 0.896 s"
-                  "（区间 0.751~0.876 s vs 0.789~1.042 s）",
+                  "（区间 0.751~0.876 s vs 0.789~1.042 s）；"
+                  "同机交替 A/B 的查询侧：base 中位 0.433 s vs new 中位 0.448 s，"
+                  "逐轮配对 4 轮慢 2 轮快，组内波动 ±0.03 s；"
+                  "写阶段复测：per_commit_ms=1.2498 / per_row_us=20.2654（38% / 62%）",
         "student_role": "学生对这次改动的解读见 /user_prompts/47/content。",
-        "conclusion": "9900 次系统调用在 0.86 s 的写阶段里换不来可测收益：写路径的成本在解析 128 个浮点字面量"
-                      "和 fsync 的固定往返上，不在系统调用次数上。字节数不变说明这次改写没有改变写放大。"
+        "conclusion": "9900 次系统调用在 0.86 s 的写阶段里换不来可测收益，查询侧也在噪声内："
+                      "写路径的成本在解析 128 个浮点字面量（每行 20.3 µs，占 62%）"
+                      "和 fsync 的固定往返（每提交 1.25 ms，占 38%）上，不在系统调用次数上。"
+                      "字节数不变说明这次改写没有改变写放大。"
                       "这是一次被自己的实验推翻的假设，结论是不再沿着系统调用这条线优化写路径。",
     },
     {
@@ -1064,7 +1069,7 @@ add_tier_basis(instances)
 doc["evidence_index"] = instances
 
 
-def compact(doc, cited_cap=140, plain_cap=80, role_cap=140, cmd_cap=90):
+def compact(doc, cited_cap=112, plain_cap=68, role_cap=130, cmd_cap=80):
     """Drop the prose of experiments that no instance quotes.
 
     Every quoted fragment has to survive, because the reviewer matches the
@@ -1093,10 +1098,13 @@ def compact(doc, cited_cap=140, plain_cap=80, role_cap=140, cmd_cap=90):
             exp.pop("hypothesis", None)
             exp.pop("command", None)
             exp.pop("conclusion", None)
-            for fname, cap in (("output", 75), ("student_role", 50)):
+            for fname, cap in (("output", 0), ("student_role", 46)):
                 text = exp.get(fname)
                 if isinstance(text, str) and len(text) > cap:
-                    exp[fname] = text[:cap].rstrip() + "…"
+                    if cap == 0:
+                        exp.pop(fname, None)
+                    else:
+                        exp[fname] = text[:cap].rstrip() + "…"
             role = exp.get("student_role")
             if isinstance(role, str) and role.startswith("学生未参与"):
                 exp["student_role"] = "学生未参与（仅作过程记录，不作为学生学习证据）。"
@@ -1328,6 +1336,7 @@ guide = {
         "0.5 档没有结果引用；高于 0.5 的档位同时给出两段引用，学生贡献与实际结果不共用同一段原文。",
         "维度只用官方的五个：问题理解与自主拆解、技术理解与迁移、独立验证与质疑、"
         "实验与反馈迭代、取舍与反思。",
+        "没有实例引用的实验只保留标题与参与情况：它们是过程记录，不参与计分。",
     ],
     "instances": len(doc["evidence_index"]),
     "claimed_tier_sum": tier_sum,
