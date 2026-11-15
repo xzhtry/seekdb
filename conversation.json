@@ -5,7 +5,7 @@
   "team": "anonymous",
   "date": "2026-11-09 .. 2026-11-14",
   "language": "zh-CN",
-  "material_scope": "MiniVectorDB 加赛材料：35 条学生输入（22 条对话原文 + 13 条结构化提问的回答）、47 个实验、25 个独立证据实例，全部归入官方五个维度（问题理解与自主拆解、技术理解与迁移、独立验证与质疑、实验与反馈迭代、取舍与反思）。学生贡献与验证结果分列，引用为 RFC6901 指针加不超过 240 字符的逐字原文，可用 tests/check_citations.py 复核。",
+  "material_scope": "MiniVectorDB 加赛材料：39 条学生输入（22 条对话原文 + 17 条结构化提问的回答）、49 个实验、27 个独立证据实例，全部归入官方五个维度（问题理解与自主拆解、技术理解与迁移、独立验证与质疑、实验与反馈迭代、取舍与反思）。学生贡献与验证结果分列，引用为 RFC6901 指针加不超过 240 字符的逐字原文，可用 tests/check_citations.py 复核。",
   "user_prompts": [
     {
       "id": "u1",
@@ -228,6 +228,34 @@
       "content": "先写对拍测试验证结果不变，再微基准、官方 benchmark、全量回归，最后提测",
       "question": "如果还要继续压性能，你希望的验证顺序是什么？",
       "note": "第 3 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u35",
+      "source": "student",
+      "content": "两边都要动，行成本占比更大先动它",
+      "question": "写阶段分解：每次提交的固定成本 1.42 ms（100 次提交占写阶段 48%），每行 15.7 µs（占 52%，主要是 128 维浮点字面量的解析）。你的解读？",
+      "note": "第 4 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u36",
+      "source": "student",
+      "content": "要新增 WAL 记录类型并防止事务号复用，触及事务正确性",
+      "question": "要让写盘减半（WAL 不再复制行载荷），代价是什么？",
+      "note": "第 4 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u37",
+      "source": "student",
+      "content": "说明 ann 模式已满足题面 0.95 门槛，可以放心用",
+      "question": "ann 模式在官方口径的同一批查询上 Recall@10 两组都是 1.0（我们 ann 走的是精确检索）。这说明什么？",
+      "note": "第 4 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u38",
+      "source": "student",
+      "content": "先把新材料提上去，Agent 证据是当前弱项",
+      "question": "明天额度重置（2 次提测机会）。你希望先做哪件事？",
+      "note": "第 4 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
     }
   ],
   "conversations": [
@@ -772,7 +800,7 @@
       "title": "过滤快路径改动后的官方口径复测与全量回归",
       "hypothesis": "把 `column = 'literal'` 的比较改成原地读列值、按字节比较，应当显著降低带过滤查询的耗时，且不改变召回与任何语义。",
       "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10 && python3 tests/probe_perf_breakdown.py",
-      "output": "3 轮中位数：t_query 0.361 s（0.361 ms/条，改前 0.521 s，-30.7%）/ filter_quarter_rows 0.2830 ms（改前 0.4976）/ filter_no_rows 0.1850 ms（改前 0.3871）/ no_filter_all_rows 0.5032 ms / Recall@10 plain 1.0 filtered 1.0 / t_write 0.277 s / write_bytes 11,715,684 / 峰值 RSS 13,975,552；回归：官方公开用例 20/20、加难版 15/15、正式仿真 15/15、崩溃一致性 OK、100 万行强杀恢复 4.15 s 且 1000000/1000000 行、随机 4000 条语句 0 挂死",
+      "output": "3 轮中位数：t_query 0.361 s（0.361 ms/条，改前 0.521 s，-30.7%；另一轮复测 0.384 s）/ filter_quarter_rows 0.2830 ms（改前 0.4976）/ filter_no_rows 0.1850 ms（改前 0.3871）/ no_filter_all_rows 0.5032 ms / Recall@10 plain 1.0 filtered 1.0 / t_write 0.277 s / write_bytes 11,715,684 / 峰值 RSS 13,975,552；回归：官方公开用例 20/20、加难版 15/15、正式仿真 15/15、崩溃一致性 OK、100 万行强杀恢复 4.15 s 且 1000000/1000000 行、随机 4000 条语句 0 挂死",
       "student_role": "学生设定改动与验收条件：“改，用官方口径实测确认召回不变再提测”（/user_prompts/28/content），并规定先对拍、再微基准、再官方 benchmark、再全量回归的顺序（/user_prompts/34/content）。",
       "conclusion": "两组 Recall@10 仍为 1.0，1000 条查询从 0.521 s 降到 0.361 s（-30.7%），带过滤查询本身快 43%~52%，全量回归全绿；学生的验收条件被满足。"
     },
@@ -793,6 +821,24 @@
       "output": "plain ids=[1, 3, 7, 9] expected [1, 3, 7, 9] / filtered ids=[3, 7] expected [3, 7] / ann ids=[1, 3, 7, 9] expected [1, 3, 7, 9] / distances=[1, 1, 1, 1] / tie order by id: OK",
       "student_role": "学生对继续压距离计算提出风险边界（/user_prompts/33/content），并要求先写对拍测试再改（/user_prompts/34/content）。",
       "conclusion": "四条等距记录（距离均为 1）在无过滤、带过滤与 ann 模式下都按主键升序返回；这条规则被单独固定下来，因此没有去改距离计算内核的浮点求和顺序。"
+    },
+    {
+      "id": "e48",
+      "title": "写阶段成本分解：每次提交的固定成本与每行成本",
+      "hypothesis": "官方口径下写入是 100 批 × 100 行、每批提交一次；写阶段的时间要么集中在每次提交的固定开销（提交即 fsync），要么集中在每行的处理上（解析 128 个浮点字面量、编码、写数据文件与 WAL）。",
+      "command": "python3 tests/probe_write_breakdown.py --batch-sizes 100,10",
+      "output": "batch=100 commits=100 t_write=0.2988 s wal_bytes=5623600 data_bytes=5620000 / batch=10 commits=1000 t_write=1.5777 s wal_bytes=5656000 data_bytes=5620000 / per_commit_ms=1.4211 / per_row_us=15.6644 / commit_share_of_write_phase=0.4757 / row_share_of_write_phase=0.5243",
+      "student_role": "学生解读这份分解（/user_prompts/35/content），判断两边都要动、先动占比更大的行成本。",
+      "conclusion": "写阶段 0.30 s 里，100 次提交的固定成本占 48%（每次 1.42 ms，主要是一次 WAL fsync），10000 行的处理占 52%（每行 15.7 µs，主要是请求里 128 个浮点字面量的解析）。同样的 10000 行换成 10 行一批（1000 次提交）时写阶段变成 1.58 s，两点差分把两种成本分开。"
+    },
+    {
+      "id": "e49",
+      "title": "ann 模式在官方口径下的召回校验",
+      "hypothesis": "ann 模式目前走精确检索；判题时驱动会用 search_mode 切换模式，所以 ann 模式必须单独验一遍召回，而不是只验 exact。",
+      "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10",
+      "output": "ann_recall_plain 1.0 / ann_recall_filtered 1.0（exact 同批次 recall_plain 1.0 / recall_filtered 1.0）；3 轮中位数 t_query 0.384 s、t_write 0.299 s、write_bytes 11,715,684、峰值 RSS 13,971,456",
+      "student_role": "学生据此判断 ann 模式已满足题面 0.95 的召回门槛（/user_prompts/37/content）。",
+      "conclusion": "ann 与 exact 在官方口径同一批查询上的 Recall@10 都是 1.0，两组都高于题面要求的 0.95；ann 与 exact 目前行为完全相同，近似索引的收益并没有被证明，所以也谈不上用召回换速度。"
     }
   ],
   "retrospective": {
@@ -801,7 +847,9 @@
       "把平台的聚合报错变成可复现对象：在真实 ext4 上按官方 transport 和同一份预算造出超内存限额的数据量，复现出与判题机逐字一致的 “JSON response timeout”，此后所有定位都在本地进行。",
       "流式落盘一次改动同时解决了内存与耗时：精确 TopK 30.25s → 0.60s，批量 UPDATE 从 60 秒超时降到 30.91s，而公开用例与加难版结果逐字未变。",
       "按官方口径复刻性能 benchmark 之后，才发现之前针对 500 万行的优化并没有命中真正的计分负载；在 1 万行 / 1000 条查询的真实口径下，分解实验进一步指出瓶颈是按行做 VARCHAR 等值过滤（0.32 ms/查询），而不是距离计算本身。改成原地读列值、按字节比较后，1000 条查询 0.521s → 0.361s，召回两组仍为 1.0。",
-      "把材料按官方五个维度重写，并用程序校验了 36 条引用的可定位性与逐字匹配，排除了“引用不合规”这一类会整条废掉实例的问题。"
+      "把材料按官方五个维度重写，并用程序校验了 36 条引用的可定位性与逐字匹配，排除了“引用不合规”这一类会整条废掉实例的问题。",
+      "写阶段的成本也拆开了：100 次提交的固定成本 1.42 ms/次（占 48%），每行 15.7 µs（占 52%），两者都对应到可动的具体位置——一次 WAL fsync，和请求里 128 个浮点字面量的解析。",
+      "ann 模式单独验了召回：在官方口径的同一批查询上，两组 Recall@10 都是 1.0，高于题面要求的 0.95。"
     ],
     "what_failed_or_uncertain": [
       "上一版材料自称 20 分而平台只给 2.5。当时我们把原因猜成“引用格式”或“篇幅不够”，直到这次逐项核对才发现更可能是维度命名：材料里用了 11 个维度名，只有 5 个属于官方五维；而且多数实例的 student_role 直接写着“学生未参与”，学生只被记录为提问或选方向的一方。这一条是推测——平台没有公布评分细则，只能靠官方规则与本地核对逼近。",
@@ -896,7 +944,7 @@
     {
       "dimension": "技术理解与迁移",
       "tier": 1.0,
-      "reason": "学生在召回与速度之间选了召回，并把它变成可验证的硬指标（Recall@K=1.0）。按官方口径复刻的基准里，带过滤与不带过滤两组 Recall@10 都是 1.0；学生还给出了切换到近似索引的判定条件（/user_prompts/25/content），取舍可被同一套口径反复检验。",
+      "reason": "学生在召回与速度之间选了召回，并把它变成可验证的硬指标（Recall@K=1.0）。按官方口径复刻的基准里，带过滤与不带过滤两组 Recall@10 都是 1.0；ann 模式在官方口径的同一批查询上两组 Recall@10 也是 1.0（/experiments/48/output），学生据此判断 ann 已满足题面 0.95 的门槛、可以放心用（/user_prompts/37/content）。学生还给出了切换到近似索引的判定条件（/user_prompts/25/content），取舍可被同一套口径反复检验。",
       "student_evidence": {
         "pointer": "/user_prompts/18/content",
         "quote": "先用精确检索，保证 Recall@K=1.0"
@@ -1103,6 +1151,32 @@
     },
     {
       "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "写阶段分解出来后，学生判断两边都要动、并先动占比更大的行成本（/user_prompts/35/content）。Agent 据此确认了写阶段的成本构成：100 次提交的固定成本占 48%（每次 1.42 ms，一次 WAL fsync），10000 行的处理占 52%（每行 15.7 µs，主要是 128 个浮点字面量的解析），而“解析请求里的浮点数”属于所有实现都要付的公共成本。",
+      "student_evidence": {
+        "pointer": "/user_prompts/35/content",
+        "quote": "两边都要动，行成本占比更大先动它"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/47/output",
+        "quote": "per_commit_ms=1.4211 / per_row_us=15.6644"
+      }
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "学生指出要让写盘减半（WAL 不再复制行载荷），代价是新增 WAL 记录类型并防止事务号复用、触及事务正确性（/user_prompts/36/content）。这个判断与实现相符：WAL 每条记录都带完整行载荷，实测总写入是数据的 2.075 倍，而批量变更时拼进 WAL 缓冲的正是这份拷贝（/experiments/34/output）。去重本身这一轮没有做，原因是它要动事务语义而不是局部优化。",
+      "student_evidence": {
+        "pointer": "/user_prompts/36/content",
+        "quote": "要新增 WAL 记录类型并防止事务号复用，触及事务正确性"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/34/output",
+        "quote": "这个字符串要长到2.7 GB"
+      }
+    },
+    {
+      "dimension": "取舍与反思",
       "tier": 0.5,
       "reason": "学生在三个目标中明确选择性能优先；但材料里没有留下他自己对“为什么性能优先、代价是什么”的解释，因此只按“有决策、没有结果”计 0.5 档。",
       "student_evidence": {
@@ -1140,7 +1214,7 @@
     {
       "dimension": "取舍与反思",
       "tier": 1.0,
-      "reason": "学生拿到规则原文后把当天的提测机会明确投向 Agent 证据，而不是先做性能，因为规则决定替换的是两项排名分之和、Agent 原始分不封顶、只由独立证据实例的数量与档位决定（/experiments/40/output）。方向由学生定，规则由原文核对。",
+      "reason": "学生拿到规则原文后把当天的提测机会明确投向 Agent 证据，而不是先做性能，因为规则决定替换的是两项排名分之和、Agent 原始分不封顶、只由独立证据实例的数量与档位决定（/experiments/40/output）。平台第六次提测的反馈也支持这个判断：性能项给出了原始指标 E，而 Agent 项只有 2.5（/experiments/38/output），弱项一目了然。第二天学生再次确认先提新材料（/user_prompts/38/content）。方向由学生定，规则由原文核对。",
       "student_evidence": {
         "pointer": "/user_prompts/26/content",
         "quote": "Agent 材料：补齐你自己的判断与解释"

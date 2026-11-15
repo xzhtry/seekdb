@@ -191,6 +191,29 @@ def run_round(args, rng):
     recall_plain = hits["plain"] / seen["plain"] if seen["plain"] else 0.0
     recall_filtered = hits["filtered"] / seen["filtered"] if seen["filtered"] else 0.0
 
+    # ---- the same queries in ann mode: the judge switches the mode with the
+    # search_mode field, and our ann mode returns exact results ----
+    ann_hits = {"plain": 0, "filtered": 0}
+    ann_seen = {"plain": 0, "filtered": 0}
+    for idx in sample_idx:
+        q, filtered, cat, qtext = queries[idx]
+        if filtered:
+            sql = ("SELECT id, L2_DISTANCE(embedding, '[%s]') AS distance FROM docs "
+                   "WHERE category = '%s' ORDER BY distance LIMIT %d" % (qtext, cat, args.k))
+        else:
+            sql = ("SELECT id, L2_DISTANCE(embedding, '[%s]') AS distance FROM docs "
+                   "ORDER BY distance LIMIT %d" % (qtext, args.k))
+        resp = session.request(sql, mode="ann")
+        if resp.get("ok") is not True:
+            raise SystemExit("ann query failed: " + json.dumps(resp, ensure_ascii=False)[:300])
+        got = [int(row[0]) for row in resp.get("rows", [])]
+        expect = truth_topk(matrix, cats, q, args.k, cat if filtered else None)
+        key = "filtered" if filtered else "plain"
+        ann_hits[key] += len(set(expect) & set(got))
+        ann_seen[key] += len(expect)
+    ann_recall_plain = ann_hits["plain"] / ann_seen["plain"] if ann_seen["plain"] else 0.0
+    ann_recall_filtered = ann_hits["filtered"] / ann_seen["filtered"] if ann_seen["filtered"] else 0.0
+
     stop.set()
     watcher.join()
     session.shutdown()
@@ -208,6 +231,8 @@ def run_round(args, rng):
         "data_dir_bytes": data_bytes,
         "recall_plain": round(recall_plain, 4),
         "recall_filtered": round(recall_filtered, 4),
+        "ann_recall_plain": round(ann_recall_plain, 4),
+        "ann_recall_filtered": round(ann_recall_filtered, 4),
     }
 
 
@@ -244,6 +269,8 @@ def main():
         "t_ready": round(statistics.median(x["t_ready"] for x in rounds), 3),
         "recall_plain": rounds[0]["recall_plain"],
         "recall_filtered": rounds[0]["recall_filtered"],
+        "ann_recall_plain": rounds[0]["ann_recall_plain"],
+        "ann_recall_filtered": rounds[0]["ann_recall_filtered"],
     }
     print("MEDIAN " + json.dumps(med, ensure_ascii=False), flush=True)
     if args.json_out:
