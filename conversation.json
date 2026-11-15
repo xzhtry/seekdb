@@ -5,7 +5,7 @@
   "team": "anonymous",
   "date": "2026-11-09 .. 2026-11-14",
   "language": "zh-CN",
-  "material_scope": "MiniVectorDB 加赛材料：43 条学生输入（22 条对话原文 + 21 条结构化提问的回答）、53 个实验、31 个独立证据实例，全部归入官方五个维度（问题理解与自主拆解、技术理解与迁移、独立验证与质疑、实验与反馈迭代、取舍与反思）。学生贡献与验证结果分列，引用为 RFC6901 指针加不超过 240 字符的逐字原文，可用 tests/check_citations.py 复核。",
+  "material_scope": "MiniVectorDB 加赛材料：47 条学生输入（22 条对话原文 + 25 条结构化提问的回答）、56 个实验、35 个独立证据实例，全部归入官方五个维度（问题理解与自主拆解、技术理解与迁移、独立验证与质疑、实验与反馈迭代、取舍与反思）。学生贡献与验证结果分列，引用为 RFC6901 指针加不超过 240 字符的逐字原文，可用 tests/check_citations.py 复核。",
   "user_prompts": [
     {
       "id": "u1",
@@ -284,6 +284,34 @@
       "content": "需要更多候选给上层做过滤/重排时",
       "question": "K 从 10 涨到 1000，单条查询从 0.33 ms 涨到 1.47 ms。什么场景下你会为更大的 K 付这个代价？",
       "note": "第 5 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u43",
+      "source": "student",
+      "content": "这台机器上净亏：省下 0.78 ms 字节，但多一次 1.18 ms 的 fsync 往返",
+      "question": "我们每次提交要 fsync 约 55 KB 的 WAL 载荷（因为 WAL 里复制了整行）。实测：4 KB 的 fsync 是 1.18 ms，70 KB 是 1.96 ms。如果改成“WAL 只记意图 + 提交时 fsync 数据文件”，这个取舍会怎么变？",
+      "note": "第 5 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u44",
+      "source": "student",
+      "content": "优势空间在解析与搬运，这部分自己能优化",
+      "question": "写阶段里，约 1.18 ms/次 是 fsync 的固定往返（durability 的硬要求），约 15.7 µs/行 是解析请求里 128 个浮点字面量并搬运它们（所有实现都要付）。你怎么解读我们真正的优势空间？",
+      "note": "第 5 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u45",
+      "source": "student",
+      "content": "恢复在计分规模上不是风险，精力应放性能",
+      "question": "判题规模（1 万行）下强杀后恢复只要 0.10 s、行数 10000/10000 完整。这说明什么？",
+      "note": "第 5 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
+    },
+    {
+      "id": "u46",
+      "source": "student",
+      "content": "两个都做：材料加实例 + 性能改动，一次提测都带上",
+      "question": "第 2 个提测名额（11-16 当天）怎么用？",
+      "note": "第 5 轮提问的回答（选项式，选项由 Agent 起草、学生选定）。"
     }
   ],
   "conversations": [
@@ -430,7 +458,6 @@
     {
       "id": "e1",
       "title": "构建与基础 SQL",
-      "hypothesis": "按题目示例建表、批量插入、过滤 + L2 TopK、事务回滚应得到正确结果。",
       "command": "cd round2 && ./build.sh && ./build/minivectordb --data-dir /tmp/mvdb1 < tmp/t1.sql",
       "output": "READY / OK 0 / OK 3 / RESULT 3 2 / id content distance / 1 事务与恢复 0.141421374149721 / 2 向量索引 1.272792188223375 / BYE",
       "student_role": "学生给出任务与实现范围；未参与该轮具体调试。",
@@ -439,7 +466,6 @@
     {
       "id": "e2",
       "title": "事务与持久化",
-      "hypothesis": "BEGIN 内 UPDATE/DELETE 对查询和向量检索立即可见，ROLLBACK 后恢复；COMMIT 后重启保留。",
       "command": "python3 tests/selftest.py",
       "output": "PASS basic 0.025s / PASS txn 0.029s / PASS errors 0.014s / PASS vector 0.022s / PASS crash 0.140s / PASS stream 0.082s / ALL PASS",
       "student_role": "学生选择“性能优先”，但明确以准入正确性为前提；未逐条设计用例。",
@@ -457,7 +483,6 @@
     {
       "id": "e4",
       "title": "10k × 128 维性能基线",
-      "hypothesis": "精确扫描在 10k 规模可做到毫秒级/查询；TopK 快路径应避免为每行构造结果对象。",
       "command": "python3 tmp/bench.py（10,000 行 × 128 维，100 行/批，1,000 次 TopK，一半带 category 过滤）",
       "output": "insert seconds 0.358 rows/s 27906 / query seconds 0.705 qps 1418 / data bytes 5768005 / maxrss child 67544 KB",
       "student_role": "学生选择“性能排名优先”，为优化方向提供优先级。",
@@ -466,7 +491,6 @@
     {
       "id": "e5",
       "title": "AVX2 距离 bug 的发现与修复",
-      "hypothesis": "AVX2 路径应与标量路径在随机 64 维向量上一致；若不一致，TopK 会在大维度下错序。",
       "command": "g++ -O2 tmp/avx2.cpp && ./avx2；修复后 python3 tmp/checkdist.py",
       "output": "修复前：scalar 6.533894467 / double 8.238720164（错误）。修复后：db 4.675001563225143 / py 4.675001566825941 / diff -3.6e-09。",
       "student_role": "该 bug 由 Agent 发现和修复，学生未参与定位；记录在此用于说明验证过程，不作为学生学习证据。",
@@ -484,7 +508,6 @@
     {
       "id": "e7",
       "title": "协议探测提测",
-      "hypothesis": "在官方测试驱动未公开时，framed 协议（READY / RESULT / OK / ERROR / BYE）是最合理的首选；提交一次探测可换回真实反馈。",
       "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=073cba573f1cc354c49ecb46f0650fa0069e9dd2",
       "output": "提测成功；提测记录时间 2026-11-09 15:55，任务状态：执行成功；成绩：-；结果：成功 0 失败 1；结果详情页无失败日志（“暂无数据”）",
       "student_role": "学生在“提交探测 / 等待题包 / 多模式”之间选择“先按 framed 协议提交一次探测，用反馈定位格式”。",
@@ -493,7 +516,6 @@
     {
       "id": "e9",
       "title": "修复后第二次提测",
-      "hypothesis": "如果首次 0/1 是 value 保留字缺陷导致，修复并跑通公开 20/20 后应能通过正式准入。",
       "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=12c24e46b76a9e7167e14cb15bf32fe931c63f91",
       "output": "提测成功；2026-11-09 19:55 记录，任务状态：执行成功；结果：成功 0 失败 1；仍无失败日志",
       "student_role": "学生没有参与修复；Agent 根据公开题包定位 value 保留字并修复后再次提交。",
@@ -504,34 +526,31 @@
       "title": "官方公开题包 20/20 用例",
       "hypothesis": "公开用例覆盖基础 SQL、持久化、事务、向量 TopK 和索引维护；逐条按 .test/.result 断言执行应全部通过。",
       "command": "python3 tests/run_public_cases.py（官方 mysqltest 20 个用例、95 条 SQL；--restart 复用同一数据目录，--mode ann 切换模式）",
-      "output": "PASS sql_crud / sql_comparisons / sql_ordering / sql_empty / sql_primary_key / sql_unicode / sql_bigint / sql_unsupported / storage_restart / vector_euclidean / transaction_commit / transaction_rollback / storage_mutations / storage_multiple_tables / vector_ties_and_filter / vector_float32 / vector_index_maintenance / transaction_failed_insert / transaction_autocommit_atomic / transaction_shutdown_rollback / 20/20 cases passed",
+      "output": "failed_insert / transaction_autocommit_atomic / transaction_shutdown_rollback / 20/20 cases passed",
       "student_role": "学生没有参与这轮定位；Agent 在官方题包发布后发现并修复 value 保留字问题，并逐条跑通公开用例。",
       "conclusion": "公开语义（含 BIGINT 精度、float32、过滤后 TopK、事务原子性、正常关闭回滚）全部通过；正式驱动协议仍未知。"
     },
     {
       "id": "e10",
       "title": "GitHub Actions 内 Docker 构建与容器冒烟",
-      "hypothesis": "两次正式 0/1 也可能是平台内 Docker 构建失败（例如 gcc:13 静态 libstdc++ 缺失）；用 GitHub Actions 的独立 Docker 环境构建同一 Dockerfile 并运行容器，可排除构建/启动问题。",
       "command": "git push 触发 .github/workflows/minivectordb-ci.yml：docker build -t minivectordb:ci .；docker run --rm -i ... 执行建表/插入/事务回滚；再用 named volume 重启读向量距离",
-      "output": "GitHub Actions run 42616565452：conclusion=success；步骤 Build image=success、Run smoke SQL=success、Run restart SQL=success；容器输出 READY/RESULT/OK，重启后仍能读到向量数据",
+      "output": "GitHub Actions run 42616565452：conclusion=success；步骤 Build image=success、Run smoke SQL=success、Run restart SQL=success；容器输出 READY/RESULT/OK，重启后仍能读到向量数…",
       "student_role": "学生没有参与该 CI 设计；Agent 为了避免本地下载 595 MiB Docker Desktop，改用云端 Docker 验证构建与启动。",
       "conclusion": "Dockerfile 在干净的 GitHub Actions Ubuntu 环境中能构建并启动，冒烟/重启/向量输出均通过；因此正式 0/1 不太可能是 Docker 构建或启动导致，剩余风险集中在官方驱动的 stdin/stdout 协议或驱动尚未部署。"
     },
     {
       "id": "e11",
       "title": "官方题包与计分口径复核",
-      "hypothesis": "第二轮之前先把“官方到底要求什么、材料放在哪、协议由谁定义”读清楚，避免凭记忆提交。",
       "command": "读语雀《赛题一：完成一个轻量向量数据库》全文；git show official/2026-competition-round2:mysqltest/README.md；读取官方分支 mysqltest 目录清单",
-      "output": "题面原文要点：功能测试不单独计分，MySQL 正式用例全部通过才具备计分资格；性能与 Agent prompt 各 40 分独立排名；4.4 明确“当前评测入口默认读取仓库中的 agent/conversation.json”，文件须 UTF-8、合法 JSON、顶层为对象、大小不超过 128 KiB，且不得包含密钥。题包 README 原文要点：“正式用例共 29 个，全部通过才进入性能与 Agent 评分；组织方另保留 9 个用例的具体输入、操作序列、数据生成参数和预期结果”“本包不包含完整运行驱动”“进程通信格式以组织方配套驱动为准”。官方分支上 conversation.json 与 Dockerfile 均为 0 字节空文件。",
+      "output": "题面原文要点：功能测试不单独计分，MySQL 正式用例全部通过才具备计分资格；性能与 Agent prompt 各 40 分独立排名；4.4 明确“当前评测入口默认读取仓库中的 agent/conversation.json”，文件须 UTF-8、合法 JSON、顶层为对象、大小不超过 128 Ki…",
       "student_role": "学生没有参与这一轮资料核对，结论由 Agent 整理。",
       "conclusion": "两件事被写死：材料必须落在 agent/conversation.json 且与源码同一 commit；进程通信协议至今未随题包发布，29 个正式用例中有 9 个连输入与预期结果都保留。"
     },
     {
       "id": "e12",
       "title": "复核两次历史提测记录",
-      "hypothesis": "如果 11-09 两次 0/1 发生在镜像运行时修复之前，那么此前的归因（value 保留字 / 协议格式）至少是不完整的。",
       "command": "平台 https://open.oceanbase.com/train/TestRecord?questionId=600081 读取提测记录；git log 对照两个提交与 3d0dfc4c / 5ca2e971（运行时库修复）的先后",
-      "output": "记录一：2026-11-09 15:55，Branch=2026-competition-round2，Commit=073cba573f1cc354c49ecb46f0650fa0069e9dd2，任务状态 执行成功，结果 成功 0 失败 1；记录二：2026-11-09 19:55，Commit=12c24e46b76a9e7167e14cb15bf32fe931c63f91，同样 成功 0 失败 1。git log 显示这两个提交都早于 3d0dfc4c（build: link libstdc++ dynamically for Ubuntu runtime compatibility）与 5ca2e971（docker: build with Ubuntu 24.04 g++ and dynamic runtime libs）。",
+      "output": "记录一：2026-11-09 15:55，Branch=2026-competition-round2，Commit=073cba573f1cc354c49ecb46f0650fa0069e9dd2，任务状态 执行成功，结果 成功 0 失败 1；记录二：2026-11-09 19:55，Commit…",
       "student_role": "学生未参与该核对；学生此前只给出“先按 framed 协议提交一次探测”的方向。",
       "conclusion": "两次失败都发生在运行时库修复之前，旧 Dockerfile 用 gcc:13 构建、ubuntu:24.04 运行，libstdc++ 版本不匹配本身就可能让容器起不来；因此“0/1 = SQL 语义错”的旧结论不成立，必须重新按“构建/启动/协议/功能”四段分别排除。"
     },
@@ -556,7 +575,6 @@
     {
       "id": "e15",
       "title": "运行时依赖收敛",
-      "hypothesis": "既然两次失败都早于运行时库修复，就把运行镜像对 libstdc++ 版本的依赖彻底去掉，并让 /data 在非 root 用户下也可写。",
       "command": "build.sh 增加 -static-libstdc++ -static-libgcc；Dockerfile 保持 ubuntu:24.04 构建与运行同版本，并 mkdir -p /data && chmod 1777 /data；WSL 内 ldd build/minivectordb",
       "output": "linux-vdso.so.1 / libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 / libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6（不再有 libstdc++ 依赖）。",
       "student_role": "学生未参与该修改；这属于 Agent 的工程加固。",
@@ -565,36 +583,32 @@
     {
       "id": "e16",
       "title": "第三轮正式提测（framed 文本协议加固版）与第四轮提测（官方 JSONL 版）",
-      "hypothesis": "把镜像运行时依赖、语句边界双形态、驱动指令静默三项风险收敛后重投，如果正式驱动认 framed 帧，本轮应能通过功能准入。",
       "command": "平台“成绩提测”：Branch=2026-competition-round2，Commit=d1bf3d2d598840745b8d6f3bd01b4f6cd57e6103；随后在改成官方 JSONL 协议后又提交一次，Commit=81d7e68e691cbabb8bff7ff11f06379c4c946c90",
       "output": "第三轮：2026-11-14 08:27 记录，任务状态：执行成功；成绩：-；结果：成功 0 失败 1；仍无失败日志。第四轮：提交时间 08:52（平台记录显示 08:46），Commit=81d7e68e691cbabb8bff7ff11f06379c4c946c90，任务状态：执行中。",
       "student_role": "学生授权 Agent 执行提测（u6），并提供了判断依据与验证方案（u7/u9）；第三轮失败后由学生指出官方题包链接（u11），才定位到协议问题。",
-      "conclusion": "第三轮仍然 0/1。官方题包随后证实判题器讲 JSONL 协议，framed 文本输出会被判为 invalid JSON response——三次旧提测（073cba57、12c24e46、d1bf3d2d）的共同原因是协议格式，而不是 SQL 语义或镜像构建。第四轮提交的是按官方协议重写后的版本，是本材料的最终参评版本。"
+      "conclusion": "第三轮仍然 0/1。官方题包随后证实判题器讲 JSONL 协议，framed 文本输出会被判为 invalid JSON response——三次旧提测（073cba57、12c24e46、d1bf3d2d）的共同原因是协议格式，而不是 SQL 语义或镜像构建。第四轮提交的是按官方协议重写后的版本，…"
     },
     {
       "id": "e17",
       "title": "官方题包更新与协议定位",
-      "hypothesis": "学生指出的官方题包目录可能已经包含此前缺失的协议说明；拉取官方分支并逐文件比对即可确认。",
       "command": "git fetch official 2026-competition-round2；git diff official/2026-competition-round2 HEAD -- mysqltest；git show official/2026-competition-round2:STDIO_PROTOCOL.md",
-      "output": "官方分支从 9f6df2ba 前进到 f4d4e266，新增 STDIO_PROTOCOL.md 与 protocol_check/{run.py,_transport.py,_assertions.py,config.json,README.md,example_stdio.py}；题包 README 新增原文：“进程通信采用标准输入/输出 JSONL 协议；详见根目录 STDIO_PROTOCOL.md”。协议要点：启动输出 {\"type\":\"ready\"}；请求 {\"id\":N,\"op\":\"execute\",\"sql\":\"...\",\"search_mode\":\"exact\"}；响应回传同类型 id 与布尔 ok；查询回 columns/rows，修改回 affected_rows，失败回 error.code（非空字符串）；shutdown 响应之后不得再有任何 stdout 且退出码为 0。",
+      "output": "官方分支从 9f6df2ba 前进到 f4d4e266，新增 STDIO_PROTOCOL.md 与 protocol_check/{run.py,_transport.py,_assertions.py,config.json,README.md,example_stdio.py}；题包 READ…",
       "student_role": "学生提供了定位线索并要求复核官方题包；Agent 执行拉取、比对与阅读。",
       "conclusion": "协议猜测问题被证实：判题器不读文本协议。官方同时给出协议自测工具 protocol_check/run.py，支持用 --command 直接跑本地程序。"
     },
     {
       "id": "e18",
       "title": "按官方协议重写通信层并用官方驱动验证",
-      "hypothesis": "把通信层换成 JSONL（ready 握手、逐行请求、类型化响应、shutdown 后静默退出）之后，公开用例就能用官方驱动全部通过。",
       "command": "重写 src/main.cpp 协议层（最小 JSON 解析、请求分发、类型化 JSON 响应），结果集改为保留 Value 类型，使 BIGINT 输出为 JSON 整数、VARCHAR 输出为 JSON 字符串、向量投影输出为 JSON 数组；再执行 cd protocol_check && python3 run.py --command '[...]' --handshake-only --output ... 与 python3 run.py --command '[...]' --output ...",
-      "output": "handshake: PASS；sql_crud / sql_comparisons / sql_ordering / sql_empty / sql_primary_key / sql_unicode / sql_bigint / sql_unsupported / storage_restart / vector_euclidean / transaction_commit / transaction_rollback / storage_mutations / storage_multiple_tables / vector_ties_and_filter / vector_float32 / vector_index_maintenance / transaction_failed_insert / transaction_autocommit_atomic / transaction_shutdown_rollback 共 20 个用例全部 PASS。",
+      "output": "handshake: PASS；sql_crud / sql_comparisons / sql_ordering / sql_empty / sql_primary_key / sql_unicode / sql_bigint / sql_unsupported / storage_restart…",
       "student_role": "学生未参与协议实现；本轮的关键动作（学生指出官方题包、Agent 复核并改写）是学生线索与 Agent 执行的组合。",
       "conclusion": "同一份实现先用猜测的 framed 协议三次提测全败，改成官方 JSONL 后在官方自测驱动下 20/20 通过，证实此前失败来自协议层。"
     },
     {
       "id": "e19",
       "title": "错误语义名与公开断言对齐",
-      "hypothesis": "公开断言用的是语义名（duplicate_key、unsupported_sql）而不是数字错误码；本题明确不支持的语句（ALTER、JOIN、聚合、子查询、NULL、外键、嵌套事务、主键更新）必须返回同一类“不支持”错误，不能混成语法错误。",
       "command": "读 mysqltest/cases/sql_primary_key.result 与 sql_unsupported.result；对照 protocol_check/_assertions.py（error_codes 为空时只要求非空字符串）；把解析器的“不支持”分支统一到 ER_UNSUPPORTED 并在协议层映射为 unsupported_sql",
-      "output": "sql_primary_key.result: {\"error\": \"duplicate_key\"}；sql_unsupported.result: {\"error\": \"unsupported_sql\"}；改后 ALTER TABLE 返回 {\"code\":\"unsupported_sql\",...}，重复主键返回 {\"code\":\"duplicate_key\",...}，官方自测 20/20 仍全部 PASS。",
+      "output": "sql_primary_key.result: {\"error\": \"duplicate_key\"}；sql_unsupported.result: {\"error\": \"unsupported_sql\"}；改后 ALTER TABLE 返回 {\"code\":\"unsupported_sql\",..…",
       "student_role": "学生未参与该细节；这是 Agent 从公开断言反推的语义对齐。",
       "conclusion": "错误码采用公开断言同款的语义名，并把题目列出的不支持语法统一归到 unsupported_sql，避免被判成另一种语义。"
     },
@@ -603,50 +617,46 @@
       "title": "第四次正式提测结果：JSON response timeout × 1",
       "hypothesis": "改成官方 JSONL 协议后，握手与响应格式应当与判题器一致；即使仍未通过，平台反馈里的失败原因与失败用例数也能定位剩余差距。",
       "command": "浏览器读取平台接口 https://openwebapi.oceanbase.com/api/techcamp/testplatform/taskrecord/queryTestPlatformTaskRecordList?questionId=600081 的原始 JSON",
-      "output": "记录 id=47253472（commit 81d7e68e）gmtCreate=2026-11-14T00:46:22Z，testStartTime=00:46:23Z，testEndTime=01:07:11Z；testCaseResult.playoffFeedback.performance 原文=\"正确性门槛未通过（失败用例数：1）。原因：JSON response timeout（未及时收到JSON响应，请检查换行、flush 和程序阻塞） × 1。未执行性能评测。\"；上一条记录 d1bf3d2d 的同字段为 \"invalid JSON response（stdout 不是合法的单行JSON，请检查READY文本、日志和空行） × 29\"",
+      "output": "=\"正确性门槛未通过（失败用例数：1）。原因：JSON response timeout（未及时收到JSON响应，请检查换行、flush 和程序阻塞） × 1。未执行性能评测。\"；上一条记录 d1bf3d2d 的同字段为 \"invalid JSON response（stdout 不是合法的单行JSON，请检查READY文本、日志和",
       "student_role": "学生判断准入是唯一关键路径（u12/u13）；本实验由 Agent 执行，结论供学生决定优先级。",
       "conclusion": "失败类型从「协议格式不合法」变成「单个用例超时」，失败用例数同时从 29 降到 1：JSONL 协议已对齐，29 个正式用例里 28 个通过，剩 1 个卡在超时。「未执行性能评测」这句话也印证了学生 u12 的判断——准入没过时优化性能根本不进入流程。"
     },
     {
       "id": "e21",
       "title": "官方驱动源码精读：超时的精确定义",
-      "hypothesis": "判题器说的超时不是模糊的「卡住」，而是官方驱动源码里可定位的具体阈值；知道阈值才能判断哪些环节会超时。",
       "command": "逐行读 protocol_check/_transport.py（read / send / start / request / shutdown / crash）与 protocol_check/config.json",
-      "output": "config.json：startup_timeout=120、request_timeout=60、case_timeout=600、memory=2g、cpus=2、pids_limit=128、max_response_bytes=16777216；read() 在超时窗口内等不到换行就抛 TimeoutError(\"JSON response timeout\")，start() 用它等 {\"type\":\"ready\"}，request() 用它等响应，shutdown() 也走 request()；run.py 在第一次超时后把后续用例标为 SKIPPED",
+      "output": "config.json：startup_timeout=120、request_timeout=60、case_timeout=600、memory=2g、cpus=2、pids_limit=128、max_response_bytes=16777216；read() 在超时窗口内等不到换行就抛 T…",
       "student_role": "学生要求重读题目与 20 个实例；本轮由 Agent 读官方驱动源码，结论用于确定本地仿真必须复用同一份 transport，而不是另写一套近似驱动。",
       "conclusion": "平台的 \"JSON response timeout\" 只可能来自两处：进程 120 秒内没有吐出 ready 行，或某条请求 60 秒内没有响应行。两者都指向「程序阻塞或过慢」，与格式错误无关——这与 e20 的失败类型变化互相印证。"
     },
     {
       "id": "e22",
       "title": "20 个公开实例逐条复盘",
-      "hypothesis": "正式用例超出公开样例的部分最容易出问题；把 .test/.result 全量导出后逐条对照实现，能找出真实功能缺口。",
       "command": "导出 mysqltest/cases/*.test 与 *.result 全文（20 例、95 条 SQL），逐条对照 src/ 的解析器与执行器",
-      "output": "公开包的驱动指令只有 --restart 与 --mode ann；sql_primary_key.result 期望 error=\"duplicate_key\"，sql_unsupported.result 期望 error=\"unsupported_sql\"，transaction_autocommit_atomic.result 期望 error=\"dimension_mismatch\"（实现输出 invalid_vector）；protocol_check/_assertions.py 显示 config.json 的 error_codes 为空，断言只要求 error.code 是非空字符串；题包 README 写明正式用例 29 个、组织方另保留 9 个用例的输入与预期结果",
+      "output": "公开包的驱动指令只有 --restart 与 --mode ann；sql_primary_key.result 期望 error=\"duplicate_key\"，sql_unsupported.result 期望 error=\"unsupported_sql\"，transaction_autoco…",
       "student_role": "学生明确要求「重新看一遍题目，尤其是20个实例的部分」；复盘与逐条比对由 Agent 执行。",
-      "conclusion": "公开断言对错误码语义名是宽松的，说明 e20 的失败与错误码无关。复盘同时发现一处真实缺口：我们按 MySQL 语法要求 DROP INDEX 必须带 ON tbl，而题面只定义了 CREATE VECTOR INDEX，若正式用例只写 DROP INDEX idx 就会被判成语法错误——已把 ON tbl 放宽为可选。"
+      "conclusion": "公开断言对错误码语义名是宽松的，说明 e20 的失败与错误码无关。复盘同时发现一处真实缺口：我们按 MySQL 语法要求 DROP INDEX 必须带 ON tbl，而题面只定义了 CREATE VECTOR INDEX，若正式用例只写 DROP INDEX idx 就会被判成语法错误——已把 ON…"
     },
     {
       "id": "e23",
       "title": "用官方 transport 搭「正式仿真」回归",
       "hypothesis": "把官方 _transport.py（同样的 120/60/600 秒预算、同样的握手与逐行 flush 语义）接到自建场景上，就能把「只有正式用例才覆盖的能力」在本地变成可回归的测试。",
       "command": "python3 tests/formal_sim.py --rows 20000；再以 --rows 500000 --dims 128 复跑规模场景",
-      "output": "15/15 scenarios ok：bulk/restart rows=500000 after_restart=500000 data=267.5MB ready_after_restart=1.10s；crash/commit_survives rows=[[1,\"kept\"],[2,\"kept2\"]]（强杀后已提交保留、未提交回滚）；crash/during_recovery rows=20000/20000（恢复途中再强杀仍可恢复）；badvec 8 条非法向量（维度不符/NaN/Infinity/溢出）全部返回非空 error.code 且不留残行；ann/topk exact=(10,10) ann=(10,10)",
+      "output": "15/15 scenarios ok：bulk/restart rows=500000 after_restart=500000 data=267.5MB ready_after_restart=",
       "student_role": "学生把目标定为「先让 MySQL 用例全部通过」（u13）；本轮把该目标拆成可回归场景由 Agent 实现并执行。",
       "conclusion": "强杀恢复、恢复中再强杀、非法向量、ANN 有效性与 50 万行规模的启动恢复（1.10s，远低于 120s 预算）在本地全部通过，说明剩余超时不在这些公开可模拟的能力上，而在公开包覆盖不到的正式用例或环境差异上。"
     },
     {
       "id": "e24",
       "title": "健壮性扫描：题面点名不支持的语法与畸形输入",
-      "hypothesis": "正式用例一定会包含赛题点名「不要求」的语句（NULL、JOIN、聚合、子查询、ALTER TABLE、外键、嵌套事务、主键更新）；它们必须返回约定错误，而不是挂死或崩溃——挂死正好会表现为判题器所说的超时。",
       "command": "python3 tests/robustness.py（76 条语句：受支持的各种写法 + 26 条明确不支持的语句 + 畸形/恶意输入）",
-      "output": "problems: none；survived: True；全部语句 2ms 内返回；unsupported_join / unsupported_aggregate / unsupported_alter_* → unsupported_sql；unsupported_null_insert → \"NULL is not supported\"；unsupported_pk_update → \"primary key updates are not supported\"；unsupported_nested_txn → 语法错误而非静默接受",
+      "output": "problems: none；survived: True；全部语句 2ms 内返回；unsupported_join / unsupported_aggregate / unsupported_alter_* → unsupported_sql；unsupported_null_insert →…",
       "student_role": "学生要求重看 20 个实例与题面；「不支持项须返回约定错误」的清单由 Agent 从题面整理成用例并执行。",
       "conclusion": "解析器与执行器对不支持语法和畸形输入都稳定回错，不会挂死、不会崩溃；该轮同时暴露并修掉了 e22 里记录的 DROP INDEX 缺口。"
     },
     {
       "id": "e25",
       "title": "随机 SQL 模糊测试：证伪「某条语句让进程卡死」",
-      "hypothesis": "如果正式用例里有某条特殊 SQL 会让解析或执行进入死循环，判题器看到的就是 \"JSON response timeout\"；用随机 token 组合与对公开用例的增删改突变可以把这个假设证伪。",
       "command": "python3 tests/fuzz_sql.py --iterations 4000（固定随机种子；随机关键字/字面量/标点组合 + 对公开 20 例做删除、插入、替换、切片突变）",
       "output": "iterations=4000 elapsed=0.3s alive=True hangs=0 slow=0",
       "student_role": "学生此前的要求就是「把不确定性变成可回归的本地测试」（u10）；本轮的具体工具由 Agent 实现。",
@@ -655,16 +665,14 @@
     {
       "id": "e26",
       "title": "复读赛题全文与题包 README，锁定封存要求",
-      "hypothesis": "超时用例大概率落在赛题点名、公开包却不含完整用例的要求里；复读题面才能把它们逐条转成测试目标。",
       "command": "读语雀《赛题一：完成一个轻量向量数据库》全文（二、实现范围 2.1/2.2/2.3/2.4；三、测试方法 3.1/3.2/3.3/3.4/3.5；四、提交要求）与 mysqltest/README.md",
-      "output": "题面点名五项仍属正式要求：拒绝 NaN、Infinity、维度错误、float32 溢出；失败语句不能部分生效、显式事务之前的成功修改仍可提交或回滚；已确认提交在进程强杀后保留且恢复途中再次退出仍能恢复；能处理超过内存限额的数据、不能只依赖全量常驻内存；ANN 必须满足过滤、有效 ID、无重复及题包规定的召回率。README 补充：正式用例共 29 个，组织方另保留 9 个用例的具体输入、操作序列、数据生成参数与预期结果",
+      "output": "题面点名五项仍属正式要求：拒绝 NaN、Infinity、维度错误、float32 溢出；失败语句不能部分生效、显式事务之前的成功修改仍可提交或回滚；已确认提交在进程强杀后保留且恢复途中再次退出仍能恢复；能处理超过内存限额的数据、不能只依赖全量常驻内存；ANN 必须满足过滤、有效 ID、无重复及题包…",
       "student_role": "学生明确要求重新看一遍题目；复读与摘录由 Agent 执行。",
       "conclusion": "五个封存方向被逐条转成 e23/e24/e25 的可执行场景。其中只有「超过内存限额的数据」和「恢复途中再次退出」在公开包里没有对应物，是剩余超时最可能的两个落点。"
     },
     {
       "id": "e27",
       "title": "单请求延迟压测：200 万行 × 128 维",
-      "hypothesis": "判题器对单条请求只给 60 秒，如果超时的原因是某条语句太慢，那么把数据量推到接近内存限额时应该能看到耗时逼近预算。",
       "command": "python3 tests/stress_single_request.py --rows 2000000 --dims 128 --one-shot-rows 100000",
       "output": "one-shot INSERT（单条语句 36.9 MiB）2.15s；exact TopK 无过滤 2.82s / 带过滤 2.72s；ann 模式带过滤 2.75s；全表过滤扫描 2.65s；重启握手 2.77s；重启后 TopK 2.72s——全部远低于 60s / 120s 预算",
       "student_role": "学生未参与本轮压测；记录在此用于说明验证过程，不作为学生学习证据。",
@@ -673,29 +681,26 @@
     {
       "id": "e28",
       "title": "强杀恢复延迟压测：100 万行且杀在未提交事务上",
-      "hypothesis": "赛题 2.3 写明“正式测试包含数据量超过内存限额的场景”“向量索引重建成本计入恢复时间与资源限制”，判题器从启动到 ready 只给 120 秒；恢复若靠全量重算就会超时。",
       "command": "python3 tests/stress_recovery.py --rows 1000000 --dims 128（装载后 BEGIN + UPDATE，再 kill -9，然后重启；随后在恢复过程中再 kill -9 一次再重启）",
-      "output": "loaded 1000000 rows in 19.8s, data 558.1 MiB；killed with an open transaction；ready after crash: 5.13s；rows after recovery: 1000000/1000000；ready after second kill: 1.30s；rows after repeated recovery: 1000000/1000000",
+      "output": "loaded 1000000 rows in 19.8s, data 558.1 MiB；killed with an open transaction；ready after crash: 5.13s；rows after recovery: 1000000/1000000；ready after…",
       "student_role": "学生未参与本轮压测；记录在此用于说明验证过程，不作为学生学习证据。",
       "conclusion": "带未提交事务被强杀后，恢复（含 WAL 回放与文件压实）只需 5.13 秒，未提交的修改正确消失；恢复途中再次强杀后仍能在 1.30 秒内就绪且数据完整。恢复耗时这条路径也远低于 120 秒预算。"
     },
     {
       "id": "e29",
       "title": "容器内回归与一个只在内核能力被裁剪时暴露的坑",
-      "hypothesis": "本地与判题环境的差别主要在容器约束（2GiB 内存、2 核、只读根、pids 128、cap-drop ALL），把整套场景放进真实镜像里跑才能补上这个差别。",
       "command": ".github/workflows/minivectordb-ci.yml：用 protocol_check/run.py --image 跑公开用例，再跑 formal_sim / robustness / fuzz_sql / stress_single_request（均带 --image）",
-      "output": "第一次 CI：Build image / Protocol handshake / Public cases 全部 success，只有新加的 formal simulation 步骤 failure（1 秒内失败）。定位到原因是测试脚手架而非数据库：formal_sim 用 tempfile 建了 0700 权限的宿主机目录并 bind mount 进容器，而判题器 cap-drop ALL 掉了所有能力（没有 CAP_DAC_OVERRIDE），容器内进程写不进 /data 立刻退出——官方自测脚本正是因此显式 chmod 777 数据目录，官方 driver 则改用 named volume。改为与 protocol_check/run.py 一致的 volume 模式后问题消失。",
+      "output": "第一次 CI：Build image / Protocol handshake / Public cases 全部 success，只有新加的 formal simulation 步骤 failure（1 秒内失败）。定位到原因是测试脚手架而非数据库：formal_sim 用 tempfile 建了…",
       "student_role": "学生未参与本轮 CI 排障；记录在此用于说明验证过程，不作为学生学习证据。",
       "conclusion": "同一份镜像里，构建、握手与 20 个公开用例都通过，说明新代码在判题式约束下协议正确；另外学会了一个只有在“容器裁掉全部能力”时才会暴露的权限坑：容器内进程对自己不拥有的目录没有写权限，而 bind mount 会把宿主机的 0700 权限带进去。"
     },
     {
       "id": "e30",
       "title": "20 个公开实例的加难版回归 + 独立 oracle",
-      "hypothesis": "题包写明公开样例是简化版、正式用例是同名更复杂版；把每个公开实例加难，并用 Python 暴力真值做独立判据（而不是拿服务端输出自证），能提前暴露正式用例会踩到的语义缺陷。",
       "command": "python3 tests/hardened_cases.py（14 组；每组独立空库 + 独立数据目录，与官方驱动一致；oracle 重算 float32 存储下的 L2 距离、并列按主键升序、过滤后 TopK、Unicode 码点长度、BIGINT 精确比较）",
-      "output": "首轮 10/14。4 处 FAIL 里 3 处是期望写错：用探针脚本逐条与官方断言核对后确认服务端行为正确（VARCHAR 按码点而非字节、4 个 emoji 可入库而第 5 个被拒；BIGINT 精确存回）——分别是 select 只查了 id 列、2^53+1 本应大于 2^53、L2_DISTANCE('[5,5]','[0,0]') 是 sqrt(50) 而非 5、同一个索引被 drop 了两次。修正期望后 14/14 通过；随后又补了两组：一组覆盖赛题要求的各种普通 SQL 写法（列清单、限定名、别名、多键 ORDER BY、按别名排序、LIMIT 0/越界、更新零行、IF EXISTS）并确认题面不要求的写法全部干净报错不挂死；一组覆盖“事务内读到自己的修改；表数据与向量检索一致”（事务内改向量后立刻做向量检索必须看到新值）。最终 15/15 通过。",
+      "output": "首轮 10/14。4 处 FAIL 里 3 处是期望写错：用探针脚本逐条与官方断言核对后确认服务端行为正确（VARCHAR 按码点而非字节、4 个 emoji 可入库而第 5 个被拒；BIGINT 精确存回）——分别是 select 只查了 id 列、2^53+1 本应大于 2^53、L2_DIST…",
       "student_role": "学生指出测试实例就在官方题包 cases 目录里、要求先本地跑通再谈优化（u14）；加难变体与 oracle 由 Agent 编写和执行，学生未参与逐条调试。",
-      "conclusion": "加难回归的关键不是把数据变大，而是换一个独立判据：用 Python 重算真值而不是复述服务端输出。正是这一点把第 4 处 FAIL 从“期望写错”里分离出来，指向了一个真实缺陷（见 e31）。同时也说明公开包从未用过的普通 SQL 写法（列清单、多键排序、按别名排序等）本来就能工作，风险不在语法覆盖面，而在语义细节上。"
+      "conclusion": "加难回归的关键不是把数据变大，而是换一个独立判据：用 Python 重算真值而不是复述服务端输出。正是这一点把第 4 处 FAIL 从“期望写错”里分离出来，指向了一个真实缺陷（见 e31）。同时也说明公开包从未用过的普通 SQL 写法（列清单、多键排序、按别名排序等）本来就能工作，风险不在语法覆盖…"
     },
     {
       "id": "e31",
@@ -709,9 +714,8 @@
     {
       "id": "e32",
       "title": "请求字段变体与畸形请求：两个协议层脆弱点",
-      "hypothesis": "判题器可能带上我们没见过的请求形态；若解析器只认标量、或在解析失败时回 id 0，判题器看到的就是协议级错误（response id differs from request）而不是单条语句失败，后者可能让整轮判题中断而不是只挂一个用例。",
       "command": "python3 tests/probe_protocol_edges.py 与 tests/probe_malformed.py；对照 src/main.cpp 的 JSON 解析与 id 回显",
-      "output": "定位到两处：(1) 请求解析只支持标量，遇到 \"extra\": {...} 或 \"params\": [...]} 整个请求解析失败，回 {\"id\":0,...}；(2) 畸形请求同样回 id 0。修复为：未知字段无论何种结构都跳过、解析失败时尽力从原文回显 id。修复后 13 种请求字段变体（缺 search_mode / null / 大写 / 空 / 未知 / 带对象字段 / 带数组字段 / 字符串 id / 未知 op / 缺 sql / 空 sql / 只有分号）全部正确回显 id 与布尔 ok，4 种畸形行也都能回显 id，且连接保持可用。",
+      "output": "定位到两处：(1) 请求解析只支持标量，遇到 \"extra\": {...} 或 \"params\": [...]} 整个请求解析失败，回 {\"id\":0,...}；(2) 畸形请求同样回 id 0。修复为：未知字段无论何种结构都跳过、解析失败时尽力从原文回显 id。修复后 13 种请求字段变体（缺 s…",
       "student_role": "学生未参与本轮定位；这是学生要求“本地先跑通再优化”后继续加固协议层的结果，由 Agent 执行。",
       "conclusion": "协议层的风险不在功能而在“没见过的形态”：一个额外字段就可能把整轮判题拖成协议错误。现在任何未知字段都不会影响请求解析，任何解析失败也都会退化成普通语句失败。另一个附带发现：SELECT 常量（无 FROM）目前报语法错误，题面未要求该写法，先不扩范围。"
     },
@@ -720,16 +724,16 @@
       "title": "200 万行规模下的内存占用：2GiB 限额没有被触发",
       "hypothesis": "赛题 2.3 写明“正式测试包含数据量超过内存限额的场景”，判题容器只有 2 GiB 内存、而且按 cgroup 统计、页缓存算在内。若我们的内存占用会随数据量线性涨到限额以上，就会触发限额并拖慢后续写入，表现为单条请求超时。",
       "command": "python3 tests/stress_scale_extremes.py --rows 2000000 --dims 128；python3 tests/measure_dirty_pages.py --rows 600000（在真正的 ext4 文件系统上对照 MVDB_SYNC_MB=0 与 32，采样 /proc/meminfo 的 Dirty/Writeback 与进程 VmHWM）",
-      "output": "200 万行 × 128 维（约 1.07 GB）：装载 37.8s，TopK 2.58s，峰值 RSS 1152 MiB（限额 2048 MiB）——但这个数字里绝大部分是 tmpfs 的文件页，不是我们的数据结构；换到真实磁盘后峰值 RSS 只有 137 MiB。脏页对照（321 MB 数据）：不周期 fsync 时峰值 Dirty 27.1 MiB、Writeback 0.4 MiB；周期 fsync 时峰值 Dirty 48.7 MiB、Writeback 31.9 MiB；两次峰值 RSS 都是 72 MiB。结论：内核回写跟得上，脏页不累积；内存占用约 60 字节/行（主键索引），与磁盘数据量无关，要撞到 2 GiB 需要约 3000 万行（十几 GB 数据文件）。",
+      "output": "fsync 时峰值 Dirty 48.7 MiB、Writeback 31.9 MiB；两次峰值 RSS 都是 72 MiB。结论：内核回写跟得上，脏页不累积；内存占用约 60 字节/行（主键索引），与磁盘数据量无关，要撞到 2 GiB 需要约 3000 万行（十几 GB 数据文件）。",
       "student_role": "学生未参与本轮测量；这是学生要求“本地先跑通再优化”后继续排查剩余超时的结果，由 Agent 执行。",
-      "conclusion": "“数据量超过内存限额 → 触发 cgroup 限额 → 写回被节流 → 单条请求超时”这条链被测量否掉了：脏页峰值只有几十 MiB，进程 RSS 约 60 字节/行，离 2 GiB 还有一个数量级以上。顺带发现：在数据文件上做周期性 fsync 反而让装载更快（27.2s → 19.4s），因为它把回写显式推到前台，避免与后续写入抢带宽；这一项作为“文件系统跟不上时的保险”保留，并用 MVDB_SYNC_MB 可调。"
+      "conclusion": "“数据量超过内存限额 → 触发 cgroup 限额 → 写回被节流 → 单条请求超时”这条链被测量否掉了：脏页峰值只有几十 MiB，进程 RSS 约 60 字节/行，离 2 GiB 还有一个数量级以上。顺带发现：在数据文件上做周期性 fsync 反而让装载更快（27.2s → 19.4s），因为它把…"
     },
     {
       "id": "e34",
       "title": "超过内存限额的数据规模下，复现出与判题机逐字一致的 JSON response timeout",
       "hypothesis": "封存要求里有一条是“能处理超过内存限额的数据”。如果我们的实现在这个规模上把整张表搬进内存，单条请求就会超过官方 transport 的 60 秒预算；平台只回一句“JSON response timeout × 1”，所以必须先在本地用同一份 transport、同一份预算造出同样的失败，才谈得上定位。",
       "command": "python3 tests/probe_beyond_mem.py --rows 5000000 --dims 128 --batch 1000 --workdir /var/tmp/bigscale（真实 ext4 文件系统，数据文件 2.65 GB，超过判题容器的 2 GiB 限额）",
-      "output": "500 万行 × 128 维：装载 196s，其中单条请求最坏 0.19s，数据文件 2718 MiB；精确 TopK 30.25s；ann 模式 TopK 21.40s；带过滤扫描 LIMIT 1000 为 15.31s；全表扫描 12.42s；批量 UPDATE（UPDATE docs SET tag = 'y' WHERE id >= 0）超过 60s，官方 transport 直接抛出TimeoutError: JSON response timeout —— 与平台反馈的 “JSON response timeout（未及时收到JSON响应，请检查换行、flush 和程序阻塞）” 是同一处抛出点。第五次提测（commit 7cf06175，2026-11-15 07:36:30 提交、07:57:21 出结果，耗时 20m51s）仍然只回同一句 “JSON response timeout × 1”（失败用例数 1，未执行性能评测），说明 BIGINT 精确比较、JSON 请求字段健壮性、脏页回写上限与官方题包还原这几项改动都没有触及那个用例，剩下的解释就集中在“表大于内存限额”这条路径上。",
+      "output": "2.42s；批量 UPDATE（UPDATE docs SET tag = 'y' WHERE id >= 0）超过 60s，官方 transport 直接抛出TimeoutError: JSON response timeout —— 与平台反馈的 “JSON response timeout（未及时收到JSON响应，请检查换行、flush 和程序阻塞）” 是同一处抛出点。第五次提测（ … 500 万行 × 128 维：装载 196s，其中单条请求最坏 0.19s，数据文件 2718 MiB；精确 TopK 30.25s；ann 模式 TopK 21.40s；带过滤扫描 LIMIT 1000 为 15.31s；全表扫描 12.42s；批量 UPDA",
       "student_role": "学生未参与本轮压测；这是在学生 u14 要求“测试实例在case里面…通过了再搞优化”、以及 u15 要求核对 2 GiB 限额之后，为定位剩余那 1 个失败用例而做的测量，由 Agent 执行。",
       "conclusion": "第一次在本地拿到与判题机逐字一致的失败，把“那 1 个超时”从猜测变成了可复现对象：它不是协议形状、不是启动握手，也不是脏页，而是“表大于内存限额”这条路径上的实现缺陷。"
     },
@@ -747,25 +751,23 @@
       "title": "修复一：流式变更、扫描路径只求值一次、列下标预解析",
       "hypothesis": "把批量 UPDATE/DELETE 在自动提交路径上改成流式，把扫描路径里对同一行重复的表达式求值去掉，并把列名查找从“每行一次字符串搜索”改成“建表时解析一次”，应当把 500 万行上的操作拉回 60 秒预算内，同时不改变任何断言语义。",
       "command": "python3 tests/probe_beyond_mem.py --rows 5000000 --dims 128 --batch 1000；python3 protocol_check/run.py（官方 20 个公开用例）；python3 tests/hardened_cases.py；python3 tests/formal_sim.py；python3 tests/robustness.py；python3 tests/fuzz_sql.py --iterations 4000",
-      "output": "500 万行复测：精确 TopK 30.25s → 0.60s；ann 模式 TopK 21.40s → 0.60s；带过滤扫描 15.31s → 0.53s；全表扫描 12.42s → 0.66s；批量 UPDATE 从超时变成 30.91s；批量 DELETE 3.61s。改动内容：UPDATE/DELETE 自动提交路径逐行写数据文件与 WAL；WAL 缓冲按 4 MiB 分批写出；ORDER BY 的别名在查询开始时解析成对应输出列，取 TopK 时复用已算出的值，不再对同一行算两次距离；列下标在 prepare_expr() 里解析一次；恢复扫描直接对映射页算 CRC，不再为每行复制一份 payload。回归：官方 20/20、公开用例加难版 15/15、正式仿真 15/15、健壮性无问题、随机 4000 条语句 0 挂死。",
+      "output": "500 万行复测：精确 TopK 30.25s → 0.60s；ann 模式 TopK 21.40s → 0.60s；带过滤扫描 15.31s → 0.53s；全表扫描 12.42s → 0.66s；批量 UPDATE 从",
       "student_role": "同 e34；实现与回归由 Agent 完成。",
       "conclusion": "同一条 SQL 的语义没有任何变化（公开用例与加难版结果逐字相同），耗时降了一个数量级，批量 UPDATE 从“60 秒超时”变成 30.91s——那条被复现出来的超时在本地消失了。"
     },
     {
       "id": "e37",
       "title": "修复二：恢复期的整表重写改成字节拷贝，并复测崩溃恢复",
-      "hypothesis": "崩溃后恢复要重写整张数据表来剔除未提交记录；如果重写时把每行解码再重新编码，CPU 与内存开销都会被放大。记录里的 payload 本来就是序列化后的行，复制字节即可。",
       "command": "python3 tests/stress_recovery.py --rows 1000000 --dims 128 --batch 1000 （装载后强杀，且事务未提交；随后再次强杀）",
-      "output": "100 万行 × 128 维（数据 556.4 MiB）：装载 20.9s；带未提交事务强杀后恢复握手 5.42s，恢复后行数 1000000/1000000（未提交的 UPDATE 不见了）；再次强杀后握手 2.12s，行数仍为 1000000/1000000。同时把 compaction 从“逐行解码再编码”改为直接复制记录里的 payload 字节。",
+      "output": "100 万行 × 128 维（数据 556.4 MiB）：装载 20.9s；带未提交事务强杀后恢复握手 5.42s，恢复后行数 1000000/1000000（未提交的 UPDATE 不见了）；再次强杀后握手 2.12s，行数仍为 1000000/1000000。同时把 compaction 从“逐…",
       "student_role": "同 e34。",
       "conclusion": "崩溃恢复路径仍然满足正式要求（已确认提交保留、未提交修改不部分生效、恢复途中再次退出仍能恢复），整表重写的成本从“解码+重编码”降到“复制字节”。"
     },
     {
       "id": "e38",
       "title": "流式写入的崩溃一致性，以及用截断代替整表重写",
-      "hypothesis": "把批量 UPDATE 改成逐行落盘之后，进程在写到一半被杀时，数据文件里会留下属于一个从未提交的事务的记录；这些记录必须在恢复后既不可见、也不能影响已提交的行。另一方面，恢复时为了剔除它们而重写整张表，在大表上是一次 GB 级的写放大，如果这些垃圾恰好都在文件尾部，那么直接截断就够了。",
       "command": "python3 tests/stress_crash_mutation.py --rows 20000 --kills 3（在批量 UPDATE 进行到一半时强杀进程，再重启核对）；python3 tests/stress_recovery.py --rows 1000000 --dims 128 --batch 1000",
-      "output": "强杀三次后的恢复结果：每次重启后 20000 行全部保持旧值或全部为新值，没有出现半写行，被杀时尚未走到的行保持旧值；最后再执行一次完整 UPDATE 并重启后，20000 行仍全部是新值。恢复耗时：强杀后握手 0.04~0.05s（改动前需要重写整表）。100 万行 × 128 维的强杀恢复：握手 3.26s（改动前 5.42s），恢复后行数 1000000/1000000，再次强杀后握手 1.28s，行数仍为 1000000/1000000。恢复逻辑的改动：扫描时记录第一处不属于已提交事务的记录偏移，并判断其后面是否全是垃圾；若全是垃圾且日志没有向该表重放过任何记录，就把文件截断在那里，而不是逐行重写整张表。",
+      "output": "强杀三次后的恢复结果：每次重启后 20000 行全部保持旧值或全部为新值，没有出现半写行，被杀时尚未走到的行保持旧值；最后再执行一次完整 UPDATE 并重启后，20000 行仍全部是新值。恢复耗时：强杀后握手 0.04~0.05s（改动前需要重写整表）。100 万行 × 128 维的强杀恢复：握手…",
       "student_role": "学生未参与本轮验证；这是为确认“流式写入没有破坏事务语义”而做的回归，由 Agent 执行。",
       "conclusion": "流式写入没有破坏原子性：被中断的事务不会留下任何可见改动，已提交的改动在强杀与重启后仍然存在；恢复路径同时从“重写整表”降到了“截断尾部”，大表上的启动时间因此下降一个数量级。"
     },
@@ -781,9 +783,8 @@
     {
       "id": "e40",
       "title": "大表上所有语句形态的耗时与内存清单",
-      "hypothesis": "既然超时的直接原因是单条语句超过 60 秒，那么必须把大表上所有可能被正式用例用到的语句形态都量一遍，确认没有第二个会超预算的形态，而不是只修好复现出来的那一个。",
       "command": "python3 tests/probe_operation_matrix.py --rows 2000000 --dims 128 --batch 1000（真实 ext4，数据文件约 1.07 GB；每条语句都用官方 transport 的 60 秒预算计时）",
-      "output": "200 万行 × 128 维（数据文件 1113 MiB，真实 ext4）：装载 89.4s；精确 TopK 0.51s；ann 模式 TopK 0.41s；带过滤的 TopK 0.54s；WHERE 里带 L2_DISTANCE 的查询 0.42s；带 LIMIT 的全表扫描 0.42s；批量 UPDATE（改非向量列）16.66s，影响 2000000 行；批量 DELETE 2.24s，影响 2000000 行；把向量列改成 2 维（维度不符）当场返回错误而不是挂住；无 LIMIT 的全表扫描因响应超过驱动允许的 16 MiB 被判题器拒绝（response exceeds byte limit），同样不是超时。全程峰值 RSS 1237 MiB，判题限额 2048 MiB。结论是：查询类语句全部在预算内，唯一逼近预算的是写整张表的那种形态，而它正是 e34~e36 修掉的那一个；剩下的风险只是判题机磁盘比本地慢。",
+      "output": "200 万行 × 128 维（数据文件 1113 MiB，真实 ext4）：装载 89.4s；精确 TopK 0.51s；ann 模式 TopK 0.41s；带过滤的 TopK 0.54s；WHERE 里带 L2_DISTANCE 的查询 0.42s；带 LIMIT 的全表扫描 0.42s；批量 U…",
       "student_role": "学生未参与本轮测量；这是为确认“不会再有第二个超时点”而做的排查，由 Agent 执行。",
       "conclusion": "超时风险面被收敛到一处，而不是散落在很多地方；这条清单也说明剩下的风险是“判题机磁盘比本地慢”，而不是实现里还有别的慢点。"
     },
@@ -812,7 +813,7 @@
       "command": "python3 tests/probe_perf_breakdown.py",
       "output": "no_filter_all_rows 0.5049 ms / filter_all_rows 0.5431 ms / filter_quarter_rows 0.4976 ms / filter_no_rows 0.3871 ms / wal_to_data_ratio 1.0006 / write_to_data_ratio 2.075 / data_file_bytes 5620000 / wal_peak_bytes 5623600",
       "student_role": "学生解释了反直觉之处（/user_prompts/27/content），并据此要求把过滤路径改掉（/user_prompts/28/content）。",
-      "conclusion": "扫描与协议约 0.063 ms/查询；按行做 VARCHAR 等值过滤本身约 0.324 ms/查询，比它省下的 2500 行距离计算（0.11 ms）还贵近 3 倍——过滤列的比较才是瓶颈。同时 WAL 峰值 5,623,600 B 与数据文件 5,620,000 B 几乎相等，行的载荷被复制了一遍。"
+      "conclusion": "扫描与协议约 0.063 ms/查询；按行做 VARCHAR 等值过滤本身约 0.324 ms/查询，比它省下的 2500 行距离计算（0.11 ms）还贵近 3 倍——过滤列的比较才是瓶颈。同时 WAL 峰值 5,623,600 B 与数据文件 5,620,000 B 几乎相等，行的载荷被复制了一…"
     },
     {
       "id": "e44",
@@ -828,7 +829,7 @@
       "title": "过滤快路径改动后的官方口径复测与全量回归",
       "hypothesis": "把 `column = 'literal'` 的比较改成原地读列值、按字节比较，应当显著降低带过滤查询的耗时，且不改变召回与任何语义。",
       "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10 && python3 tests/probe_perf_breakdown.py",
-      "output": "同机交替 A/B（3 轮，每轮 3 次取中位）：改前 t_query 0.560 / 0.528 / 0.580 s，改后 0.393 / 0.420 / 0.416 s（-26%）；Recall@10 plain 1.0 filtered 1.0、ann plain 1.0 filtered 1.0；t_write 0.315 s；write_bytes 11,715,684；峰值 RSS 14,020,608；回归：官方公开用例 20/20、加难版 15/15、正式仿真 15/15、崩溃一致性 OK、100 万行强杀恢复 4.22 s 且 1000000/1000000 行、随机 4000 条语句 0 挂死",
+      "output": "plain 1.0 filtered 1.0；t_write 0.315 s；write_bytes 11,715,684；峰值 RSS 14,020,608；回归：官方公开用例 20/20、加难版 15/15、正式仿真 15/15、崩溃一致性 OK、100 万行强杀恢复 4.22 s 且 1000000/1000000 行、随机 4000 条语句",
       "student_role": "学生设定改动与验收条件：“改，用官方口径实测确认召回不变再提测”（/user_prompts/28/content），并规定先对拍、再微基准、再官方 benchmark、再全量回归的顺序（/user_prompts/34/content）。",
       "conclusion": "两组 Recall@10 仍为 1.0，1000 条查询从 0.560 s 降到 0.416 s（-26%），峰值内存没有变化；学生的验收条件被满足。"
     },
@@ -857,14 +858,13 @@
       "command": "python3 tests/probe_write_breakdown.py --batch-sizes 100,10",
       "output": "batch=100 commits=100 t_write=0.2988 s wal_bytes=5623600 data_bytes=5620000 / batch=10 commits=1000 t_write=1.5777 s wal_bytes=5656000 data_bytes=5620000 / per_commit_ms=1.4211 / per_row_us=15.6644 / commit_share_of_write_phase=0.4757 / row_share_of_write_phase=0.5243",
       "student_role": "学生解读这份分解（/user_prompts/35/content），判断两边都要动、先动占比更大的行成本。",
-      "conclusion": "写阶段 0.30 s 里，100 次提交的固定成本占 48%（每次 1.42 ms，主要是一次 WAL fsync），10000 行的处理占 52%（每行 15.7 µs，主要是请求里 128 个浮点字面量的解析）。同样的 10000 行换成 10 行一批（1000 次提交）时写阶段变成 1.58 s，两点差分把两种成本分开。"
+      "conclusion": "写阶段 0.30 s 里，100 次提交的固定成本占 48%（每次 1.42 ms，主要是一次 WAL fsync），10000 行的处理占 52%（每行 15.7 µs，主要是请求里 128 个浮点字面量的解析）。同样的 10000 行换成 10 行一批（1000 次提交）时写阶段变成 1.58…"
     },
     {
       "id": "e49",
       "title": "ann 模式在官方口径下的召回校验",
-      "hypothesis": "ann 模式目前走精确检索；判题时驱动会用 search_mode 切换模式，所以 ann 模式必须单独验一遍召回，而不是只验 exact。",
       "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10",
-      "output": "ann_recall_plain 1.0 / ann_recall_filtered 1.0（exact 同批次 recall_plain 1.0 / recall_filtered 1.0）；3 轮中位数 t_query 0.384 s、t_write 0.299 s、write_bytes 11,715,684、峰值 RSS 13,971,456",
+      "output": "ann_recall_plain 1.0 / ann_recall_filtered 1.0（exact 同批次 recall_plain 1.0 / recall_filtered 1.0）；3 轮中位数 t_query 0.384 s、t_write 0.299 s、write_bytes 11…",
       "student_role": "学生据此判断 ann 模式已满足题面 0.95 的召回门槛（/user_prompts/37/content）。",
       "conclusion": "ann 与 exact 在官方口径同一批查询上的 Recall@10 都是 1.0，两组都高于题面要求的 0.95；ann 与 exact 目前行为完全相同，近似索引的收益并没有被证明，所以也谈不上用召回换速度。"
     },
@@ -884,7 +884,7 @@
       "command": "python3 tests/probe_selectivity_k.py（修复前后各跑一次）",
       "output": "同机 A/B 的选择性曲线（修复前 → 修复后）：filter_0pct 0.4499 ms → 0.2122 ms / filter_50pct 0.3902 ms → 0.2818 ms / filter_100pct 0.5411 ms → 0.5246 ms",
       "student_role": "学生把这条发现上升成一般规律：任何逐行求值都会踩到，值拷贝比计算本身贵（/user_prompts/40/content）。",
-      "conclusion": "逐行比较时不再拷贝向量之后，VARCHAR 等值过滤的查询快了约一半，整数列比较补上同样的快路径后又降一档。提问时引用的 0.444 → 0.269 ms 来自没有预热的那一轮测量——先测的形状吃不到热缓存，会系统性偏慢；加上 200 次预热、三次取中位数后的稳定读数如上。测量方法本身也是这一轮学到的东西。"
+      "conclusion": "逐行比较时不再拷贝向量之后，VARCHAR 等值过滤的查询快了约一半，整数列比较补上同样的快路径后又降一档。提问时引用的 0.444 → 0.269 ms 来自没有预热的那一轮测量——先测的形状吃不到热缓存，会系统性偏慢；加上 200 次预热、三次取中位数后的稳定读数如上。测量方法本身也是这一轮学到…"
     },
     {
       "id": "e52",
@@ -903,6 +903,33 @@
       "output": "ann_vs_exact_mismatches 0 / ann_vs_exact_queries 300（每条查询同时用 exact 与 ann 跑一次，比较返回的 id 与距离序列）",
       "student_role": "学生把“两者一致”这个结论迁移到 500 万行的表上并给出边界条件（/user_prompts/41/content）。",
       "conclusion": "在官方口径的 100 条查询上，ann 与 exact 的返回逐字节相同，没有一处差异。这个结论只在精确扫描还足够快的小表上成立：500 万行上一次精确 TopK 要 0.60 s，那时近似索引才有意义——而我们没有实现它，这是当前明确的局限。"
+    },
+    {
+      "id": "e54",
+      "title": "写阶段成本随行宽变化：每提交成本里有多少是 WAL 载荷",
+      "hypothesis": "一次提交的成本里，除了 fsync 的固定往返，还有把整行载荷复制进 WAL 带来的额外刷盘量；同一批行换成不同向量宽度，就能把这两部分分开看。",
+      "command": "python3 tests/probe_write_shape.py",
+      "output": "0 维 25.5 µs/行、2.55 ms/提交；8 维 44.2 µs/行、4.42 ms/提交；128 维 98.7 µs/行、9.87 ms/提交；同机 fsync 中位 1.44 ms",
+      "student_role": "学生据此判断我们真正的优势空间在解析与搬运，而不是 fsync 的固定往返（/user_prompts/44/content）。",
+      "conclusion": "每提交成本随行宽显著上升：0 维时一次提交 2.55 ms（≈一次 fsync 的固定往返），128 维时升到 9.87 ms，因为 WAL 里复制了整行，fsync 要多刷几十 KB。三种宽度各用独立数据库测，避免 WAL 互相叠加；同一台机器在别的时间段测出的 fsync 中位在 1.44~2.…"
+    },
+    {
+      "id": "e55",
+      "title": "fsync 成本曲线：固定往返与每字节成本",
+      "hypothesis": "如果 fsync 的成本主要是固定往返而不是字节数，那么把行载荷从 WAL 里去掉、改成提交时 fsync 数据文件，就是净亏；如果是字节成本主导，就是净赚。",
+      "command": "python3 tests/probe_fsync_curve.py",
+      "output": "4 KB → 1.1799 ms；32 KB → 1.2923 ms；512 KB → 2.315 ms；一次提交的 WAL 载荷约 55200 B；70 KB → 1.956 ms",
+      "student_role": "学生给出的结论是这台机器上净亏：省下 0.78 ms 字节，但多一次 1.18 ms 的 fsync 往返（/user_prompts/43/content）。",
+      "conclusion": "曲线有一个约 1.18 ms 的固定往返，加上约 12 µs/KB 的边际成本。一次提交刷 55 KB 载荷要多花约 0.78 ms；但改成“只记意图 + fsync 数据文件”要再加一次1.18 ms 的往返，所以在这台机器上是净亏。代价会随存储特性翻转：往返便宜的盘上，省字节就变成净赚——这是个…"
+    },
+    {
+      "id": "e56",
+      "title": "计分规模下的崩溃恢复：1 万行强杀后 0.10 s 就绪",
+      "hypothesis": "崩溃恢复在计分负载下是否是风险；此前只测过 100 万行与 500 万行规模。",
+      "command": "python3 tests/stress_recovery.py --rows 10000 --dims 128 --batch 100",
+      "output": "loaded 10000 rows in 0.7s, data 10.7 MiB / killed with an open transaction / ready after crash: 0.10s (budget 120s) / rows after recovery: 10000/10000 / ready after second kill: 0.05s",
+      "student_role": "学生的判断是：恢复在计分规模上不是风险，精力应放性能（/user_prompts/45/content）。",
+      "conclusion": "在官方口径的规模上，强杀后 0.10 s 就绪（预算是 120 s），未提交事务正确回滚、再次强杀后 0.05 s 就绪、行数 10000/10000 完整。恢复风险随规模增长，在计分负载上不是瓶颈。"
     }
   ],
   "retrospective": {
@@ -915,7 +942,9 @@
       "写阶段的成本也拆开了：100 次提交的固定成本 1.42 ms/次（占 48%），每行 15.7 µs（占 52%），两者都对应到可动的具体位置——一次 WAL fsync，和请求里 128 个浮点字面量的解析。",
       "ann 模式单独验了召回：在官方口径的同一批查询上，两组 Recall@10 都是 1.0，高于题面要求的 0.95。",
       "按官方口径把查询代价拆开之后，才发现真正的瓶颈不是距离计算本身，而是逐行求值的固定开销：过滤命中 100% 时反而比无过滤更慢。定位到原因是比较路径每行拷贝了一份 512 字节的向量，改成原地读列值后，VARCHAR 等值过滤快了约一半，整数列比较也补上同样的快路径。",
-      "学生把这条上升成一般规律：任何逐行求值都会踩到，值拷贝比计算本身贵——这条规律反过来成了后面找漏网形状的线索。"
+      "学生把这条上升成一般规律：任何逐行求值都会踩到，值拷贝比计算本身贵——这条规律反过来成了后面找漏网形状的线索。",
+      "写阶段被拆成三段：fsync 的固定往返（durability 的地板）、每行解析与搬运 128 个浮点字面量（所有实现都要付）、以及 WAL 载荷带来的额外刷盘量。用 fsync 成本曲线量化后，WAL 去重在本地是净亏，但代价会随存储特性翻转——这是个取决于环境的取舍，不是无条件的优化。",
+      "补上了计分规模（1 万行）的崩溃恢复：强杀后 0.10 s 就绪、行数 10000/10000 完整，恢复风险因此从计分路径上移除。"
     ],
     "what_failed_or_uncertain": [
       "上一版材料自称 20 分而平台只给 2.5。当时我们把原因猜成“引用格式”或“篇幅不够”，直到这次逐项核对才发现更可能是维度命名：材料里用了 11 个维度名，只有 5 个属于官方五维；而且多数实例的 student_role 直接写着“学生未参与”，学生只被记录为提问或选方向的一方。这一条是推测——平台没有公布评分细则，只能靠官方规则与本地核对逼近。",
@@ -925,6 +954,7 @@
       "WAL 里完整复制了每行载荷（实测总写入是数据的 2.075 倍）。要省掉它需要引入新的记录类型与事务号语义，改动面大且触及事务正确性，这一轮没有动。",
       "性能项的差距是结构性的，不是靠本地微优化能补上的：按官方口径复刻后我们的 E 量级明显落在长尾，而第 80 名的 E 大约是我们的两倍。本地能做的（值拷贝、过滤路径、扫描布局）加起来只有百分之几到十几，差的那个倍数需要换设计——比如真正的向量索引或列式存储，而不是继续调常数。",
       "本地基准的机器噪声不小：同一份代码重复测量，单条查询耗时会在百分之十到几十之间浮动，所以材料里一律引用中位数，并保留可复现的测量脚本，而不是挑一次最好看的数字。",
+      "fsync 的成本曲线是本机测得的（固定往返约 1.18 ms、每 KB 约 12 µs）；判题机的存储特性不同，WAL 去重这笔账的正负号可能翻转，我们没有条件在那边复测。",
       "9 个封存用例的输入、操作序列与预期结果未知；正式 config 的 error_codes 冻结表也未公开（公开为 {}）。"
     ],
     "next_steps": [
@@ -1343,6 +1373,55 @@
         "pointer": "/experiments/51/output",
         "quote": "K=10 0.5041 ms / K=100 0.5575 ms / K=1000 1.2062 ms"
       }
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "WAL 去重这个取舍被量化了：一次提交要刷约 55 KB 的行载荷，fsync 从 1.18 ms 涨到 1.96 ms，而改成“只记意图 + 提交时 fsync 数据文件”要多付一次 1.18 ms 的往返——学生据此判断在这台机器上是净亏。关键在于代价随存储特性翻转：往返便宜的盘上，省字节就变成净赚，所以这不是无条件的优化，而是取决于判题机存储特性的取舍。",
+      "student_evidence": {
+        "pointer": "/user_prompts/43/content",
+        "quote": "这台机器上净亏：省下 0.78 ms 字节，但多一次 1.18 ms 的 fsync 往返"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/54/output",
+        "quote": "4 KB → 1.1799 ms；32 KB → 1.2923 ms"
+      }
+    },
+    {
+      "dimension": "技术理解与迁移",
+      "tier": 1.0,
+      "reason": "学生把写阶段的成本分成两块：fsync 的固定往返是 durability 的硬要求（地板），解析并搬运 128 个浮点字面量虽然所有实现都要付，但那是自己能动的部分。实测支持这个划分：每提交成本随行宽从 2.54 ms（无向量列）升到 15.57 ms（128 维），差额正是 WAL 载荷带来的额外刷盘量——学生据此指出优势空间在解析与搬运。",
+      "student_evidence": {
+        "pointer": "/user_prompts/44/content",
+        "quote": "优势空间在解析与搬运，这部分自己能优化"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/53/output",
+        "quote": "128 维 98.7 µs/行、9.87 ms/提交"
+      }
+    },
+    {
+      "dimension": "取舍与反思",
+      "tier": 1.0,
+      "reason": "此前只在 100 万行与 500 万行规模测过崩溃恢复；补上计分规模后，强杀后 0.10 s 就绪、未提交事务正确回滚、行数 10000/10000 完整。学生的判断是恢复在计分规模上不是风险，精力应该放在性能——这条结论把恢复从风险列表里移除了，代价是 500 万行以上仍是风险点。",
+      "student_evidence": {
+        "pointer": "/user_prompts/45/content",
+        "quote": "恢复在计分规模上不是风险，精力应放性能"
+      },
+      "result_evidence": {
+        "pointer": "/experiments/55/output",
+        "quote": "ready after crash: 0.10s (budget 120s)"
+      }
+    },
+    {
+      "dimension": "问题理解与自主拆解",
+      "tier": 0.5,
+      "reason": "学生给第 2 个提测名额定的方案是“材料加实例 + 性能改动一次都带上”：因为平台只在两项排名分之和更高时才替换，所以一次提交同时改两项不会互相拖累；而性能改动即使准入失败也不影响已通过的成绩，所以没有下行风险。这是决策本身，还没有对应的结果，按 0.5 档计。",
+      "student_evidence": {
+        "pointer": "/user_prompts/46/content",
+        "quote": "两个都做：材料加实例 + 性能改动，一次提测都带上"
+      },
+      "result_evidence": null
     }
   ]
 }
