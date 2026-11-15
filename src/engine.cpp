@@ -491,6 +491,8 @@ bool Table::recover_records(const WalScan &wal, u64 checkpoint, bool wal_empty) 
   ensure_mapped();
   u64 total = file_size_;
   const char *base = map_.data();
+  u64 garbage_off = 0;       // first record that is not committed
+  bool garbage_tail_only = true;
   while (off + kHeaderSize <= total) {
     const char *header = base + off;
     RecordHeader h;
@@ -510,6 +512,9 @@ bool Table::recover_records(const WalScan &wal, u64 checkpoint, bool wal_empty) 
     }
     RowRef ref{off, h.payload_len};
     if (visible) {
+      // A committed record behind the garbage means the file cannot simply
+      // be cut off at the garbage.
+      if (garbage_off) garbage_tail_only = false;
       if (h.type == WalType::ROW) {
         rows_[h.row_id] = ref;
         if (cache_.size() * 2 < rows_.size() + 16 || cache_bytes_ < cache_budget_) {
@@ -521,19 +526,36 @@ bool Table::recover_records(const WalScan &wal, u64 checkpoint, bool wal_empty) 
       }
     } else {
       needs_compact = true;
+      if (!garbage_off) garbage_off = off;
     }
     off += kHeaderSize + h.payload_len;
   }
   if (off < total) {
     // Partial tail from a crash.  It is not part of any committed record.
-    ::ftruncate(fd_, static_cast<off_t>(off));
-    file_size_ = off;
+    if (!garbage_off || off < garbage_off) {
+      garbage_off = off;
+      garbage_tail_only = true;
+    }
     needs_compact = true;
   }
+  garbage_off_ = garbage_off;
+  garbage_tail_only_ = garbage_tail_only && garbage_off > 0;
   ensure_mapped();
   live_bytes_ = file_size_;
   snapshot_valid_ = false;
   return needs_compact;
+}
+
+void Table::truncate_garbage_tail() {
+  if (garbage_off_ == 0 || garbage_off_ > file_size_) return;
+  ::ftruncate(fd_, static_cast<off_t>(garbage_off_));
+  file_size_ = garbage_off_;
+  synced_bytes_ = file_size_;
+  live_bytes_ = file_size_;
+  garbage_off_ = 0;
+  garbage_tail_only_ = false;
+  ensure_mapped();
+  snapshot_valid_ = false;
 }
 
 void Table::compact() {
@@ -784,7 +806,18 @@ void Database::recover() {
   for (Table *t : wal_touched_) need_compact.push_back(t);
   std::sort(need_compact.begin(), need_compact.end());
   need_compact.erase(std::unique(need_compact.begin(), need_compact.end()), need_compact.end());
-  for (Table *t : need_compact) t->compact();
+  for (Table *t : need_compact) {
+    // When the records of the transaction that never committed sit at the end
+    // of the file and the log did not replay anything into this table, the
+    // file can be cut off there instead of being rewritten row by row.  On a
+    // multi gigabyte table that is the difference between a few seconds and
+    // a full rewrite of the data.
+    if (t->has_garbage_tail() && !wal_touched_.count(t)) {
+      t->truncate_garbage_tail();
+      continue;
+    }
+    t->compact();
+  }
 
   // All records are now committed and durable enough to make the WAL
   // redundant.  Record the checkpoint first, then truncate the log.

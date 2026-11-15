@@ -127,6 +127,11 @@ class Table {
   void ensure_mapped();
   u64 live_bytes() const { return live_bytes_; }
   u64 data_bytes() const;
+  // Records that belong to a transaction which never committed.  When they
+  // sit at the end of the file the table can be truncated instead of being
+  // rewritten, which is much cheaper on a large table.
+  bool has_garbage_tail() const { return garbage_tail_only_ && garbage_off_ > 0; }
+  void truncate_garbage_tail();
   void adjust_live(i64 delta) {
     if (delta < 0 && live_bytes_ < static_cast<u64>(-delta)) live_bytes_ = 0;
     else live_bytes_ = static_cast<u64>(static_cast<i64>(live_bytes_) + delta);
@@ -156,6 +161,10 @@ class Table {
   size_t cache_bytes_ = 0;
   size_t cache_budget_ = kDefaultCacheBudget;
   u64 live_bytes_ = 0;
+  // Offset of the first record that does not belong to a committed
+  // transaction, and whether everything behind it is garbage as well.
+  u64 garbage_off_ = 0;
+  bool garbage_tail_only_ = false;
   std::vector<ScanEntry> snapshot_;
   bool snapshot_valid_ = false;
   bool snapshot_usable_ = false;
