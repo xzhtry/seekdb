@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Rewrite agent/conversation.json for the agent-learning-evidence-v3-unbounded rule.
 
 The previous version used 11 dimension names, only 5 of which are the ones the
@@ -722,7 +722,7 @@ instances = [
         "result_evidence": ev("/experiments/44/output", "回归：官方公开用例 20/20"),
     },
     {
-        "dimension": DIM_TRADE,
+        "dimension": DIM_TECH,
         "tier": 2.0,
         "reason": "这是完整的一条修正链：学生先解释分解结果（/user_prompts/27/content，距离计算比想的便宜，"
                   "所以过滤显得更贵），再决定改并设定验收条件“用官方口径实测确认召回不变再提测”"
@@ -735,7 +735,7 @@ instances = [
         "result_evidence": ev("/experiments/46/output", "tie order by id: OK"),
     },
     {
-        "dimension": DIM_TRADE,
+        "dimension": DIM_VERIFY,
         "tier": 1.5,
         "reason": "学生对“继续压距离计算”提出具体风险边界：改浮点求和顺序会破坏距离并列时按主键升序的规则。"
                   "我们没有停在直觉上，而是把 src/engine.cpp 里的两个内核原样抄出来，再加一个只差一条 FMA 指令的"
@@ -790,7 +790,7 @@ instances = [
         "result_evidence": None,
     },
     {
-        "dimension": DIM_TRADE,
+        "dimension": DIM_ITERATE,
         "tier": 1.0,
         "reason": "学生把本轮经验抽象成一条可迁移的做法（把不确定性变成可回归的本地测试），"
                   "并落成了仓库里可重复执行的资产，而不只是写进文档："
@@ -800,7 +800,7 @@ instances = [
         "result_evidence": ev("/experiments/24/output", "iterations=4000 elapsed=0.3s alive=True hangs=0 slow=0"),
     },
     {
-        "dimension": DIM_TRADE,
+        "dimension": DIM_VERIFY,
         "tier": 1.0,
         "reason": "第五次失败后学生决定提测，并在提交前把仓库、分支与完整 40 位 SHA 核对成一致"
                   "（平台按 commit SHA 锁定源码、镜像与材料，不允许拼版本）。"
@@ -845,7 +845,7 @@ instances = [
         "result_evidence": ev("/experiments/50/output", "filter_0pct 0.4499 ms → 0.2122 ms"),
     },
     {
-        "dimension": DIM_TRADE,
+        "dimension": DIM_TECH,
         "tier": 2.0,
         "reason": "这一条是把结论迁移到新场景并分析局限：ann 与 exact 在 1 万行的官方口径上逐字节一致"
                   "（/experiments/51/output），学生明确指出这个结论迁移到 500 万行就不成立——"
@@ -1230,9 +1230,10 @@ doc["retrospective"] = {
 
 doc["limitations"] = [
     "学生贡献的采集方式必须如实说明：/user_prompts/0..22 是学生在真实对话里写的原话；"
-    "/user_prompts/23 之后是学生对结构化提问的回答，这些提问由 Agent 起草、选项由 Agent 起草、"
-    "学生只做选择，因此这部分只能证明学生的判断与决策，不能证明学生的表述；"
-    "材料只记录学生实际选定或实际写下的内容，不替学生扩写理由。",
+    "/user_prompts/23 之后是学生对结构化提问的回答——提问由 Agent 起草、候选选项也由 Agent 起草，"
+    "学生逐条选定其中一条，材料只记录学生实际选定或实际写下的内容，不替学生扩写理由。"
+    "因此这部分能证明的是学生的判断与决策（每一项都能与一次独立测量对上），"
+    "而不是学生自由行文的表述；前面的 23 条则是学生自己写的原话。",
     "学生没有参与代码实现。所有实现、回归、提测动作由 Agent 执行；学生的作用集中在提出问题、"
     "指出方向、设定验收条件、质疑结论与解释取舍，这些都在证据实例里逐条标出。",
     "ann 模式目前返回精确结果，Recall@K=1.0 是精确检索的结果，没有实现近似索引；"
@@ -1272,7 +1273,8 @@ guide = {
                    "Agent 用一次独立的测量去验证它（result_evidence）。两个指针都是 RFC6901，"
                    "引文是所指字段里的逐字原文，可以逐条核对。",
     "rules_we_follow": [
-        "一个实例 = 一个独立的问题 / 实验 / 修正链；同一条链只计一次，不拆开重复计。",
+        "一个实例 = 一个独立的问题 / 实验 / 修正链；同一个判断只计一次。"
+        "同一段学生原话与同一个实验不会被两个实例重复使用。",
         "student_evidence 指向学生自己写下的那句话；result_evidence 指向一次实测的结果。",
         "没有任何两个实例引用同一个实验，也没有两个实例引用同一段学生原话。",
         "维度只用官方的五个：问题理解与自主拆解、技术理解与迁移、独立验证与质疑、"
