@@ -339,6 +339,7 @@ void Table::open_data() {
 }
 
 void Table::close_data() {
+  flush_writes();
   map_.unmap();
   if (fd_ >= 0) {
     ::close(fd_);
@@ -347,6 +348,9 @@ void Table::close_data() {
 }
 
 void Table::ensure_mapped() {
+  // The buffered records are not in the file yet, and the file size below is
+  // read back from the descriptor, so they have to be written first.
+  flush_writes();
   u64 sz = file_size(fd_);
   if (sz != file_size_) file_size_ = sz;
   map_.remap(file_size_);
@@ -468,15 +472,27 @@ void Table::erase_row(i64 id) {
 
 RowRef Table::append_record(WalType type, u64 txn, i64 row_id, std::string_view payload) {
   std::string rec = encode_record(kDataMagic, type, txn, row_id, schema_.id, payload);
-  write_all(fd_, rec.data(), rec.size(), static_cast<off_t>(file_size_));
   RowRef ref;
   ref.offset = file_size_;
   ref.length = static_cast<u32>(payload.size());
   file_size_ += rec.size();
+  // The records of one statement are contiguous, so they are collected and
+  // written in one batch.  One pwrite per row cost one system call per row,
+  // which is pure overhead on a batch of a hundred rows.
+  wbuf_ += rec;
+  if (wbuf_.size() >= kWriteBatchBytes) flush_writes();
   return ref;
 }
 
+void Table::flush_writes() {
+  if (wbuf_.empty()) return;
+  off_t off = static_cast<off_t>(file_size_ - wbuf_.size());
+  write_all(fd_, wbuf_.data(), wbuf_.size(), off);
+  wbuf_.clear();
+}
+
 void Table::fsync_data() {
+  flush_writes();
   ::fdatasync(fd_);
   synced_bytes_ = file_size_;
 }
@@ -548,6 +564,9 @@ bool Table::recover_records(const WalScan &wal, u64 checkpoint, bool wal_empty) 
 
 void Table::truncate_garbage_tail() {
   if (garbage_off_ == 0 || garbage_off_ > file_size_) return;
+  // Write the pending records first: the truncation cuts the file at
+  // garbage_off_, and the buffer may still hold records behind it.
+  flush_writes();
   ::ftruncate(fd_, static_cast<off_t>(garbage_off_));
   file_size_ = garbage_off_;
   synced_bytes_ = file_size_;
@@ -968,6 +987,9 @@ void Database::commit_changes(std::vector<Change> &changes) {
       c.table->cache_row(c.id, c.row, false);
     }
   }
+  // The rows have to be in the file before the statement answers: a later
+  // scan may fall back to the mapped file instead of the row cache.
+  for (Change &c : changes) c.table->flush_writes();
   // Push the data file out to disk regularly: in the judge's 2 GiB memory
   // cgroup the dirty page cache counts against the limit, and once it fills
   // up every following write is throttled until the writeback catches up.
@@ -1027,6 +1049,9 @@ void Database::commit_txn() {
       c.table->cache_row(c.id, c.row, false);
     }
   }
+  // The rows have to be in the file before the statement answers: a later
+  // scan may fall back to the mapped file instead of the row cache.
+  for (Change &c : changes) c.table->flush_writes();
   // Same dirty page cache bound as in the autocommit path.
   for (Change &c : changes) {
     if (c.table->unsynced_bytes() > data_sync_interval()) c.table->fsync_data();

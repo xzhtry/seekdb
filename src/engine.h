@@ -5,6 +5,9 @@
 
 namespace mvdb {
 
+// Data file records are written in batches of this size.
+constexpr size_t kWriteBatchBytes = 256 * 1024;
+
 struct RowRef {
   u64 offset = 0;
   u32 length = 0;  // payload length
@@ -111,6 +114,10 @@ class Table {
   // (2 GiB): unreclaimable dirty pages count against that limit and slow every
   // following write down.
   u64 unsynced_bytes() const { return file_size_ - synced_bytes_; }
+  // Records of one statement are contiguous, so they are written in one batch
+  // instead of one pwrite per row.  The buffer is always flushed before the
+  // file size is observed from the outside (map, fsync, truncate, close).
+  void flush_writes();
 
   bool get_ref(i64 id, RowRef &ref) const;
   bool has_row(i64 id) const;
@@ -166,6 +173,7 @@ class Table {
   u64 garbage_off_ = 0;
   bool garbage_tail_only_ = false;
   std::vector<ScanEntry> snapshot_;
+  std::string wbuf_;  // pending data file records
   bool snapshot_valid_ = false;
   bool snapshot_usable_ = false;
 
