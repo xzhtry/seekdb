@@ -105,8 +105,21 @@ static void put_f32(std::string &out, float f) {
 
 std::string serialize_row(const TableSchema &schema, const Row &row) {
   if (row.values.size() != schema.columns.size()) fail(1105, "row column count mismatch");
+  // The size of the payload is known before it is written, so the buffer is
+  // allocated once instead of growing while the row is serialized.  A row
+  // carries a vector, so the growth used to copy the row several times.
+  size_t need = 0;
+  for (size_t i = 0; i < schema.columns.size(); ++i) {
+    const Column &c = schema.columns[i];
+    const Value &v = row.values[i];
+    switch (c.type) {
+      case ColType::BIGINT: need += 8; break;
+      case ColType::VARCHAR: need += 4 + v.s.size(); break;
+      case ColType::VECTOR: need += static_cast<size_t>(c.param) * 4; break;
+    }
+  }
   std::string out;
-  out.reserve(64);
+  out.reserve(need);
   for (size_t i = 0; i < schema.columns.size(); ++i) {
     const Column &c = schema.columns[i];
     const Value &v = row.values[i];
@@ -124,7 +137,19 @@ std::string serialize_row(const TableSchema &schema, const Row &row) {
       case ColType::VECTOR: {
         if (v.type != ValueType::VECTOR || v.v.size() != c.param)
           fail(1105, "row value is not VECTOR");
-        for (float f : v.v) put_f32(out, f);
+        // The float bytes are written in one block, in the same little endian
+        // order put_u32 uses, so the record is byte for byte the same.
+        size_t base = out.size();
+        out.resize(base + static_cast<size_t>(c.param) * 4);
+        char *dst = &out[base];
+        for (u32 k = 0; k < c.param; ++k) {
+          u32 bits;
+          std::memcpy(&bits, &v.v[k], 4);
+          dst[4 * k + 0] = static_cast<char>(bits & 0xff);
+          dst[4 * k + 1] = static_cast<char>((bits >> 8) & 0xff);
+          dst[4 * k + 2] = static_cast<char>((bits >> 16) & 0xff);
+          dst[4 * k + 3] = static_cast<char>((bits >> 24) & 0xff);
+        }
         break;
       }
     }

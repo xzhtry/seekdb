@@ -1,6 +1,7 @@
 #include "sql.h"
 
 #include <charconv>
+#include <cstring>
 #include <cmath>
 
 namespace mvdb {
@@ -22,11 +23,22 @@ ExprPtr clone_expr(const Expr &e) {
 
 namespace {
 
-bool is_ident_start(unsigned char c) {
-  return std::isalpha(c) || c == '_' || c == '$' || c >= 0x80;
+// The character classes below are the ASCII ones the grammar needs.  The
+// standard library functions are calls into libc, and the lexer runs them on
+// every character of every statement, so the inline versions pay off on the
+// large INSERT statements.
+inline bool is_digit_ascii(unsigned char c) { return c >= '0' && c <= '9'; }
+inline bool is_space_ascii(unsigned char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
-bool is_ident_char(unsigned char c) {
-  return std::isalnum(c) || c == '_' || c == '$' || c >= 0x80;
+inline bool is_alpha_ascii(unsigned char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+inline bool is_ident_start(unsigned char c) {
+  return is_alpha_ascii(c) || c == '_' || c == '$' || c >= 0x80;
+}
+inline bool is_ident_char(unsigned char c) {
+  return is_alpha_ascii(c) || is_digit_ascii(c) || c == '_' || c == '$' || c >= 0x80;
 }
 
 // Aggregate functions are explicitly out of scope for this task.
@@ -92,7 +104,7 @@ std::vector<Token> Lexer::tokenize() {
   const size_t n = sql_.size();
   while (pos_ < n) {
     unsigned char c = static_cast<unsigned char>(sql_[pos_]);
-    if (std::isspace(c)) {
+    if (is_space_ascii(c)) {
       ++pos_;
       continue;
     }
@@ -161,40 +173,61 @@ std::vector<Token> Lexer::tokenize() {
       ++pos_;
       std::string raw;
       bool closed = false;
-      while (pos_ < n) {
-        char ch = sql_[pos_];
-        if (ch == quote) {
-          if (pos_ + 1 < n && sql_[pos_ + 1] == quote) {
-            raw.push_back(quote);
+      bool has_escape = false;
+      // Fast path: a string without an escape is copied in one block and
+      // needs no unescaping.  The protocol sends the vector literals as
+      // strings, so this is the hot path of the write phase.
+      {
+        const char *start = sql_.data() + pos_;
+        const char *end = sql_.data() + n;
+        const char *q = static_cast<const char *>(memchr(start, quote, static_cast<size_t>(end - start)));
+        if (q) {
+          size_t len = static_cast<size_t>(q - start);
+          if (memchr(start, '\\', len) == nullptr) {
+            raw.assign(start, len);
+            pos_ += len + 1;
+            closed = true;
+          }
+        }
+      }
+      if (!closed) {
+        while (pos_ < n) {
+          char ch = sql_[pos_];
+          if (ch == quote) {
+            if (pos_ + 1 < n && sql_[pos_ + 1] == quote) {
+              raw.push_back(quote);
+              pos_ += 2;
+              continue;
+            }
+            ++pos_;
+            closed = true;
+            break;
+          }
+          if (ch == '\\' && pos_ + 1 < n) {
+            has_escape = true;
+            raw.push_back(ch);
+            raw.push_back(sql_[pos_ + 1]);
             pos_ += 2;
             continue;
           }
-          ++pos_;
-          closed = true;
-          break;
-        }
-        if (ch == '\\' && pos_ + 1 < n) {
           raw.push_back(ch);
-          raw.push_back(sql_[pos_ + 1]);
-          pos_ += 2;
-          continue;
+          ++pos_;
         }
-        raw.push_back(ch);
-        ++pos_;
       }
       if (!closed) fail(ER_PARSE, "unterminated string literal");
       t.type = Token::Type::STRING;
-      t.text = unescape_sql_string(raw);
+      // The fast path already knows that there is nothing to unescape.
+      t.text = has_escape ? unescape_sql_string(raw) : std::move(raw);
       out.push_back(std::move(t));
       continue;
     }
-    if (std::isdigit(c) || (c == '.' && pos_ + 1 < n && std::isdigit(static_cast<unsigned char>(sql_[pos_ + 1])))) {
+    if (is_digit_ascii(c) || (c == '.' && pos_ + 1 < n && is_digit_ascii(static_cast<unsigned char>(sql_[pos_ + 1])))) {
       size_t b = pos_;
       bool dot = false, exp = false;
       if (c == '.') { dot = true; ++pos_; }
       while (pos_ < n) {
         unsigned char d = static_cast<unsigned char>(sql_[pos_]);
-        if (std::isdigit(d)) {
+        if (is_digit_ascii(d)) {
           ++pos_;
         } else if (d == '.' && !dot && !exp) {
           dot = true;
@@ -226,42 +259,119 @@ std::vector<Token> Lexer::tokenize() {
   return out;
 }
 
+// A decimal in a vector literal is a plain number like "0.123456".  When the
+// mantissa is exactly representable as a double and the power of ten is
+// exactly representable as well, one IEEE division or multiplication gives
+// the correctly rounded result, which is exactly what std::from_chars
+// returns.  The fast path is therefore not an approximation: it either
+// produces the same double or it is not used.
+bool parse_decimal_exact(const char *p, const char *e, double &out, const char *&endp) {
+  static const double kPow10[] = {
+      1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
+      1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
+  const char *q = p;
+  bool neg = false;
+  if (q < e && (*q == '+' || *q == '-')) {
+    neg = (*q == '-');
+    ++q;
+  }
+  u64 mant = 0;
+  int digits = 0;
+  int frac = 0;
+  bool any = false;
+  while (q < e && is_digit_ascii(static_cast<unsigned char>(*q))) {
+    if (digits >= 19) return false;
+    mant = mant * 10 + static_cast<u64>(*q - '0');
+    ++digits;
+    ++q;
+    any = true;
+  }
+  if (q < e && *q == '.') {
+    ++q;
+    while (q < e && is_digit_ascii(static_cast<unsigned char>(*q))) {
+      if (digits >= 19) return false;
+      mant = mant * 10 + static_cast<u64>(*q - '0');
+      ++digits;
+      ++frac;
+      ++q;
+      any = true;
+    }
+  }
+  if (!any) return false;
+  int exp10 = 0;
+  if (q < e && (*q == 'e' || *q == 'E')) {
+    ++q;
+    bool eneg = false;
+    if (q < e && (*q == '+' || *q == '-')) {
+      eneg = (*q == '-');
+      ++q;
+    }
+    int v = 0;
+    int n = 0;
+    while (q < e && is_digit_ascii(static_cast<unsigned char>(*q))) {
+      if (n >= 3) return false;
+      v = v * 10 + (*q - '0');
+      ++n;
+      ++q;
+    }
+    if (n == 0) return false;
+    exp10 = eneg ? -v : v;
+  }
+  // The mantissa has to be exact, and the power of ten has to be exact.
+  if (mant > (1ull << 53)) return false;
+  int k = exp10 - frac;
+  if (k > 22 || k < -22) return false;
+  double v = static_cast<double>(mant);
+  if (k >= 0) {
+    v *= kPow10[k];
+  } else {
+    v /= kPow10[-k];
+  }
+  out = neg ? -v : v;
+  endp = q;
+  return true;
+}
+
 std::vector<double> parse_vector_text(std::string_view s, bool &ok) {
   ok = false;
   std::vector<double> out;
   size_t i = 0;
-  while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+  while (i < s.size() && is_space_ascii(static_cast<unsigned char>(s[i]))) ++i;
   if (i >= s.size() || s[i] != '[') return out;
   ++i;
-  while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+  while (i < s.size() && is_space_ascii(static_cast<unsigned char>(s[i]))) ++i;
   if (i < s.size() && s[i] == ']') {
     ++i;
-    while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+    while (i < s.size() && is_space_ascii(static_cast<unsigned char>(s[i]))) ++i;
     ok = (i == s.size());
     return out;
   }
   while (i < s.size()) {
-    while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+    while (i < s.size() && is_space_ascii(static_cast<unsigned char>(s[i]))) ++i;
     size_t b = i;
     if (i < s.size() && s[i] == '+') ++i;
     if (i >= s.size()) return out;
     const char *nb = s.data() + i;
     const char *ne = s.data() + s.size();
     double v = 0;
-    auto res = std::from_chars(nb, ne, v);
-    if (res.ec != std::errc() || res.ptr == nb) return out;
+    const char *after = nullptr;
+    if (!parse_decimal_exact(nb, ne, v, after)) {
+      auto res = std::from_chars(nb, ne, v);
+      if (res.ec != std::errc() || res.ptr == nb) return out;
+      after = res.ptr;
+    }
     if (!std::isfinite(v)) return out;
     out.push_back(v);
-    i = static_cast<size_t>(res.ptr - s.data());
+    i = static_cast<size_t>(after - s.data());
     (void)b;
-    while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+    while (i < s.size() && is_space_ascii(static_cast<unsigned char>(s[i]))) ++i;
     if (i < s.size() && s[i] == ',') {
       ++i;
       continue;
     }
     if (i < s.size() && s[i] == ']') {
       ++i;
-      while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+      while (i < s.size() && is_space_ascii(static_cast<unsigned char>(s[i]))) ++i;
       if (i != s.size()) return out;
       ok = true;
       return out;

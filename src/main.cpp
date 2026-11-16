@@ -373,6 +373,23 @@ bool json_read_string(const std::string &s, size_t &i, std::string &out) {
   if (i >= s.size() || s[i] != '"') return false;
   ++i;
   out.clear();
+  // Fast path: the protocol sends the whole SQL statement as one JSON string,
+  // so the characters up to the closing quote are copied in one go instead of
+  // one push_back per character.  A backslash anywhere in the range sends the
+  // string through the slow path below, which handles the escapes.
+  {
+    size_t left = s.size() - i;
+    const char *start = s.data() + i;
+    const char *quote = static_cast<const char *>(memchr(start, '"', left));
+    if (quote) {
+      size_t len = static_cast<size_t>(quote - start);
+      if (memchr(start, '\\', len) == nullptr) {
+        out.append(start, len);
+        i += len + 1;
+        return true;
+      }
+    }
+  }
   while (i < s.size()) {
     char c = s[i++];
     if (c == '"') return true;
@@ -461,7 +478,7 @@ bool json_skip_container(const std::string &s, size_t &i) {
   return false;
 }
 
-bool json_read_value(const std::string &s, size_t &i, JsonField &f) {
+bool json_read_value(const std::string &s, size_t &i, JsonField &f, bool need_raw = true) {
   json_skip_ws(s, i);
   if (i >= s.size()) return false;
   size_t start = i;
@@ -477,8 +494,11 @@ bool json_read_value(const std::string &s, size_t &i, JsonField &f) {
     std::string tmp;
     if (!json_read_string(s, i, tmp)) return false;
     f.is_string = true;
-    f.str = tmp;
-    f.raw = s.substr(start, i - start);
+    f.str = std::move(tmp);
+    // The raw text of a string is only needed when it is echoed back
+    // verbatim (the request id), so the SQL statement does not pay for a
+    // second copy of itself.
+    if (need_raw) f.raw = s.substr(start, i - start);
     return true;
   }
   if (s.compare(i, 4, "true") == 0) {
@@ -523,7 +543,7 @@ bool json_parse_line(const std::string &line, std::vector<JsonField> &fields) {
     ++i;
     JsonField f;
     f.key = key;
-    if (!json_read_value(line, i, f)) return false;
+    if (!json_read_value(line, i, f, f.key != "sql")) return false;
     fields.push_back(std::move(f));
     json_skip_ws(line, i);
     if (i < line.size() && line[i] == ',') {
@@ -804,7 +824,7 @@ int run_jsonl(Database &db) {
       } else if (f.key == "op" && f.is_string) {
         op = f.str;
       } else if (f.key == "sql" && f.is_string) {
-        sql = f.str;
+        sql = std::move(f.str);
         have_sql = true;
       } else if (f.key == "search_mode" && f.is_string) {
         mode = f.str;
