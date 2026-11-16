@@ -1763,9 +1763,53 @@ ResultSet Database::exec_select(const Statement &st) {
         std::vector<FastCand> all;
         if (!bounded) all.reserve(snap->size());
         size_t dim = schema.columns[vc].param;
+        // `column = 'literal'` is the shape the benchmark filter has.  The
+        // generic path spends about eighty instructions per row on it: the
+        // kind checks, the evaluation context and the call itself.  The
+        // specialised comparison below is the same comparison, so a filter of
+        // any other shape keeps the generic path and the semantics do not
+        // depend on the shape of the condition.
+        int filter_col = -1;
+        const std::string *filter_lit = nullptr;
+        if (s.where && s.where->kind == CondKind::COMPARE && s.where->op == CmpOp::EQ) {
+          const Expr *col = nullptr;
+          const Expr *lit = nullptr;
+          if (s.where->left->kind == ExprKind::COLUMN &&
+              s.where->right->kind == ExprKind::STRING_LITERAL) {
+            col = s.where->left.get();
+            lit = s.where->right.get();
+          } else if (s.where->right->kind == ExprKind::COLUMN &&
+                     s.where->left->kind == ExprKind::STRING_LITERAL) {
+            col = s.where->right.get();
+            lit = s.where->left.get();
+          }
+          if (col && lit && col->col_index >= 0) {
+            filter_col = col->col_index;
+            filter_lit = &lit->s;
+          }
+        }
         for (const auto &e : *snap) {
           if (!e.vec) continue;
-          if (s.where) {
+          if (filter_lit) {
+            int idx = filter_col;
+            if (idx < static_cast<int>(e.row->values.size())) {
+              const Value &v = e.row->values[idx];
+              if (v.type == ValueType::STRING) {
+                if (v.s != *filter_lit) continue;
+              } else {
+                // Not a string: let the generic path decide what happens.
+                EvalContext ctx;
+                ctx.schema = &schema;
+                ctx.row = e.row;
+                if (!eval_cond(*s.where, ctx)) continue;
+              }
+            } else {
+              EvalContext ctx;
+              ctx.schema = &schema;
+              ctx.row = e.row;
+              if (!eval_cond(*s.where, ctx)) continue;
+            }
+          } else if (s.where) {
             EvalContext ctx;
             ctx.schema = &schema;
             ctx.row = e.row;
