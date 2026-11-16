@@ -31,7 +31,13 @@ std::string trim(std::string_view s) {
   return std::string(s.substr(b, e - b));
 }
 
-static u32 crc_table[256];
+// Slice by eight.  The checksum is the CRC32 of the reflected IEEE
+// polynomial, so the value must not change: the table below is the same
+// polynomial, only eight bytes are folded per step.  Every record of the
+// data file and of the WAL carries a checksum, and a byte at a time table
+// lookup costs about seven instructions per byte, which was the tenth of the
+// instructions of the whole run.
+static u32 crc_table[8][256];
 static bool crc_table_ready = false;
 
 static void init_crc_table() {
@@ -39,7 +45,14 @@ static void init_crc_table() {
   for (u32 i = 0; i < 256; ++i) {
     u32 c = i;
     for (int k = 0; k < 8; ++k) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-    crc_table[i] = c;
+    crc_table[0][i] = c;
+  }
+  for (u32 i = 0; i < 256; ++i) {
+    u32 c = crc_table[0][i];
+    for (int k = 1; k < 8; ++k) {
+      c = crc_table[0][c & 0xff] ^ (c >> 8);
+      crc_table[k][i] = c;
+    }
   }
   crc_table_ready = true;
 }
@@ -48,7 +61,19 @@ u32 crc32_update(u32 crc, const void *data, size_t len) {
   init_crc_table();
   const u8 *p = static_cast<const u8 *>(data);
   crc = ~crc;
-  for (size_t i = 0; i < len; ++i) crc = crc_table[(crc ^ p[i]) & 0xff] ^ (crc >> 8);
+  while (len >= 8) {
+    // The first four bytes are folded into the register, the last four are
+    // looked up one table per byte.
+    u32 c = crc ^ (static_cast<u32>(p[0]) | (static_cast<u32>(p[1]) << 8) |
+                   (static_cast<u32>(p[2]) << 16) | (static_cast<u32>(p[3]) << 24));
+    crc = crc_table[7][c & 0xff] ^ crc_table[6][(c >> 8) & 0xff] ^
+          crc_table[5][(c >> 16) & 0xff] ^ crc_table[4][(c >> 24) & 0xff] ^
+          crc_table[3][p[4]] ^ crc_table[2][p[5]] ^ crc_table[1][p[6]] ^
+          crc_table[0][p[7]];
+    p += 8;
+    len -= 8;
+  }
+  for (size_t i = 0; i < len; ++i) crc = crc_table[0][(crc ^ p[i]) & 0xff] ^ (crc >> 8);
   return ~crc;
 }
 

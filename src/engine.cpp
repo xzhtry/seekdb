@@ -38,12 +38,17 @@ static void put_u64_at(char *p, u64 v) {
 static u32 get_u32_at(const char *p) { return get_u32(p); }
 static u64 get_u64_at(const char *p) { return get_u64(p); }
 
-static std::string encode_record(u32 magic, WalType type, u64 txn, i64 row_id, u32 table_id,
-                                 std::string_view payload) {
+// The record is appended to the buffer that collects the records of a
+// statement.  Building the record in a string of its own and appending that
+// string copied every byte of every row twice, and a row of the benchmark
+// carries 512 bytes of vector.
+static void encode_record_into(std::string &out, u32 magic, WalType type, u64 txn, i64 row_id,
+                                u32 table_id, std::string_view payload) {
   if (payload.size() > kMaxRecordPayload) fail(1105, "record too large");
-  std::string out;
-  out.resize(kHeaderSize + payload.size());
-  char *p = out.data();
+  size_t base = out.size();
+  out.append(kHeaderSize, '\0');
+  if (!payload.empty()) out.append(payload.data(), payload.size());
+  char *p = out.data() + base;
   put_u32_at(p, magic);
   p[4] = static_cast<char>(type);
   p[5] = 0;
@@ -54,10 +59,15 @@ static std::string encode_record(u32 magic, WalType type, u64 txn, i64 row_id, u
   put_u32_at(p + 24, table_id);
   put_u32_at(p + 28, static_cast<u32>(payload.size()));
   put_u32_at(p + 32, 0);
-  if (!payload.empty()) std::memcpy(p + kHeaderSize, payload.data(), payload.size());
   u32 crc = crc32(p, 32);
   crc = crc32_update(crc, payload.data(), payload.size());
   put_u32_at(p + 32, crc);
+}
+
+static std::string encode_record(u32 magic, WalType type, u64 txn, i64 row_id, u32 table_id,
+                                 std::string_view payload) {
+  std::string out;
+  encode_record_into(out, magic, type, txn, row_id, table_id, payload);
   return out;
 }
 
@@ -97,12 +107,6 @@ static bool verify_crc(const char *header, const char *payload, u32 payload_len)
 // ===========================================================================
 // Row serialization.
 // ===========================================================================
-static void put_f32(std::string &out, float f) {
-  u32 bits;
-  std::memcpy(&bits, &f, 4);
-  put_u32(out, bits);
-}
-
 std::string serialize_row(const TableSchema &schema, const Row &row) {
   if (row.values.size() != schema.columns.size()) fail(1105, "row column count mismatch");
   // The size of the payload is known before it is written, so the buffer is
@@ -496,15 +500,15 @@ void Table::erase_row(i64 id) {
 }
 
 RowRef Table::append_record(WalType type, u64 txn, i64 row_id, std::string_view payload) {
-  std::string rec = encode_record(kDataMagic, type, txn, row_id, schema_.id, payload);
   RowRef ref;
   ref.offset = file_size_;
   ref.length = static_cast<u32>(payload.size());
-  file_size_ += rec.size();
   // The records of one statement are contiguous, so they are collected and
   // written in one batch.  One pwrite per row cost one system call per row,
   // which is pure overhead on a batch of a hundred rows.
-  wbuf_ += rec;
+  size_t before = wbuf_.size();
+  encode_record_into(wbuf_, kDataMagic, type, txn, row_id, schema_.id, payload);
+  file_size_ += wbuf_.size() - before;
   if (wbuf_.size() >= kWriteBatchBytes) flush_writes();
   return ref;
 }
@@ -989,7 +993,7 @@ void Database::commit_changes(std::vector<Change> &changes) {
       payload = serialize_row(c.table->schema(), c.row);
       type = WalType::ROW;
     }
-    walbuf += encode_record(kWalMagic, type, txn, c.id, c.table->schema().id, payload);
+    encode_record_into(walbuf, kWalMagic, type, txn, c.id, c.table->schema().id, payload);
     // Hand the log records over in batches instead of building one huge
     // string: a statement that rewrites a large table must not need as much
     // memory as the table itself.
@@ -998,7 +1002,7 @@ void Database::commit_changes(std::vector<Change> &changes) {
       walbuf.clear();
     }
   }
-  walbuf += encode_record(kWalMagic, WalType::COMMIT, txn, 0, 0, {});
+  encode_record_into(walbuf, kWalMagic, WalType::COMMIT, txn, 0, 0, {});
   wal_.append_batch(walbuf, true);
 
   for (Change &c : changes) {
@@ -1059,9 +1063,9 @@ void Database::commit_txn() {
       payload = serialize_row(c.table->schema(), c.row);
       type = WalType::ROW;
     }
-    walbuf += encode_record(kWalMagic, type, txn, c.id, c.table->schema().id, payload);
+    encode_record_into(walbuf, kWalMagic, type, txn, c.id, c.table->schema().id, payload);
   }
-  walbuf += encode_record(kWalMagic, WalType::COMMIT, txn, 0, 0, {});
+  encode_record_into(walbuf, kWalMagic, WalType::COMMIT, txn, 0, 0, {});
   wal_.append_batch(walbuf, true);
   for (Change &c : changes) {
     if (c.deleted) {
@@ -1521,25 +1525,28 @@ Value coerce_for_column(const Value &v, const Column &col) {
       return v;
     }
     case ColType::VECTOR: {
-      std::vector<double> nums;
       if (v.type == ValueType::VECTOR) {
-        nums.reserve(v.v.size());
-        for (float f : v.v) nums.push_back(static_cast<double>(f));
-      } else if (v.type == ValueType::STRING) {
-        bool ok = false;
-        nums = parse_vector_text(v.s, ok);
-        if (!ok) fail(ER_INVALID_VECTOR, "invalid vector literal");
-      } else {
-        fail(ER_INVALID_VECTOR, "VECTOR column requires a vector value");
+        // The value already is a vector of float32.  The generic path below
+        // widens it to double and narrows it back, and that round trip is the
+        // identity for every finite float, so it only cost an allocation and
+        // two copies of the whole vector per row.
+        if (v.v.size() != static_cast<size_t>(col.param))
+          fail(ER_INVALID_VECTOR, "vector dimension mismatch for column '" + col.name + "'");
+        for (float f : v.v)
+          if (!std::isfinite(f)) fail(ER_INVALID_VECTOR, "vector value out of float32 range");
+        return Value::make_vector(std::vector<float>(v.v));
       }
-      if (nums.size() != col.param)
+      if (v.type != ValueType::STRING)
+        fail(ER_INVALID_VECTOR, "VECTOR column requires a vector value");
+      bool ok = false;
+      std::vector<double> nums = parse_vector_text(v.s, ok);
+      if (!ok) fail(ER_INVALID_VECTOR, "invalid vector literal");
+      if (nums.size() != static_cast<size_t>(col.param))
         fail(ER_INVALID_VECTOR, "vector dimension mismatch for column '" + col.name + "'");
       std::vector<float> out(col.param);
       for (size_t i = 0; i < nums.size(); ++i) {
         double d = nums[i];
-        if (!std::isfinite(d) || std::fabs(d) > static_cast<double>(FLT_MAX) ||
-            (d != 0 && std::fabs(d) < static_cast<double>(FLT_TRUE_MIN) &&
-             false))
+        if (!std::isfinite(d) || std::fabs(d) > static_cast<double>(FLT_MAX))
           fail(ER_INVALID_VECTOR, "vector value out of float32 range");
         float f = static_cast<float>(d);
         if (!std::isfinite(f)) fail(ER_INVALID_VECTOR, "vector value out of float32 range");
@@ -1549,6 +1556,20 @@ Value coerce_for_column(const Value &v, const Column &col) {
     }
   }
   fail(ER_UNSUPPORTED, "unsupported column type");
+}
+
+// The same conversion for a value that is not used afterwards.  The buffer of
+// a vector column can be handed over instead of copied, which saves one copy
+// of 512 bytes per inserted row.
+Value coerce_for_column(Value &&v, const Column &col) {
+  if (col.type == ColType::VECTOR && v.type == ValueType::VECTOR) {
+    if (v.v.size() != static_cast<size_t>(col.param))
+      fail(ER_INVALID_VECTOR, "vector dimension mismatch for column '" + col.name + "'");
+    for (float f : v.v)
+      if (!std::isfinite(f)) fail(ER_INVALID_VECTOR, "vector value out of float32 range");
+    return Value::make_vector(std::move(v.v));
+  }
+  return coerce_for_column(static_cast<const Value &>(v), col);
 }
 
 Value literal_value(const Expr &e) {
@@ -2007,7 +2028,7 @@ ResultSet Database::exec_insert(const Statement &st) {
     for (size_t i = 0; i < exprs.size(); ++i) {
       if (!exprs[i]) fail(ER_PARSE, "missing value");
       Value v = literal_value(*exprs[i]);
-      row.values[mapping[i]] = coerce_for_column(v, schema.columns[mapping[i]]);
+      row.values[mapping[i]] = coerce_for_column(std::move(v), schema.columns[mapping[i]]);
       assigned[mapping[i]] = true;
     }
     for (size_t i = 0; i < ncols; ++i) {
@@ -2113,7 +2134,7 @@ ResultSet Database::exec_update(const Statement &st) {
       Row nr = row;
       for (auto &set : sets) {
         Value v = eval_expr(*set.second, ctx);
-        nr.values[set.first] = coerce_for_column(v, schema.columns[set.first]);
+        nr.values[set.first] = coerce_for_column(std::move(v), schema.columns[set.first]);
       }
       Change c;
       c.table = t;
@@ -2163,10 +2184,10 @@ ResultSet Database::exec_update(const Statement &st) {
     Row nr = row;
     for (auto &set : sets) {
       Value v = eval_expr(*set.second, ctx);
-      nr.values[set.first] = coerce_for_column(v, schema.columns[set.first]);
+      nr.values[set.first] = coerce_for_column(std::move(v), schema.columns[set.first]);
     }
     std::string payload = serialize_row(schema, nr);
-    walbuf += encode_record(kWalMagic, WalType::ROW, txn, id, schema.id, payload);
+    encode_record_into(walbuf, kWalMagic, WalType::ROW, txn, id, schema.id, payload);
     if (walbuf.size() >= kWalBatchBytes) {
       wal_.append_batch(walbuf, false);
       walbuf.clear();
@@ -2177,7 +2198,7 @@ ResultSet Database::exec_update(const Statement &st) {
     ++affected;
     if (t->unsynced_bytes() > data_sync_interval()) t->fsync_data();
   }
-  walbuf += encode_record(kWalMagic, WalType::COMMIT, txn, 0, 0, {});
+  encode_record_into(walbuf, kWalMagic, WalType::COMMIT, txn, 0, 0, {});
   wal_.append_batch(walbuf, true);
   if (wal_.size() > 64ull * 1024ull * 1024ull) checkpoint_now();
   rs.affected = affected;
@@ -2282,7 +2303,7 @@ ResultSet Database::exec_delete(const Statement &st) {
     ctx.schema = &schema;
     ctx.row = rowp;
     if (s.where && !eval_cond(*s.where, ctx)) continue;
-    walbuf += encode_record(kWalMagic, WalType::DEL, txn, id, schema.id, {});
+    encode_record_into(walbuf, kWalMagic, WalType::DEL, txn, id, schema.id, {});
     if (walbuf.size() >= kWalBatchBytes) {
       wal_.append_batch(walbuf, false);
       walbuf.clear();
@@ -2292,7 +2313,7 @@ ResultSet Database::exec_delete(const Statement &st) {
     ++affected;
     if (t->unsynced_bytes() > data_sync_interval()) t->fsync_data();
   }
-  walbuf += encode_record(kWalMagic, WalType::COMMIT, txn, 0, 0, {});
+  encode_record_into(walbuf, kWalMagic, WalType::COMMIT, txn, 0, 0, {});
   wal_.append_batch(walbuf, true);
   if (wal_.size() > 64ull * 1024ull * 1024ull) checkpoint_now();
   rs.affected = affected;

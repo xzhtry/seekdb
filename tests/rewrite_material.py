@@ -540,6 +540,40 @@ new_experiments = [
                       "与改动前的读数（1.42 ms / 15.7 µs / 48% / 52%）相比比例接近、绝对值有波动——"
                       "写阶段仍是这两笔账，而不是系统调用的次数。",
     },
+    {
+        "id": "e67",
+        "title": "写阶段指令级剖析与一批可证明不改语义的改动",
+        "hypothesis": "写阶段的成本已经拆成 fsync 固定往返与每行解析搬运两块，但每块具体花多少指令还没量过；"
+                      "动代码之前先用指令计数定位热点，改完必须证明输出没有变。",
+        "command": "valgrind --tool=callgrind ./build/minivectordb --data-dir /var/tmp/cgdir --protocol jsonl < req.jsonl",
+        "output": "833,326,159 条指令（1 万行写入 + 40 条查询）：parse_decimal_exact 27.60%、memcpy 13.09%、"
+                  "crc32_update 10.79%、parse_vector_text 9.47%、serialize_row 6.07%、l2_avx2 4.59%。"
+                  "改动后写阶段指令数 176.2M → 126.7M → 76.9M（-56%）；"
+                  "CRC 切八与逐字节查表对同一多项式输出完全相同（校验值 0xCBF43926、全长度与链式更新一致）；"
+                  "tbl_1.dat / wal.log / catalog.db / meta.db 的 md5 与改动前逐字节一致",
+        "student_role": "学生要求把性能分提上去（/user_prompts/50/content）；"
+                        "“优势空间在解析与搬运，这部分自己能优化”是学生此前给出的判断（/user_prompts/44/content）。",
+        "conclusion": "热点确实落在学生指出的那一侧：浮点字面量解析与行序列化占掉整轮的三分之一以上。"
+                      "改动分别是批量拷贝、无转义时跳过反转义、十进制精确快路径、CRC 切八、"
+                      "去掉向量强制转换里恒等的 double 往返、记录直写目标缓冲区；"
+                      "指令数砍掉一半以上，而四个文件逐字节不变，语义没有被改。",
+    },
+    {
+        "id": "e68",
+        "title": "交替 A/B 最终测量：优化前与优化后",
+        "hypothesis": "指令数下降不等于墙钟下降；必须在同一台机器上交替测量两个二进制，"
+                      "而且每轮反转先后顺序，避免把机器漂移算成收益。",
+        "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10 --bin <binary>",
+        "output": "4 轮交替、每轮反转顺序：写阶段 0.3525 → 0.2470 s（-30%），最小值 0.311 → 0.242 s（-22%）；"
+                  "查询 0.4305 → 0.4155 s（-3.5%）；峰值 RSS 14,203,328 → 13,807,616 B（-2.8%）；"
+                  "写盘字节数 11,714,560 前后完全一致；Recall@10 plain/filtered 与 ann 两组都是 1.0",
+        "student_role": "学生要求把性能分提上去（/user_prompts/50/content），"
+                        "并定下“先对拍、再微基准、再官方 benchmark、最后全量回归”的验证顺序"
+                        "（/user_prompts/34/content）。",
+        "conclusion": "写阶段这一侧确实拿到了二到三成的收益，查询侧在噪声内，字节数与召回率都没有变。"
+                      "同一批测量也给出了这条路的边界：写阶段在 E 里只占三分之一，"
+                      "而进榜需要 2.11 倍，所以这是真实收益，但不足以把性能项送进榜。",
+    },
 ]
 for exp in new_experiments:
     doc["experiments"].append(exp)
@@ -893,9 +927,11 @@ instances = [
         "reason": "学生把写阶段的成本分成两块：fsync 的固定往返是 durability 的硬要求（地板），"
                   "解析并搬运 128 个浮点字面量虽然所有实现都要付，但那是自己能动的部分。"
                   "实测支持这个划分：每提交成本随行宽从 2.54 ms（无向量列）升到 15.57 ms（128 维），"
-                  "差额正是 WAL 载荷带来的额外刷盘量——学生据此指出优势空间在解析与搬运。",
+                  "每行 98.7 µs、每提交 9.87 ms。这个判断在当晚被落实——指令级剖析确认热点就在解析与"
+                  "序列化一侧，做完一批可证明不改语义的改动后写阶段指令数降到原来的 44%，"
+                  "而数据文件、WAL、catalog 与 meta 的 md5 逐字节不变。",
         "student_evidence": ev("/user_prompts/44/content", "优势空间在解析与搬运，这部分自己能优化"),
-        "result_evidence": ev("/experiments/53/output", "128 维 98.7 µs/行、9.87 ms/提交"),
+        "result_evidence": ev("/experiments/65/output", "写阶段指令数 176.2M → 126.7M → 76.9M（-56%）"),
     },
     {
         "dimension": DIM_TRADE,
@@ -1122,8 +1158,8 @@ def compact(doc, cited_cap=112, plain_cap=68, role_cap=130, cmd_cap=80):
                     pos = text.find(q)
                     if pos < 0:
                         continue
-                    start = max(0, pos - 60)
-                    end = min(len(text), pos + len(q) + 60)
+                    start = max(0, pos - 32)
+                    end = min(len(text), pos + len(q) + 32)
                     pieces.append(text[start:end].strip())
                 if pieces:
                     exp[fname] = " … ".join(pieces)
@@ -1203,6 +1239,7 @@ problems, citations = check(doc)
 # 4. Scope, retrospective and limitations.
 # ---------------------------------------------------------------------------
 doc["schema"] = "agent-learning-evidence-v3-unbounded"
+doc["date"] = "2026-11-09 .. 2026-11-16"
 doc["material_scope"] = (
     "MiniVectorDB 加赛材料：47 条学生输入（22 条对话原文 + 25 条结构化提问的回答）、"
     "56 个实验、35 个独立证据实例，全部归入官方五个维度（问题理解与自主拆解、技术理解与迁移、"
@@ -1282,7 +1319,8 @@ doc["limitations"] = [
     "/user_prompts/23 之后是学生对结构化提问的回答——提问由 Agent 起草、候选选项也由 Agent 起草，"
     "学生逐条选定其中一条，材料只记录学生实际选定或实际写下的内容，不替学生扩写理由。"
     "因此这部分能证明的是学生的判断与决策（每一项都能与一次独立测量对上），"
-    "而不是学生自由行文的表述；前面的 23 条则是学生自己写的原话。",
+    "而不是学生自由行文的表述；前面的 23 条则是学生自己写的原话。"
+    "/user_prompts/50 是例外：它同样是学生自己写下的原话，是学生重新登录平台后直接提出的一条要求。",
     "学生没有参与代码实现。所有实现、回归、提测动作由 Agent 执行；学生的作用集中在提出问题、"
     "指出方向、设定验收条件、质疑结论与解释取舍，这些都在证据实例里逐条标出。",
     "ann 模式目前返回精确结果，Recall@K=1.0 是精确检索的结果，没有实现近似索引；"

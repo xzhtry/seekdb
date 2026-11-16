@@ -237,6 +237,7 @@ def run_round(args, rng):
 
 
 def main():
+    global BIN
     ap = argparse.ArgumentParser()
     ap.add_argument("--rows", type=int, default=10000)
     ap.add_argument("--dims", type=int, default=128)
@@ -249,8 +250,12 @@ def main():
     ap.add_argument("--recall-sample", type=int, default=20)
     ap.add_argument("--seed", type=int, default=20261115)
     ap.add_argument("--workdir", default="/var/tmp/benchofficial")
+    ap.add_argument("--bin", default="", help="server binary (default: build/minivectordb)")
     ap.add_argument("--json-out", default="")
     args = ap.parse_args()
+
+    if args.bin:
+        BIN = args.bin
 
     rounds = []
     for r in range(args.rounds):
