@@ -1181,21 +1181,37 @@ static double l2_scalar(const float *a, const float *b, size_t n) {
 }
 
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+// One block of eight floats.  The order of the additions is the order of the
+// blocks, so unrolling the loop does not change the result.
+#define MVDB_L2_BLOCK(off)                                                  \
+  {                                                                         \
+    __m256 va = _mm256_loadu_ps(a + i + (off));                             \
+    __m256 vb = _mm256_loadu_ps(b + i + (off));                             \
+    __m256 d = _mm256_sub_ps(va, vb);                                       \
+    __m128 lo = _mm256_castps256_ps128(d);                                  \
+    __m128 hi = _mm256_extractf128_ps(d, 1);                               \
+    __m256d dlo = _mm256_cvtps_pd(lo);                                     \
+    __m256d dhi = _mm256_cvtps_pd(hi);                                     \
+    sum0 = _mm256_fmadd_pd(dlo, dlo, sum0);                                \
+    sum1 = _mm256_fmadd_pd(dhi, dhi, sum1);                                \
+  }
+
 __attribute__((target("avx2,fma"))) static double l2_avx2(const float *a, const float *b,
                                                           size_t n) {
   __m256d sum0 = _mm256_setzero_pd();
   __m256d sum1 = _mm256_setzero_pd();
   size_t i = 0;
+  // Four blocks per iteration.  The loop control was a quarter of the
+  // instructions of the kernel, and the benchmark dimension is a multiple of
+  // thirty two, so the tail loop runs zero times there.
+  for (; i + 32 <= n; i += 32) {
+    MVDB_L2_BLOCK(0)
+    MVDB_L2_BLOCK(8)
+    MVDB_L2_BLOCK(16)
+    MVDB_L2_BLOCK(24)
+  }
   for (; i + 8 <= n; i += 8) {
-    __m256 va = _mm256_loadu_ps(a + i);
-    __m256 vb = _mm256_loadu_ps(b + i);
-    __m256 d = _mm256_sub_ps(va, vb);
-    __m128 lo = _mm256_castps256_ps128(d);
-    __m128 hi = _mm256_extractf128_ps(d, 1);
-    __m256d dlo = _mm256_cvtps_pd(lo);
-    __m256d dhi = _mm256_cvtps_pd(hi);
-    sum0 = _mm256_fmadd_pd(dlo, dlo, sum0);
-    sum1 = _mm256_fmadd_pd(dhi, dhi, sum1);
+    MVDB_L2_BLOCK(0)
   }
   double lanes0[4], lanes1[4];
   _mm256_storeu_pd(lanes0, sum0);
@@ -1209,6 +1225,7 @@ __attribute__((target("avx2,fma"))) static double l2_avx2(const float *a, const 
   }
   return std::sqrt(total);
 }
+#undef MVDB_L2_BLOCK
 #endif
 
 static double vector_l2_ptr(const float *a, const float *b, size_t n) {
