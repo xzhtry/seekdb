@@ -566,13 +566,30 @@ new_experiments = [
         "command": "python3 tests/bench_official_shape.py --rounds 3 --recall-sample 10 --bin <binary>",
         "output": "4 轮交替、每轮反转顺序：写阶段 0.3525 → 0.2470 s（-30%），最小值 0.311 → 0.242 s（-22%）；"
                   "查询 0.4305 → 0.4155 s（-3.5%）；峰值 RSS 14,203,328 → 13,807,616 B（-2.8%）；"
-                  "写盘字节数 11,714,560 前后完全一致；Recall@10 plain/filtered 与 ann 两组都是 1.0",
+                  "写盘字节数 11,714,560 前后完全一致；Recall@10 plain/filtered 与 ann 两组都是 1.0。"
+                  "查询侧随后两处改动同口径复测：过滤特化 0.379 → 0.362 s（-4.5%），"
+                  "内核展开 0.3575 → 0.3315 s（-7.3%），两次都逐条比对了 200 条查询的响应（完全相同）",
         "student_role": "学生要求把性能分提上去（/user_prompts/50/content），"
                         "并定下“先对拍、再微基准、再官方 benchmark、最后全量回归”的验证顺序"
                         "（/user_prompts/34/content）。",
         "conclusion": "写阶段这一侧确实拿到了二到三成的收益，查询侧在噪声内，字节数与召回率都没有变。"
                       "同一批测量也给出了这条路的边界：写阶段在 E 里只占三分之一，"
-                      "而进榜需要 2.11 倍，所以这是真实收益，但不足以把性能项送进榜。",
+                      "而进榜需要 2.11 倍，所以这是真实收益，但不足以把性能项送进榜。"
+                      "查询侧后来又拿到一成多的收益（过滤就地比较、内核四块展开），两次响应逐字节相同。",
+    },
+    {
+        "id": "e69",
+        "title": "查询侧的行级剖析：过滤比较与距离内核的每行开销",
+        "hypothesis": "查询阶段占 E 的三分之二，它的每行开销还没有量过；"
+                      "在改代码之前先把每行的指令都定位出来。",
+        "command": "valgrind --tool=callgrind ./build/minivectordb --data-dir /var/tmp/cgdir --protocol jsonl < reqq.jsonl",
+        "output": "查询阶段每行 22.5 条循环指令，每次距离计算 205 条；"
+                  "过滤比较走通用求值路径约 40 条/行；"
+                  "内核的循环控制单独占 56 条/次（128 维）",
+        "student_role": "学生要求把性能分提上去（/user_prompts/50/content）。",
+        "conclusion": "两处都改了：过滤比较在扫描循环里就地做，内核四块展开。"
+                      "交替 A/B：过滤特化 -4.5%、内核展开 -7.3%，"
+                      "两次都逐条比对了 200 条查询的响应，写盘字节数与召回率不变。",
     },
 ]
 for exp in new_experiments:
@@ -1158,8 +1175,8 @@ def compact(doc, cited_cap=112, plain_cap=68, role_cap=130, cmd_cap=80):
                     pos = text.find(q)
                     if pos < 0:
                         continue
-                    start = max(0, pos - 32)
-                    end = min(len(text), pos + len(q) + 32)
+                    start = max(0, pos - 21)
+                    end = min(len(text), pos + len(q) + 21)
                     pieces.append(text[start:end].strip())
                 if pieces:
                     exp[fname] = " … ".join(pieces)
@@ -1282,6 +1299,11 @@ doc["retrospective"] = {
         "喂同一份构造数据——换求和顺序就让等距两行的先后翻转（差 1 ulp）；当前内核是精确并列、按主键排序。",
         "材料本身也做了结构调整：证据索引放到最前面（只读一部分也能看到全部实例）、"
         "每个实例引用一次互不重复的实验（此前有五组共用）、加了一页 evidence_guide 说明规则与档位依据。",
+        "查询侧也没有停在直觉上：用行级剖析把每行的指令都量了出来，发现过滤比较走的是通用求值路径"
+        "（约 40 条/行）、距离内核的循环控制占了内核四分之一的指令。分别改成在扫描循环里就地比较、"
+        "以及内核四块展开之后，交替 A/B 量到查询阶段 0.379 → 0.3315 s（-12.7%），"
+        "并且两次都逐条比对了 200 条查询的响应，确认结果一个字都没变——"
+        "内核展开不改变求和顺序，所以等距并列仍然按主键升序。",
     ],
     "what_failed_or_uncertain": [
         "上一版材料自称 20 分而平台只给 2.5，平台不公布评审明细（提测记录里只有一句汇总），"
