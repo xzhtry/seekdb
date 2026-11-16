@@ -276,28 +276,30 @@ bool parse_decimal_exact(const char *p, const char *e, double &out, const char *
     ++q;
   }
   u64 mant = 0;
-  int digits = 0;
-  int frac = 0;
-  bool any = false;
-  while (q < e && is_digit_ascii(static_cast<unsigned char>(*q))) {
-    if (digits >= 19) return false;
-    mant = mant * 10 + static_cast<u64>(*q - '0');
-    ++digits;
+  // The digits are accumulated without a check per digit.  Up to nineteen
+  // digits the accumulator cannot overflow, and the length of a longer run is
+  // known from the pointers, so such a run is rejected after it was read.
+  const char *int_start = q;
+  while (q < e) {
+    unsigned d = static_cast<unsigned>(static_cast<unsigned char>(*q)) - '0';
+    if (d > 9) break;
+    mant = mant * 10 + d;
     ++q;
-    any = true;
   }
+  int digits = static_cast<int>(q - int_start);
+  int frac = 0;
   if (q < e && *q == '.') {
     ++q;
-    while (q < e && is_digit_ascii(static_cast<unsigned char>(*q))) {
-      if (digits >= 19) return false;
-      mant = mant * 10 + static_cast<u64>(*q - '0');
-      ++digits;
-      ++frac;
+    const char *frac_start = q;
+    while (q < e) {
+      unsigned d = static_cast<unsigned>(static_cast<unsigned char>(*q)) - '0';
+      if (d > 9) break;
+      mant = mant * 10 + d;
       ++q;
-      any = true;
     }
+    frac = static_cast<int>(q - frac_start);
+    digits += frac;
   }
-  if (!any) return false;
   int exp10 = 0;
   if (q < e && (*q == 'e' || *q == 'E')) {
     ++q;
@@ -317,6 +319,8 @@ bool parse_decimal_exact(const char *p, const char *e, double &out, const char *
     if (n == 0) return false;
     exp10 = eneg ? -v : v;
   }
+  if (digits == 0) return false;
+  if (digits > 19) return false;
   // The mantissa has to be exact, and the power of ten has to be exact.
   if (mant > (1ull << 53)) return false;
   int k = exp10 - frac;

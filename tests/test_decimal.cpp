@@ -13,6 +13,8 @@
 
 typedef uint64_t u64;
 
+static inline bool is_digit_ascii(unsigned char c) { return c >= '0' && c <= '9'; }
+
 static bool parse_decimal_exact(const char *p, const char *e, double &out, const char *&endp) {
   static const double kPow10[] = {
       1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
@@ -24,28 +26,27 @@ static bool parse_decimal_exact(const char *p, const char *e, double &out, const
     ++q;
   }
   u64 mant = 0;
-  int digits = 0;
-  int frac = 0;
-  bool any = false;
-  while (q < e && is_digit_ascii((unsigned char)*q)) {
-    if (digits >= 19) return false;
-    mant = mant * 10 + (u64)(*q - '0');
-    ++digits;
+  const char *int_start = q;
+  while (q < e) {
+    unsigned d = static_cast<unsigned>(static_cast<unsigned char>(*q)) - '0';
+    if (d > 9) break;
+    mant = mant * 10 + d;
     ++q;
-    any = true;
   }
+  int digits = static_cast<int>(q - int_start);
+  int frac = 0;
   if (q < e && *q == '.') {
     ++q;
-    while (q < e && is_digit_ascii((unsigned char)*q)) {
-      if (digits >= 19) return false;
-      mant = mant * 10 + (u64)(*q - '0');
-      ++digits;
-      ++frac;
+    const char *frac_start = q;
+    while (q < e) {
+      unsigned d = static_cast<unsigned>(static_cast<unsigned char>(*q)) - '0';
+      if (d > 9) break;
+      mant = mant * 10 + d;
       ++q;
-      any = true;
     }
+    frac = static_cast<int>(q - frac_start);
+    digits += frac;
   }
-  if (!any) return false;
   int exp10 = 0;
   if (q < e && (*q == 'e' || *q == 'E')) {
     ++q;
@@ -65,6 +66,8 @@ static bool parse_decimal_exact(const char *p, const char *e, double &out, const
     if (n == 0) return false;
     exp10 = eneg ? -v : v;
   }
+  if (digits == 0) return false;
+  if (digits > 19) return false;
   if (mant > (1ull << 53)) return false;
   int k = exp10 - frac;
   if (k > 22 || k < -22) return false;
@@ -88,8 +91,12 @@ int main() {
     double v1 = 0, v2 = 0;
     const char *after = nullptr;
     bool ok1 = parse_decimal_exact(s.data(), s.data() + s.size(), v1, after);
-    auto res = std::from_chars(s.data(), s.data() + s.size(), v2);
-    bool ok2 = (res.ec == std::errc() && res.ptr != s.data());
+    // The fast path reads the sign itself, and from_chars does not take a
+    // leading plus, so the magnitude is the part that has to agree.
+    const char *mag = s.data();
+    if (!s.empty() && s[0] == '+') ++mag;
+    auto res = std::from_chars(mag, s.data() + s.size(), v2);
+    bool ok2 = (res.ec == std::errc() && res.ptr != mag);
     if (!ok1) return;  // rejected: the fallback path handles it
     ++accepted;
     if (!ok2) {

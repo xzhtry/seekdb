@@ -1228,6 +1228,21 @@ __attribute__((target("avx2,fma"))) static double l2_avx2(const float *a, const 
 #undef MVDB_L2_BLOCK
 #endif
 
+// The kernel that is used does not change from row to row, so the scan picks
+// it once and calls it directly.  The function local static of vector_l2_ptr
+// carries an initialization guard, and the guard is checked on every call.
+using L2Kernel = double (*)(const float *, const float *, size_t);
+
+static L2Kernel l2_kernel_for(size_t n) {
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+  static const bool have_avx2 =
+      __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
+  if (have_avx2 && n >= 16) return &l2_avx2;
+#endif
+  (void)n;
+  return &l2_scalar;
+}
+
 static double vector_l2_ptr(const float *a, const float *b, size_t n) {
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
   static const bool have_avx2 =
@@ -1780,6 +1795,8 @@ ResultSet Database::exec_select(const Statement &st) {
         std::vector<FastCand> all;
         if (!bounded) all.reserve(snap->size());
         size_t dim = schema.columns[vc].param;
+        // The kernel is picked once for the whole scan.
+        const L2Kernel l2 = l2_kernel_for(dim);
         // `column = 'literal'` is the shape the benchmark filter has.  The
         // generic path spends about eighty instructions per row on it: the
         // kind checks, the evaluation context and the call itself.  The
@@ -1832,7 +1849,7 @@ ResultSet Database::exec_select(const Statement &st) {
             ctx.row = e.row;
             if (!eval_cond(*s.where, ctx)) continue;
           }
-          double d = vector_l2_ptr(e.vec, dist->fnums.data(), dim);
+          double d = l2(e.vec, dist->fnums.data(), dim);
           FastCand fc{d, e.id, e.row};
           if (bounded) {
             if (cap == 0) continue;
