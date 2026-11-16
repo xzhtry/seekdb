@@ -988,7 +988,7 @@ ExprPtr Parser::parse_primary() {
     if (!ok) fail(ER_PARSE, "invalid vector literal");
     ExprPtr e = make_expr(ExprKind::VECTOR_LITERAL);
     e->nums = std::move(nums);
-    e->text = raw;
+    e->text = std::move(raw);
     return e;
   }
   if (t.type == Token::Type::IDENT) {
