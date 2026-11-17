@@ -386,7 +386,10 @@ std::vector<double> parse_vector_text(std::string_view s, bool &ok) {
 }
 
 Parser::Parser(std::string sql) : sql_(std::move(sql)) {
-  Lexer lex(sql_);
+  // The parser does not use the statement text after the tokens are built,
+  // so the lexer takes it over instead of copying it: a statement of a
+  // hundred rows is a hundred kilobytes of text.
+  Lexer lex(std::move(sql_));
   tokens_ = lex.tokenize();
   comments_ = lex.comments();
 }

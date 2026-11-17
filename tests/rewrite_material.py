@@ -1495,6 +1495,9 @@ guide = {
         "2": "在同一实例中迁移到新场景，完成验证，并结合结果分析局限",
     },
     "rules_we_follow": [
+        "材料里三类来源分开写：student_evidence 是学生本人写下的原话；"
+        "experiments 的 command 与 output 是工具跑出来的命令与实测输出；"
+        "experiments 的 conclusion 是 Agent 对这个结果的解读，不冒充学生的结论。",
         "一个实例 = 一个独立的问题 / 实验 / 修正链；同一个判断只计一次。"
         "同一段学生原话与同一个实验不会被两个实例重复使用。",
         "student_evidence 指向学生本人写下的原话；result_evidence 指向一次实测的结果。"
