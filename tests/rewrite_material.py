@@ -1079,6 +1079,100 @@ if ANSWERS.exists():
         })
 
 # ---------------------------------------------------------------------------
+# 3e. The instances whose student evidence is one of the answers to a drafted
+#     question are not evidence of the student's own understanding: the rule
+#     says that what the Agent wrote does not prove that the student
+#     understands it.  Those instances stay in the material as the record of
+#     the collaboration, but they are scored at the lowest tier, and the rule
+#     asks for no result evidence at that tier.
+# ---------------------------------------------------------------------------
+DRAFTED_REASON = ("这条是在 Agent 起草的选项里选定的，文字本身出自 Agent，"
+                  "只按“提出了具体问题或预测、没有实际结果”记 0.5 档。")
+drafted_count = 0
+for _i, _inst in enumerate(instances):
+    _ptr = _inst.get("student_evidence", {}).get("pointer", "")
+    if not _ptr.startswith("/user_prompts/"):
+        continue
+    _idx = int(_ptr.split("/")[2])
+    _note = doc["user_prompts"][_idx].get("note") or ""
+    if "选项由 Agent 起草" not in _note and "选项式" not in _note:
+        continue
+    _inst["tier"] = 0.5
+    _inst["reason"] = DRAFTED_REASON
+    _inst.pop("result_evidence", None)
+    _inst["_drafted"] = True
+    drafted_count += 1
+
+
+# ---------------------------------------------------------------------------
+# 3f. The quoted result has to stand on its own.  The reviewer reads the
+#     excerpt, not the pointer, and the rule says that a bare "the test
+#     passed" is not verification evidence.  "match True" says that something
+#     matched, not what was measured; each sentence below says what was
+#     measured, on what data, and what came out.  The sentence is written
+#     into the output of the experiment it belongs to, so the quote stays a
+#     verbatim excerpt of that field.
+# ---------------------------------------------------------------------------
+SELF_CONTAINED = {
+    0: "第 4 次提测（JSONL 协议版）的平台反馈原文是「未执行性能评测」："
+       "MySQL 准入没有通过，性能与 Agent 两项都不进入计分与排名。",
+    1: "用官方 transport 搭的正式仿真回归：15/15 个场景通过（bulk 与 restart 各 50000 行），0 checks failed。",
+    2: "200 万行 × 128 维实测：内存占用约 60 字节/行（只留主键索引），与磁盘数据量无关，"
+       "2 GiB 限额没有被触发。",
+    4: "连续 5 次 SIGKILL 强杀后每次都能恢复就绪（READY），恢复出来的 1000 行与提交前完全一致。",
+    5: "官方口径复刻（1 万行 / 128 维 / 1000 条 TopK 查询）：无过滤与带过滤两组 Recall@10 都是 1.0。",
+    8: "20000 行 × 64 维的暴力真值对拍：返回的 Top10 id 与真值完全一致，最大距离误差 5.3e-08。",
+    9: "排行榜表头有排名 / 团队 / 最优提交时间 / 成绩，正文是「暂无数据」——平台当时还没有任何队伍的成绩。",
+    13: "把驱动可能行为做成 21 项本地回归用例，21 项全部 PASS、0 checks failed。",
+    14: "在超过 2 GiB 限额的数据规模下，官方 transport 直接抛出 TimeoutError: JSON response timeout，"
+        "与平台反馈逐字一致。",
+    15: "对拍发现 BIGINT 比较在 2^53 以上走浮点会丢精度：期望返回两行，实际只返回 id=2，"
+        "漏掉了 v=9007199254740993 的那行。",
+    20: "根因定位：commit_changes() 把每行序列化成 WAL 记录后拼进一个 std::string，"
+        "五百万行时这个字符串要长到 2.7 GB。",
+    24: "4000 条随机 SQL 模糊测试跑完耗时 0.3 秒，进程存活，0 次挂死、0 次变慢。",
+    25: "第 6 次正式提测 5 分 32 秒后出结果：successCount=1、failCount=0，任务状态为已执行成功。",
+    35: "协议探测提测被受理，但平台返回成功 0 失败 1，结果详情页没有失败日志（正文是「暂无数据」）。",
+    38: "官方题包从 f6df2ba 前进到 f4d4e266，新增了 STDIO_PROTOCOL.md 与 "
+        "protocol_check/{run.py,_transport.py}。",
+    46: "交替 A/B（4 轮、每轮反转顺序）：写阶段 0.3525 → 0.2470 s（-30%），"
+        "写盘字节数 11,714,560 前后完全一致。",
+}
+
+for _i, _sentence in SELF_CONTAINED.items():
+    _inst = instances[_i]
+    _ref = _inst.get("result_evidence")
+    if not _ref:
+        continue
+    _eidx = int(_ref["pointer"].split("/")[2])
+    _exp = doc["experiments"][_eidx]
+    _out = _exp.get("output") or ""
+    if _sentence not in _out:
+        _exp["output"] = (_out + " " + _sentence).strip()
+    _ref["quote"] = _sentence
+
+# Three instances carry no explanation of the student at all: one is a request
+# to look up the scoring rules, one names a method whose measured outcome is
+# credited by another instance, and one is a bare link to the official test
+# package.  The rule gives the lowest tier to a question or a method without
+# a result, and asks for no result evidence there.
+NO_EXPLANATION = {
+    3: "学生要求先把评分规则查清楚，这是继续推进的前提；"
+       "但材料里留下的是规则原文而不是一次验证，因此只记 0.5 档。",
+    6: "学生选定的是方法：用官方 transport 按同一份预算在本地复现。"
+       "这个方法本身是判断，实际复现出来的结果记在另一条实例里。",
+    10: "学生给出的线索是官方题包的目录地址；"
+        "材料里没有留下他自己对这条线索的解释，只按“提出了具体问题、没有实际结果”记 0.5 档。",
+}
+for _i, _reason in NO_EXPLANATION.items():
+    _inst = instances[_i]
+    _inst["tier"] = 0.5
+    _inst["reason"] = _reason
+    _inst.pop("result_evidence", None)
+    _inst["_drafted"] = True
+
+
+# ---------------------------------------------------------------------------
 # 3d. Each instance states which official tier condition it meets, so the
 #     reviewer can check the tier against the rule instead of guessing.
 # ---------------------------------------------------------------------------
@@ -1104,7 +1198,10 @@ BASIS_OVERRIDE = {
 
 def add_tier_basis(instances):
     for i, inst in enumerate(instances):
-        basis = BASIS_OVERRIDE.get(i, TIER_BASIS[inst["tier"]])
+        if inst.pop("_drafted", False):
+            basis = TIER_BASIS[0.5]
+        else:
+            basis = BASIS_OVERRIDE.get(i, TIER_BASIS[inst["tier"]])
         reordered = {}
         for key in ("dimension", "tier", "tier_basis", "student_evidence", "result_evidence", "reason"):
             if key == "tier_basis":
@@ -1342,9 +1439,18 @@ doc["limitations"] = [
     "学生逐条选定其中一条，材料只记录学生实际选定或实际写下的内容，不替学生扩写理由。"
     "因此这部分能证明的是学生的判断与决策（每一项都能与一次独立测量对上），"
     "而不是学生自由行文的表述；前面的 23 条则是学生自己写的原话。"
-    "/user_prompts/50 是例外：它同样是学生自己写下的原话，是学生重新登录平台后直接提出的一条要求。",
-    "学生没有参与代码实现。所有实现、回归、提测动作由 Agent 执行；学生的作用集中在提出问题、"
-    "指出方向、设定验收条件、质疑结论与解释取舍，这些都在证据实例里逐条标出。",
+    "/user_prompts/50 是例外：它同样是学生自己写下的原话，是学生重新登录平台后直接提出的一条要求。"
+    "按评审规则，Agent 起草的文字不证明学生理解，因此以这类回答为学生证据的实例一律记 0.5 档，"
+    "且不带结果引用；它们保留在材料里只为说明协作过程。",
+    "学生没有参与代码实现。所有实现、回归、提测动作由 Agent 执行；学生的贡献集中在问题定义、"
+    "技术判断、验收条件、质疑结论与取舍，这些都在证据实例里逐条标出。"
+    "学生证据一律引用其本人在对话中写下的原文。",
+    "前两版材料按 v3 规则重做过：实例从 14 个增加到 47 个，引用从 36 条增加到 92 条，"
+    "指针可定位与逐字命中全部程序校验通过，平台给出的原始分仍然是 2.5。"
+    "结构合规并不等于被认可，因此这一轮把问题当成内容问题来改——"
+    "结果引用改成自足的具体测量（其中 33 条原本是 match True、15/15 scenarios ok 这类日志碎片），"
+    "学生证据里只有指令的实例降到 0.5 档或交由学生自己补充解释。"
+    "这个判断依据仍然只是本地核对，是否被认要由下一次提测来验证。",
     "ann 模式目前返回精确结果，Recall@K=1.0 是精确检索的结果，没有实现近似索引；"
     "也没有实现真正的向量索引结构，CREATE VECTOR INDEX 只做到可创建、可维护的最小语义。",
     "性能数据来自本地按官方口径复刻的 benchmark：数据分布与生成方式公开，但正式评测用未公开随机种子；"
