@@ -153,7 +153,17 @@ class Table {
     const float *vec;
   };
   const std::vector<ScanEntry> *scan_snapshot();
-  void invalidate_snapshot() { snapshot_valid_ = false; }
+  void invalidate_snapshot() {
+    snapshot_valid_ = false;
+    fingerprints_.clear();
+  }
+  // A fingerprint of the value of a column for every row of the snapshot.
+  // The rows live in a hash map, so reading one value of one row costs two
+  // cache misses; the fingerprint of a column is one number per row and lets
+  // a filter reject a row without walking to the row at all.  It is built on
+  // the first query that filters on the column and thrown away with the
+  // snapshot.
+  const std::vector<u64> *fingerprints(int column);
 
  private:
   Database *db_;
@@ -173,6 +183,7 @@ class Table {
   u64 garbage_off_ = 0;
   bool garbage_tail_only_ = false;
   std::vector<ScanEntry> snapshot_;
+  std::vector<std::vector<u64>> fingerprints_;  // one entry per column
   std::string wbuf_;  // pending data file records
   bool snapshot_valid_ = false;
   bool snapshot_usable_ = false;
@@ -263,6 +274,10 @@ class Database {
     i64 id;
     bool deleted;
     Row row;
+    // The serialized row, filled in while the log record is written.  The log
+    // and the data file hold the same bytes, so the row is serialized once
+    // and both copies take it from here.
+    std::string payload;
   };
   void commit_changes(std::vector<Change> &changes);
   void apply_change_to_memory(Table *t, const Change &c);

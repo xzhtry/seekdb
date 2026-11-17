@@ -142,10 +142,17 @@ std::string serialize_row(const TableSchema &schema, const Row &row) {
         if (v.type != ValueType::VECTOR || v.v.size() != c.param)
           fail(1105, "row value is not VECTOR");
         // The float bytes are written in one block, in the same little endian
-        // order put_u32 uses, so the record is byte for byte the same.
+        // order put_u32 uses, so the record is byte for byte the same.  The
+        // byte at a time loop that did this wrote one byte per instruction,
+        // and a vector of the benchmark shape is a hundred and twenty eight
+        // of them.
         size_t base = out.size();
-        out.resize(base + static_cast<size_t>(c.param) * 4);
+        size_t bytes = static_cast<size_t>(c.param) * 4;
+        out.resize(base + bytes);
         char *dst = &out[base];
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+        std::memcpy(dst, v.v.data(), bytes);
+#else
         for (u32 k = 0; k < c.param; ++k) {
           u32 bits;
           std::memcpy(&bits, &v.v[k], 4);
@@ -154,6 +161,7 @@ std::string serialize_row(const TableSchema &schema, const Row &row) {
           dst[4 * k + 2] = static_cast<char>((bits >> 16) & 0xff);
           dst[4 * k + 3] = static_cast<char>((bits >> 24) & 0xff);
         }
+#endif
         break;
       }
     }
@@ -459,6 +467,41 @@ const std::vector<Table::ScanEntry> *Table::scan_snapshot() {
             [](const ScanEntry &a, const ScanEntry &b) { return a.id < b.id; });
   snapshot_usable_ = true;
   return &snapshot_;
+}
+
+// The fingerprint of a string value.  Two different strings hardly ever share
+// one, and the caller still compares the strings of the rows that match, so a
+// fingerprint only ever rejects a row that is certainly a different string.
+// Zero is kept for the rows whose value is not a string at all.
+static u64 value_fingerprint(const std::string &s) {
+  u64 h = 1469598103934665603ull;
+  for (unsigned char c : s) {
+    h ^= c;
+    h *= 1099511628211ull;
+  }
+  return h ? h : 1;
+}
+
+const std::vector<u64> *Table::fingerprints(int column) {
+  if (column < 0 || static_cast<size_t>(column) >= schema_.columns.size()) return nullptr;
+  if (schema_.columns[column].type != ColType::VARCHAR) return nullptr;
+  if (fingerprints_.size() < schema_.columns.size()) fingerprints_.resize(schema_.columns.size());
+  std::vector<u64> &slot = fingerprints_[column];
+  if (!slot.empty()) return &slot;
+  if (snapshot_.empty()) return nullptr;
+  slot.reserve(snapshot_.size());
+  for (const auto &e : snapshot_) {
+    if (static_cast<size_t>(column) >= e.row->values.size()) return nullptr;
+    const Value &v = e.row->values[column];
+    // A column of strings holds strings.  If that ever stops being true the
+    // fingerprint is not used and the general comparison decides.
+    if (v.type != ValueType::STRING) {
+      slot.clear();
+      return nullptr;
+    }
+    slot.push_back(value_fingerprint(v.s));
+  }
+  return &slot;
 }
 
 static size_t row_memory(const Row &r) {
@@ -986,14 +1029,13 @@ void Database::commit_changes(std::vector<Change> &changes) {
   if (changes.empty()) return;
   u64 txn = alloc_txn();
   std::string walbuf;
-  for (const Change &c : changes) {
-    std::string payload;
+  for (Change &c : changes) {
     WalType type = WalType::DEL;
     if (!c.deleted) {
-      payload = serialize_row(c.table->schema(), c.row);
+      c.payload = serialize_row(c.table->schema(), c.row);
       type = WalType::ROW;
     }
-    encode_record_into(walbuf, kWalMagic, type, txn, c.id, c.table->schema().id, payload);
+    encode_record_into(walbuf, kWalMagic, type, txn, c.id, c.table->schema().id, c.payload);
     // Hand the log records over in batches instead of building one huge
     // string: a statement that rewrites a large table must not need as much
     // memory as the table itself.
@@ -1010,8 +1052,7 @@ void Database::commit_changes(std::vector<Change> &changes) {
       c.table->append_record(WalType::DEL, txn, c.id, {});
       c.table->erase_row(c.id);
     } else {
-      std::string payload = serialize_row(c.table->schema(), c.row);
-      RowRef ref = c.table->append_record(WalType::ROW, txn, c.id, payload);
+      RowRef ref = c.table->append_record(WalType::ROW, txn, c.id, c.payload);
       c.table->rows()[c.id] = ref;
       c.table->cache_row(c.id, c.row, false);
     }
@@ -1056,14 +1097,13 @@ void Database::commit_txn() {
   // We inline the write here so that txn ids are stable and monotonic.
   u64 txn = old_txn;
   std::string walbuf;
-  for (const Change &c : changes) {
-    std::string payload;
+  for (Change &c : changes) {
     WalType type = WalType::DEL;
     if (!c.deleted) {
-      payload = serialize_row(c.table->schema(), c.row);
+      c.payload = serialize_row(c.table->schema(), c.row);
       type = WalType::ROW;
     }
-    encode_record_into(walbuf, kWalMagic, type, txn, c.id, c.table->schema().id, payload);
+    encode_record_into(walbuf, kWalMagic, type, txn, c.id, c.table->schema().id, c.payload);
   }
   encode_record_into(walbuf, kWalMagic, WalType::COMMIT, txn, 0, 0, {});
   wal_.append_batch(walbuf, true);
@@ -1072,8 +1112,7 @@ void Database::commit_txn() {
       c.table->append_record(WalType::DEL, txn, c.id, {});
       c.table->erase_row(c.id);
     } else {
-      std::string payload = serialize_row(c.table->schema(), c.row);
-      RowRef ref = c.table->append_record(WalType::ROW, txn, c.id, payload);
+      RowRef ref = c.table->append_record(WalType::ROW, txn, c.id, c.payload);
       c.table->rows()[c.id] = ref;
       c.table->cache_row(c.id, c.row, false);
     }
@@ -1183,6 +1222,13 @@ static double l2_scalar(const float *a, const float *b, size_t n) {
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 // One block of eight floats.  The order of the additions is the order of the
 // blocks, so unrolling the loop does not change the result.
+//
+// The block is loaded as one wide value and split afterwards.  Subtracting the
+// two halves apart and converting them apart gives the same eight differences
+// and the same order of additions, but it doubles the number of loads, and
+// the vectors of the rows sit at scattered addresses, so the extra loads cost
+// more than the shuffle they save.  The measurement on the benchmark shape
+// with the rows laid out as the engine lays them out is what settled this.
 #define MVDB_L2_BLOCK(off)                                                  \
   {                                                                         \
     __m256 va = _mm256_loadu_ps(a + i + (off));                             \
@@ -1822,9 +1868,25 @@ ResultSet Database::exec_select(const Statement &st) {
             filter_lit = &lit->s;
           }
         }
-        for (const auto &e : *snap) {
+        // The filter is the one part of the scan that has to walk to the row
+        // itself, and the rows of a table live in a hash map, so that walk
+        // costs two cache misses per row.  The fingerprint of the column is
+        // one number per row, so a row that certainly does not match is
+        // rejected without the walk.  The rows whose fingerprint matches are
+        // still compared as strings, so the outcome does not depend on the
+        // fingerprint.
+        const std::vector<u64> *filter_fp = nullptr;
+        u64 filter_fp_value = 0;
+        if (filter_lit) {
+          filter_fp = t->fingerprints(filter_col);
+          if (filter_fp) filter_fp_value = value_fingerprint(*filter_lit);
+        }
+        const std::vector<Table::ScanEntry> &entries = *snap;
+        for (size_t row = 0; row < entries.size(); ++row) {
+          const auto &e = entries[row];
           if (!e.vec) continue;
           if (filter_lit) {
+            if (filter_fp && (*filter_fp)[row] != filter_fp_value) continue;
             int idx = filter_col;
             if (idx < static_cast<int>(e.row->values.size())) {
               const Value &v = e.row->values[idx];
@@ -1848,6 +1910,12 @@ ResultSet Database::exec_select(const Statement &st) {
             ctx.schema = &schema;
             ctx.row = e.row;
             if (!eval_cond(*s.where, ctx)) continue;
+          }
+          // Without a filter every row is scored, and the vector of the next
+          // row starts at an address of its own.  Asking for its first line
+          // now pays for the miss while this row is being scored.
+          if (!filter_lit && row + 1 < entries.size() && entries[row + 1].vec) {
+            _mm_prefetch(reinterpret_cast<const char *>(entries[row + 1].vec), _MM_HINT_T0);
           }
           double d = l2(e.vec, dist->fnums.data(), dim);
           FastCand fc{d, e.id, e.row};
