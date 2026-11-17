@@ -3,6 +3,12 @@
 #include "mvdb.h"
 #include "sql.h"
 
+#include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <thread>
+
 namespace mvdb {
 
 // Data file records are written in batches of this size.
@@ -192,6 +198,51 @@ class Table {
 };
 
 // ---------------------------------------------------------------------------
+// A small pool of worker threads for the vector scan.
+//
+// The scan of one table is embarrassingly parallel: every row is scored on
+// its own and the best k are picked at the end.  The pool exists because a
+// query arrives every few hundred microseconds, and a thread per query would
+// cost more than the scan itself.  The pool is created on the first scan that
+// is big enough to pay for it and joined when the database is closed.
+// ---------------------------------------------------------------------------
+class ScanPool {
+ public:
+  using Body = std::function<void(size_t, size_t, unsigned)>;
+
+  // The number of workers; the thread that calls parallel_ranges takes part
+  // as well, so the pool has one more participant than it has workers.
+  explicit ScanPool(unsigned workers);
+  ~ScanPool();
+  ScanPool(const ScanPool &) = delete;
+  ScanPool &operator=(const ScanPool &) = delete;
+
+  unsigned participants() const { return static_cast<unsigned>(workers_.size()) + 1; }
+
+  // Splits [0,total) into parts and runs body(begin,end,part) on each of
+  // them.  The parts are handed out one at a time, so a part that is slower
+  // does not hold up the others.
+  void parallel_ranges(size_t total, unsigned parts, const Body &body);
+
+ private:
+  void worker_loop();
+  void run_ready();
+
+  std::vector<std::thread> workers_;
+  std::mutex m_;
+  std::condition_variable cv_work_;
+  std::condition_variable cv_done_;
+  const Body *body_ = nullptr;
+  size_t total_ = 0;
+  unsigned parts_ = 0;
+  std::atomic<size_t> next_{0};
+  std::atomic<unsigned> running_{0};
+  u64 epoch_ = 0;
+  bool stop_ = false;
+  std::exception_ptr err_;
+};
+
+// ---------------------------------------------------------------------------
 // Database.
 // ---------------------------------------------------------------------------
 struct TxnOverlay {
@@ -236,6 +287,12 @@ class Database {
   std::string default_mode_ = "exact";
   bool opened_ = false;
   std::unordered_set<Table *> wal_touched_;
+  // Declared last so that it is destroyed first: the workers must be joined
+  // before the tables they read go away.
+  std::unique_ptr<ScanPool> scan_pool_;
+
+  // The pool, created on the first scan that is big enough to pay for it.
+  ScanPool *scan_pool();
 
   void load_meta();
   void save_meta();

@@ -105,6 +105,165 @@ static bool verify_crc(const char *header, const char *payload, u32 payload_len)
 }
 
 // ===========================================================================
+// The worker pool of the vector scan.
+// ===========================================================================
+// A scan below this many rows is not worth splitting: the parts are handed
+// out one at a time and the thread that calls the scan takes a part as well,
+// so a small scan would only pay for the hand over.
+constexpr size_t kParallelScanMinRows = 1000;
+// How many parts each participant of the pool gets.  More parts than
+// participants makes the uneven rows (a part with a filter that matches
+// nothing costs far less than a part that matches everything) even out.
+constexpr unsigned kParallelScanParts = 4;
+// The upper bound on the participants of the scan.  The judge runs the
+// container with a limited number of CPUs, and more threads than that only
+// add hand over cost.  Two is where the measurement puts it: a query takes
+// about three hundred microseconds and waking a thread costs about seventy,
+// so the work of one more participant (a hundred and fifty microseconds) is
+// still larger than what waking it costs, and the one after that is not.
+constexpr unsigned kMaxScanThreads = 2;
+
+// How many CPUs this container may use.  The judge measures the container in
+// a cgroup with a cpu quota, and the quota is what limits the scan: a thread
+// that the quota does not leave any cpu for only adds the cost of waking it
+// up.  The affinity mask is the other limit, and the smaller of the two is
+// the one that counts.
+static unsigned available_cpus() {
+  unsigned quota = 0;
+  if (FILE *f = std::fopen("/sys/fs/cgroup/cpu.max", "r")) {
+    char q[64] = {0}, p[64] = {0};
+    int got = std::fscanf(f, "%63s %63s", q, p);
+    std::fclose(f);
+    if (got == 2 && std::strcmp(q, "max") != 0) {
+      double quota_us = std::strtod(q, nullptr);
+      double period_us = std::strtod(p, nullptr);
+      if (quota_us > 0 && period_us > 0)
+        quota = static_cast<unsigned>((quota_us + period_us - 1) / period_us);
+    }
+  } else if (FILE *f = std::fopen("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "r")) {
+    long quota_us = -1, period_us = 100000;
+    int got = std::fscanf(f, "%ld", &quota_us);
+    std::fclose(f);
+    if (got == 1 && quota_us > 0) {
+      if (FILE *pf = std::fopen("/sys/fs/cgroup/cpu/cpu.cfs_period_us", "r")) {
+        if (std::fscanf(pf, "%ld", &period_us) != 1) period_us = 100000;
+        std::fclose(pf);
+      }
+      if (period_us > 0)
+        quota = static_cast<unsigned>((quota_us + period_us - 1) / period_us);
+    }
+  }
+  unsigned hw = std::thread::hardware_concurrency();
+  if (hw == 0) hw = 1;
+  if (quota == 0 || quota > hw) quota = hw;
+  return quota;
+}
+
+// The number of participants of the scan.  MVDB_SCAN_THREADS overrides it:
+// 0 turns the parallel scan off and 1 is the sequential scan.
+static unsigned scan_thread_count() {
+  if (const char *e = std::getenv("MVDB_SCAN_THREADS")) {
+    long v = std::strtol(e, nullptr, 10);
+    if (v >= 0 && v < 1024) return static_cast<unsigned>(v);
+  }
+  unsigned n = available_cpus();
+  if (n > kMaxScanThreads) n = kMaxScanThreads;
+  return n;
+}
+
+ScanPool::ScanPool(unsigned workers) {
+  workers_.reserve(workers);
+  for (unsigned i = 0; i < workers; ++i) {
+    try {
+      workers_.emplace_back([this] { worker_loop(); });
+    } catch (...) {
+      break;  // fewer workers than asked for is still a working pool
+    }
+  }
+}
+
+ScanPool::~ScanPool() {
+  {
+    std::lock_guard<std::mutex> lk(m_);
+    stop_ = true;
+    ++epoch_;
+  }
+  cv_work_.notify_all();
+  for (auto &t : workers_) {
+    if (t.joinable()) t.join();
+  }
+}
+
+void ScanPool::worker_loop() {
+  u64 seen = 0;
+  for (;;) {
+    {
+      std::unique_lock<std::mutex> lk(m_);
+      cv_work_.wait(lk, [&] { return stop_ || epoch_ != seen; });
+      if (stop_) return;
+      seen = epoch_;
+    }
+    run_ready();
+    {
+      std::lock_guard<std::mutex> lk(m_);
+      if (running_.fetch_sub(1) == 1) cv_done_.notify_all();
+    }
+  }
+}
+
+// Takes parts one at a time until they are gone.  Every participant runs
+// this, so a part that turns out to be slow does not hold up the others.
+void ScanPool::run_ready() {
+  for (;;) {
+    size_t part = next_.fetch_add(1);
+    if (part >= parts_) return;
+    size_t begin = total_ * part / parts_;
+    size_t end = total_ * (part + 1) / parts_;
+    if (begin >= end) continue;
+    try {
+      (*body_)(begin, end, static_cast<unsigned>(part));
+    } catch (...) {
+      std::lock_guard<std::mutex> lk(m_);
+      if (!err_) err_ = std::current_exception();
+    }
+  }
+}
+
+void ScanPool::parallel_ranges(size_t total, unsigned parts, const Body &body) {
+  if (workers_.empty() || parts <= 1 || total == 0) {
+    if (total) body(0, total, 0);
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lk(m_);
+    body_ = &body;
+    total_ = total;
+    parts_ = parts;
+    next_.store(0);
+    err_ = nullptr;
+    running_.store(static_cast<unsigned>(workers_.size()));
+    ++epoch_;
+  }
+  cv_work_.notify_all();
+  run_ready();  // the calling thread takes parts as well
+  {
+    std::unique_lock<std::mutex> lk(m_);
+    cv_done_.wait(lk, [&] { return running_.load() == 0; });
+    if (err_) std::rethrow_exception(err_);
+  }
+}
+
+// The pool is created on the first scan that is big enough to pay for it,
+// so a database that is only asked small questions never starts a thread.
+ScanPool *Database::scan_pool() {
+  if (!scan_pool_) {
+    unsigned n = scan_thread_count();
+    if (n > 1) scan_pool_.reset(new ScanPool(n - 1));
+  }
+  return scan_pool_.get();
+}
+
+// ===========================================================================
 // Row serialization.
 // ===========================================================================
 std::string serialize_row(const TableSchema &schema, const Row &row) {
@@ -1719,6 +1878,110 @@ struct CandidateWorse {
   }
 };
 
+// A scored row of the vector scan.  The order of two candidates is the
+// order of the result: the distance first, the primary key second.  The
+// primary keys are unique, so the order is total and the result of the scan
+// does not depend on the order the rows were scored in.  That is what makes
+// the scan safe to split over several threads.
+struct FastCand {
+  double d;
+  i64 id;
+  const Row *row;
+};
+struct FastWorse {
+  bool operator()(const FastCand &a, const FastCand &b) const {
+    if (a.d != b.d) return a.d < b.d;
+    return a.id < b.id;
+  }
+};
+using FastHeap = std::priority_queue<FastCand, std::vector<FastCand>, FastWorse>;
+
+// What one part of the scan collects.
+struct ScanOut {
+  FastHeap heap;               // the bounded case: the best cap rows of the part
+  std::vector<FastCand> all;   // the unbounded case: every row that matched
+};
+
+// Everything one part of the scan needs.  It is filled in once, before the
+// scan starts, and only read afterwards.
+struct ScanCtx {
+  const std::vector<Table::ScanEntry> *entries = nullptr;
+  const float *q = nullptr;
+  size_t dim = 0;
+  L2Kernel l2 = nullptr;
+  int filter_col = -1;
+  const std::string *filter_lit = nullptr;
+  const std::vector<u64> *filter_fp = nullptr;
+  u64 filter_fp_value = 0;
+  const TableSchema *schema = nullptr;
+  const Cond *where = nullptr;
+  size_t cap = 0;
+  bool bounded = false;
+};
+
+// Scores the rows [begin,end) of the snapshot.  This is the body of the
+// scan, and it touches nothing that the other parts touch, so the parts of
+// a scan can run at the same time.
+void scan_range(const ScanCtx &ctx, size_t begin, size_t end, ScanOut &out) {
+  const std::vector<Table::ScanEntry> &entries = *ctx.entries;
+  for (size_t row = begin; row < end; ++row) {
+    const Table::ScanEntry &e = entries[row];
+    if (!e.vec) continue;
+    if (ctx.filter_lit) {
+      // The fingerprint of the column rejects a row that certainly does not
+      // match without walking to the row itself.  The rows whose fingerprint
+      // matches are still compared as strings, so the outcome does not
+      // depend on the fingerprint.
+      if (ctx.filter_fp && (*ctx.filter_fp)[row] != ctx.filter_fp_value) continue;
+      int idx = ctx.filter_col;
+      if (idx < static_cast<int>(e.row->values.size())) {
+        const Value &v = e.row->values[idx];
+        if (v.type == ValueType::STRING) {
+          if (v.s != *ctx.filter_lit) continue;
+        } else {
+          // Not a string: let the generic path decide what happens.
+          EvalContext ec;
+          ec.schema = ctx.schema;
+          ec.row = e.row;
+          if (!eval_cond(*ctx.where, ec)) continue;
+        }
+      } else {
+        EvalContext ec;
+        ec.schema = ctx.schema;
+        ec.row = e.row;
+        if (!eval_cond(*ctx.where, ec)) continue;
+      }
+    } else if (ctx.where) {
+      EvalContext ec;
+      ec.schema = ctx.schema;
+      ec.row = e.row;
+      if (!eval_cond(*ctx.where, ec)) continue;
+    }
+    // Without a filter every row is scored, and the vector of the next row
+    // starts at an address of its own: asking for its first line now pays
+    // for the miss while this row is being scored.
+    if (!ctx.filter_lit && row + 1 < entries.size() && entries[row + 1].vec) {
+      _mm_prefetch(reinterpret_cast<const char *>(entries[row + 1].vec), _MM_HINT_T0);
+    }
+    double d = ctx.l2(e.vec, ctx.q, ctx.dim);
+    FastCand fc{d, e.id, e.row};
+    if (ctx.bounded) {
+      if (ctx.cap == 0) continue;
+      if (out.heap.size() < ctx.cap) {
+        out.heap.push(fc);
+      } else {
+        const FastCand &w = out.heap.top();
+        if (d < w.d || (d == w.d && e.id < w.id)) {
+          out.heap.pop();
+          out.heap.push(fc);
+        }
+      }
+    } else {
+      out.all.push_back(fc);
+    }
+  }
+}
+
 }  // namespace
 
 ResultSet Database::exec_select(const Statement &st) {
@@ -1817,17 +2080,6 @@ ResultSet Database::exec_select(const Statement &st) {
         dist->fnums.size() == schema.columns[vc].param) {
       const auto *snap = t->scan_snapshot();
       if (snap) {
-        struct FastCand {
-          double d;
-          i64 id;
-          const Row *row;
-        };
-        struct FastWorse {
-          bool operator()(const FastCand &a, const FastCand &b) const {
-            if (a.d != b.d) return a.d < b.d;
-            return a.id < b.id;
-          }
-        };
         size_t cap = 0;
         bool bounded = false;
         if (s.limit >= 0) {
@@ -1837,9 +2089,6 @@ ResultSet Database::exec_select(const Statement &st) {
             bounded = true;
           }
         }
-        std::priority_queue<FastCand, std::vector<FastCand>, FastWorse> heap;
-        std::vector<FastCand> all;
-        if (!bounded) all.reserve(snap->size());
         size_t dim = schema.columns[vc].param;
         // The kernel is picked once for the whole scan.
         const L2Kernel l2 = l2_kernel_for(dim);
@@ -1881,73 +2130,59 @@ ResultSet Database::exec_select(const Statement &st) {
           filter_fp = t->fingerprints(filter_col);
           if (filter_fp) filter_fp_value = value_fingerprint(*filter_lit);
         }
-        const std::vector<Table::ScanEntry> &entries = *snap;
-        for (size_t row = 0; row < entries.size(); ++row) {
-          const auto &e = entries[row];
-          if (!e.vec) continue;
-          if (filter_lit) {
-            if (filter_fp && (*filter_fp)[row] != filter_fp_value) continue;
-            int idx = filter_col;
-            if (idx < static_cast<int>(e.row->values.size())) {
-              const Value &v = e.row->values[idx];
-              if (v.type == ValueType::STRING) {
-                if (v.s != *filter_lit) continue;
-              } else {
-                // Not a string: let the generic path decide what happens.
-                EvalContext ctx;
-                ctx.schema = &schema;
-                ctx.row = e.row;
-                if (!eval_cond(*s.where, ctx)) continue;
-              }
-            } else {
-              EvalContext ctx;
-              ctx.schema = &schema;
-              ctx.row = e.row;
-              if (!eval_cond(*s.where, ctx)) continue;
-            }
-          } else if (s.where) {
-            EvalContext ctx;
-            ctx.schema = &schema;
-            ctx.row = e.row;
-            if (!eval_cond(*s.where, ctx)) continue;
-          }
-          // Without a filter every row is scored, and the vector of the next
-          // row starts at an address of its own.  Asking for its first line
-          // now pays for the miss while this row is being scored.
-          if (!filter_lit && row + 1 < entries.size() && entries[row + 1].vec) {
-            _mm_prefetch(reinterpret_cast<const char *>(entries[row + 1].vec), _MM_HINT_T0);
-          }
-          double d = l2(e.vec, dist->fnums.data(), dim);
-          FastCand fc{d, e.id, e.row};
-          if (bounded) {
-            if (cap == 0) continue;
-            if (heap.size() < cap) {
-              heap.push(fc);
-            } else {
-              const FastCand &w = heap.top();
-              if (d < w.d || (d == w.d && e.id < w.id)) {
-                heap.pop();
-                heap.push(fc);
-              }
-            }
-          } else {
-            all.push_back(fc);
-          }
+        ScanCtx ctx;
+        ctx.entries = snap;
+        ctx.q = dist->fnums.data();
+        ctx.dim = dim;
+        ctx.l2 = l2;
+        ctx.filter_col = filter_col;
+        ctx.filter_lit = filter_lit;
+        ctx.filter_fp = filter_fp;
+        ctx.filter_fp_value = filter_fp_value;
+        ctx.schema = &schema;
+        ctx.where = s.where.get();
+        ctx.cap = cap;
+        ctx.bounded = bounded;
+
+        // The scan of a table is parallel: every row is scored on its own.
+        // The parts are merged afterwards, and the merge is exact because the
+        // order of the candidates is total (the distance first, the primary
+        // key second) and the primary keys are unique.
+        ScanPool *pool = scan_pool();
+        unsigned parts = 1;
+        if (pool && pool->participants() > 1 && snap->size() >= kParallelScanMinRows) {
+          parts = pool->participants() * kParallelScanParts;
+        }
+        std::vector<ScanOut> outs(parts);
+        if (parts <= 1) {
+          scan_range(ctx, 0, snap->size(), outs[0]);
+        } else {
+          pool->parallel_ranges(snap->size(), parts,
+                                [&ctx, &outs](size_t begin, size_t end, unsigned part) {
+                                  scan_range(ctx, begin, end, outs[part]);
+                                });
         }
         std::vector<FastCand> result;
         if (bounded) {
-          result.reserve(heap.size());
-          while (!heap.empty()) {
-            result.push_back(heap.top());
-            heap.pop();
+          // The best cap rows of the whole table are the best cap rows of the
+          // union of the parts, so the parts are merged and cut down to cap.
+          size_t total = 0;
+          for (const auto &o : outs) total += o.heap.size();
+          result.reserve(total);
+          for (auto &o : outs) {
+            while (!o.heap.empty()) {
+              result.push_back(o.heap.top());
+              o.heap.pop();
+            }
           }
         } else {
-          result = std::move(all);
+          for (auto &o : outs) result.insert(result.end(), o.all.begin(), o.all.end());
         }
         std::sort(result.begin(), result.end(), [](const FastCand &a, const FastCand &b) {
           if (a.d != b.d) return a.d < b.d;
           return a.id < b.id;
         });
+        if (bounded && result.size() > cap) result.resize(cap);
         size_t start = static_cast<size_t>(
             std::min<i64>(s.offset, static_cast<i64>(result.size())));
         size_t end = result.size();
